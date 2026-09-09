@@ -78,11 +78,15 @@ mirrors willing to host it.
 
 ## One repository or two
 
-Currently split into `pspdx` and `pspdx-registry`. The split matters once a bot
-has write access to the catalog and the client embeds a root key, because those
-two things must not live in the same place. Before that it is overhead.
+Decided: one. The catalog lives in `catalog/` inside this repository.
 
-The decision has a deadline, though: once a client ships, the catalog URL is
-baked into it. Moving the catalog afterwards points every installed copy at a
-dead URL. Deciding before the first release costs nothing; after it costs a
-migration.
+The split only starts paying for itself once a bot has write access to the
+catalog and the client embeds a root key, because those two things must not sit
+in the same place. Neither exists yet, and nothing has shipped, so the move costs
+nothing today.
+
+It will not stay free. Once a client is released the catalog URL is baked into
+it, and relocating the catalog afterwards points every installed copy at a dead
+URL. Either split before the first release, or publish the catalog through a
+jsDelivr URL, which can be redirected to another repository without the client
+noticing.
