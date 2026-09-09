@@ -1,0 +1,11 @@
+[package]
+name = "pspdx-app"
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+description = "On-device PSPDX client for the PlayStation Portable."
+
+[dependencies]
+# Pinned to a commit rather than the crates.io release: 0.3.13 predates the
+# libunwind rebuild and the PanicPayload move that the current nightly needs.
+psp = { git = "https://github.com/overdrivenpotato/rust-psp", rev = "1c11e132e7e2950400a7710b715248b2f6265a1e" }

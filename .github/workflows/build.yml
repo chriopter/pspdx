@@ -1,0 +1,42 @@
+name: Build EBOOT
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # rust-psp pins this; building against anything else fails in libunwind.
+  RUSTUP_TOOLCHAIN: nightly-2026-08-26
+
+jobs:
+  eboot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUSTUP_TOOLCHAIN }}
+          components: rust-src
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install cargo-psp
+        run: cargo install --git https://github.com/overdrivenpotato/rust-psp --rev 1c11e132e7e2950400a7710b715248b2f6265a1e cargo-psp
+
+      - name: Build
+        run: cargo psp --manifest-path crates/pspdx-app/Cargo.toml
+
+      - name: Check it is a PBP
+        run: |
+          eboot=crates/pspdx-app/target/mipsel-sony-psp/debug/pspdx-app.EBOOT.PBP
+          test -f "$eboot"
+          head -c 4 "$eboot" | grep -q $'\x00PBP'
+          ls -l "$eboot"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pspdx-app-EBOOT
+          path: crates/pspdx-app/target/mipsel-sony-psp/debug/pspdx-app.EBOOT.PBP
