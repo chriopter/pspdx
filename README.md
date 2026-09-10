@@ -13,13 +13,6 @@ Runs under PPSSPP; nobody has put it on real hardware yet.
 To get your open source licensed brew listed, send a PR to
 [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) or open an issue.
 
-## Technical
-- One request gets the whole index: [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) is folded into a single `catalog.json`. The PSP pays per TLS handshake, not per byte.
-- Downloads come from the author's own release. PSPDX hosts nothing and mirrors nothing.
-- An author who publishes an `app.pspdx` gets updates on the device minutes later, with no change to the index. An author who has stopped answering is carried by the index instead.
-- TLS 1.3, with the seed collected off the analog stick at startup, because the PSP has no usable PRNG.
-- Every manifest sits on the same GitHub host, so one handshake covers the whole update check.
-
 ## What an app is
 
 One entry in the catalog, and — if its author feels like it — one file in their
@@ -89,12 +82,20 @@ Four entries, which between them cover every shape the catalog has:
 | [PSPDX Test App](https://github.com/chriopter/psp-dx-testapp) | 69 KB of hello world, so a `rev` comparison can be watched without downloading 44 MB |
 | [Abandoned Test App](https://github.com/chriopter/psp-dx-testapp-abandoned) | the same, with no manifest and no author: the index carries its release itself |
 
-## The client
+## App Tech
 
 The on-device client lives in `app/`. It collects entropy, fetches the catalog
-over TLS 1.3, and installs or updates a package from its manifest.
+over TLS 1.3, and installs or updates a package from its manifest. File paths
+below are relative to `app/`.
 
-### How it is laid out
+- One request gets the whole index: [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) is folded into a single `catalog.json`. The PSP pays per TLS handshake, not per byte.
+- Downloads come from the author's own release. PSPDX hosts nothing and mirrors nothing.
+- An author who publishes an `app.pspdx` gets updates on the device minutes later, with no change to the index. An author who has stopped answering is carried by the index instead.
+- TLS 1.3, with the seed collected off the analog stick at startup, because the PSP has no usable PRNG.
+- Every manifest sits on the same GitHub host, so one handshake covers the whole update check.
+
+<details>
+<summary><b>How it is laid out</b> — one directory per layer, and what each one is responsible for.</summary>
 
 One directory per layer; every include names its directory, so the layer a
 header comes from is visible at the include line.
@@ -111,8 +112,6 @@ header comes from is visible at the include line.
 | `app/network/` | HTTPS and the compiled-in roots |
 | `app/util/` | logging and the millisecond clock |
 
-File paths in the rest of this section are relative to `app/`.
-
 Dependencies run one way: `gui` → `update` → `install` → `network`, with
 `util` under all of them. Nothing in `update/`, `install/` or `network/`
 draws or plays a note: `gui/preview.c` asks `update/assets.c` for bytes and
@@ -124,7 +123,50 @@ The card the picture sits on is the one thing drawn in real perspective; it
 drifts and leans a little, and a sweep of light crosses it now and then.
 Once the still is up, the entry's film fades in over it and loops.
 
-### The film
+</details>
+
+<details>
+<summary><b>The TLS 1.3 client</b> — wolfSSL on <code>sceNetInet</code> sockets: what it offers, and where the randomness under it comes from.</summary>
+
+wolfSSL over `sceNetInet` sockets, TLS 1.3 only. It offers X25519 ahead of
+P-256 and ChaCha20-Poly1305 ahead of AES-128-GCM, because this CPU has no AES
+instruction; `network/bench.c` measures the gap on the device itself. The key
+share rides along with the ClientHello, so no HelloRetryRequest and one
+handshake covers the whole catalog.
+
+Its randomness is the sweep: one bit for every newly touched point of an
+invisible 250x250 field, until the pool holds the 128 that X25519 and
+ChaCha20-Poly1305 stand on. The pool goes on taking packet arrival times and
+battery readings for the rest of the run, uncounted, and reaches `PSPDX.SEED`
+once, on the way out through HOME.
+
+</details>
+
+<details>
+<summary><b>What it trusts</b> — 17 roots compiled in, because the PSP has no CA store worth using.</summary>
+
+The chain is verified against `app/network/ca_certs.h`, 17 roots compiled in. The
+PSP has no CA store worth using, so the client carries its own; regenerate it with
+
+```sh
+python3 app/tools/make-ca-bundle.py
+```
+
+A host whose CA is not in there fails the handshake and names the CA in
+`PSPDX.LOG`. That is the signal to add it.
+
+A root that no distribution ships yet goes in `app/ca-extra/` as one PEM per
+file. The script refuses any file there that is not itself signed by a root in
+the host's own store, so putting a certificate in it does not add trust -- it
+only carries trust that already exists to a console that has no store. What is
+in there now is `isrg-root-yr.pem`, ISRG's 2026 root, cross-signed by ISRG Root
+X1: GitHub Pages serves a chain ending in it, and it is newer than the
+ca-certificates package on most machines.
+
+</details>
+
+<details>
+<summary><b>The film</b> — an MP4 on the way in, a PSMF on the way out, decoded on the Media Engine.</summary>
 
 The catalog serves a plain MP4 -- H.264 baseline, 480x272 at 30 -- the same
 file a PSP plays out of `PSP/VIDEO`. The PSP's decoder, `sceMpeg` on the
@@ -162,41 +204,10 @@ cc -I. audio/synth.c audio/music.c audio/cues.c tools/render-music.c -lm
 ./a.out music.wav
 ```
 
-### The TLS client
+</details>
 
-wolfSSL over `sceNetInet` sockets, TLS 1.3 only. It offers X25519 ahead of
-P-256 and ChaCha20-Poly1305 ahead of AES-128-GCM, because this CPU has no AES
-instruction; `network/bench.c` measures the gap on the device itself. The key
-share rides along with the ClientHello, so no HelloRetryRequest and one
-handshake covers the whole catalog.
-
-Its randomness is the sweep: one bit for every newly touched point of an
-invisible 250x250 field, until the pool holds the 128 that X25519 and
-ChaCha20-Poly1305 stand on. The pool goes on taking packet arrival times and
-battery readings for the rest of the run, uncounted, and reaches `PSPDX.SEED`
-once, on the way out through HOME.
-
-### What it trusts
-
-The chain is verified against `app/network/ca_certs.h`, 17 roots compiled in. The
-PSP has no CA store worth using, so the client carries its own; regenerate it with
-
-```sh
-python3 app/tools/make-ca-bundle.py
-```
-
-A host whose CA is not in there fails the handshake and names the CA in
-`PSPDX.LOG`. That is the signal to add it.
-
-A root that no distribution ships yet goes in `app/ca-extra/` as one PEM per
-file. The script refuses any file there that is not itself signed by a root in
-the host's own store, so putting a certificate in it does not add trust -- it
-only carries trust that already exists to a console that has no store. What is
-in there now is `isrg-root-yr.pem`, ISRG's 2026 root, cross-signed by ISRG Root
-X1: GitHub Pages serves a chain ending in it, and it is newer than the
-ca-certificates package on most machines.
-
-### Building
+<details>
+<summary><b>Building</b> — two Docker lines, or a pspdev tarball and no Docker at all.</summary>
 
 ```sh
 cd app
@@ -212,7 +223,10 @@ Without Docker, the same works with a pspdev release tarball unpacked
 anywhere: set `PSPDEV` to it and put its `bin/` on `PATH`. CMake is needed for
 the wolfSSL step.
 
-### Running it on a desk
+</details>
+
+<details>
+<summary><b>Running it on a desk</b> — one command to build it and open it in PPSSPP.</summary>
 
 ```sh
 dev/start           # build, then open it in PPSSPP, one instance, straight to the catalog
@@ -224,7 +238,10 @@ the clips from the catalog repo next door, a seed -- and stop whatever
 instance was running before, since two at once write the same files and
 play the same tune slightly apart.
 
-### Running it without a screen
+</details>
+
+<details>
+<summary><b>Running it without a screen</b> — headless, for a rig: it writes what it did to the stick.</summary>
 
 The app writes what it did to the memory stick, so a run needs no window:
 
@@ -261,7 +278,10 @@ gone. Copying through the GE is what games do for their save icons, and it
 is the path the emulator keeps honest. That is also the only screenshot path
 that works on a real PSP, and on a host whose desktop is locked.
 
-### Files it leaves on the stick
+</details>
+
+<details>
+<summary><b>Files it leaves on the stick</b> — every path the client writes, and what is in it.</summary>
 
 | Path | What |
 |---|---|
@@ -276,6 +296,8 @@ that works on a real PSP, and on a host whose desktop is locked.
 | `PSP/PSPDX/cache/<id>.png`, `.mp4` | a picture once fetched, so it costs one handshake per install, not per run; what is here is shown even if the catalog does not link it -- the rig plants the repo's clips this way before a deploy |
 | `PSP/PSPDX/font/ltn8.pgf` | never written by the client: where it looks for the system font when `flash0:` has none |
 | `PSP/PSPDX/db/<id>.json` | what was installed: rev, directory, manifest URL |
+
+</details>
 
 ## Open
 
