@@ -38,8 +38,6 @@
 
 /* A Memory Stick tops out at 32 GB and no homebrew is anywhere near this.
    The number exists so that a size field cannot ask for something absurd. */
-#define MAX_PACKAGE_BYTES (1024u * 1024u * 1024u)
-
 /* ------------------------------------------------------------- manifest */
 
 static char g_manifest[8 * 1024];
@@ -55,8 +53,8 @@ static int mem_sink(void *ctx, const void *data, size_t len) {
 
 /* An id becomes a file name, so it may not carry a path. Reverse-DNS letters,
    digits, dot, dash and underscore only. */
-static int id_is_safe(const char *id) {
-    if (!*id || strlen(id) > 80) return 0;
+int manifest_id_is_safe(const char *id) {
+    if (!id || !*id || strlen(id) > 80) return 0;
     for (const char *p = id; *p; p++) {
         int ok = (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
                  (*p >= '0' && *p <= '9') || *p == '.' || *p == '-' || *p == '_';
@@ -64,6 +62,16 @@ static int id_is_safe(const char *id) {
     }
     if (strstr(id, "..")) return 0;
     return 1;
+}
+
+/* Attacker-controlled doubles: out of range, the conversion to an integer
+   is undefined rather than merely wrong. */
+int manifest_rev_in_range(double rev) {
+    return rev >= 0 && rev <= 4294967295.0;
+}
+
+int manifest_size_in_range(double size) {
+    return size > 0 && size <= MAX_PACKAGE_BYTES;
 }
 
 static int hexval(char c) {
@@ -111,17 +119,15 @@ int manifest_fetch(const char *url, const char *expect_id, struct manifest *m) {
         if (hi < 0 || lo < 0) { logline("manifest: sha256 hex"); goto out; }
         m->sha256[i] = (unsigned char)(hi * 16 + lo);
     }
-    /* Attacker-controlled doubles: out of range, the conversion to an integer
-       is undefined rather than merely wrong. */
-    if (!(rev->valuedouble >= 0 && rev->valuedouble <= 4294967295.0)) {
+    if (!manifest_rev_in_range(rev->valuedouble)) {
         logline("manifest: rev out of range");
         goto out;
     }
-    if (!(size->valuedouble > 0 && size->valuedouble <= MAX_PACKAGE_BYTES)) {
+    if (!manifest_size_in_range(size->valuedouble)) {
         logline("manifest: size out of range");
         goto out;
     }
-    if (!id_is_safe(id->valuestring)) { logline("manifest: unusable id"); goto out; }
+    if (!manifest_id_is_safe(id->valuestring)) { logline("manifest: unusable id"); goto out; }
     if (expect_id && strcmp(expect_id, id->valuestring) != 0) {
         /* The catalog said which package this is. A manifest that renames
            itself would otherwise overwrite another package's record. */

@@ -69,11 +69,18 @@ static int parse(struct catalog *catalog) {
             cJSON *rev = cJSON_GetObjectItemCaseSensitive(release, "rev");
             cJSON *size = cJSON_GetObjectItemCaseSensitive(release, "size");
             cJSON *sha = cJSON_GetObjectItemCaseSensitive(release, "sha256");
-            if (cJSON_IsNumber(rev)) m->rev = (unsigned)rev->valuedouble;
-            if (cJSON_IsNumber(size)) m->size = (size_t)size->valuedouble;
+            /* The same rules the manifest is held to: these fields go
+               straight into a download and an unpack. */
+            int ok = 1;
+            if (cJSON_IsNumber(rev) && manifest_rev_in_range(rev->valuedouble))
+                m->rev = (unsigned)rev->valuedouble;
+            else ok = 0;
+            if (cJSON_IsNumber(size) && manifest_size_in_range(size->valuedouble))
+                m->size = (size_t)size->valuedouble;
+            else ok = 0;
             copy_str(m->url, sizeof(m->url), cJSON_GetObjectItemCaseSensitive(release, "url"));
             copy_str(m->version, sizeof(m->version), cJSON_GetObjectItemCaseSensitive(release, "version"));
-            int ok = m->rev && m->url[0] && cJSON_IsString(sha) && strlen(sha->valuestring) == 64;
+            ok = ok && m->rev && m->url[0] && cJSON_IsString(sha) && strlen(sha->valuestring) == 64;
             for (int k = 0; ok && k < 32; k++) {
                 unsigned byte;
                 if (sscanf(sha->valuestring + 2 * k, "%2x", &byte) != 1) ok = 0;
@@ -90,7 +97,9 @@ static int parse(struct catalog *catalog) {
         copy_str(shot, sizeof(shot), cJSON_GetObjectItemCaseSensitive(app, "video"));
         asset_url(shot, entry->video, sizeof(entry->video));
 
-        if (!entry->id[0] || !entry->name[0]) continue;
+        /* An id names a directory on the stick and a file in the cache: one
+           that cannot be a path component is not an entry. */
+        if (!manifest_id_is_safe(entry->id) || !entry->name[0]) continue;
         if (!entry->has_release && !entry->manifest[0]) continue;
 
         struct installed installed;
@@ -148,7 +157,7 @@ int catalog_check_updates(struct catalog *catalog) {
             entry->state = APP_CURRENT;
         }
     }
-    logline("updates: %d of %d installed", updates, catalog->count);
+    logline("updates: %d waiting, %d apps", updates, catalog->count);
     return updates;
 }
 

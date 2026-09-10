@@ -46,6 +46,16 @@ typedef void (*install_phase_cb)(void *ctx, const char *phase);
    package's record. */
 int manifest_fetch(const char *url, const char *expect_id, struct manifest *m);
 
+/* The rules a manifest's fields are held to, for whoever else reads the
+   same fields -- the catalog folds a release in and has to be as strict. An
+   id is a path component on the stick: letters, digits, dot, dash and
+   underscore, at most eighty of them, no "..". A package is at most a
+   gigabyte, and a revision fits an unsigned. */
+#define MAX_PACKAGE_BYTES (1024u * 1024u * 1024u)
+int manifest_id_is_safe(const char *id);
+int manifest_rev_in_range(double rev);
+int manifest_size_in_range(double size);
+
 /* Finishes an install interrupted between its two renames. Call once at
    startup, before anything reads the database. */
 void install_recover(void);
