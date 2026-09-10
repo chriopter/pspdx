@@ -12,9 +12,11 @@ To get your open source licensed brew listed, send a PR to
 [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) or open an issue.
 
 ## Technical
-- PSPDX polls a catalog / index of apps in this repository, each one pointing at the author's own repository and a manifest file, where the download lives.
-- TLS: PSPDX supports TLS1.3, Seedgeneration (bc. missing PRNG) on start.
-- Fast connection to all vendor repos by reusing initial TLS handshake with github
+- One request gets the whole index: [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) is folded into a single `catalog.json`. The PSP pays per TLS handshake, not per byte.
+- Downloads come from the author's own release. PSPDX hosts nothing and mirrors nothing.
+- An author who publishes an `app.pspdx` gets updates on the device minutes later, with no change to the index. An author who has stopped answering is carried by the index instead.
+- TLS 1.3, with the seed collected off the analog stick at startup, because the PSP has no usable PRNG.
+- Every manifest sits on the same GitHub host, so one handshake covers the whole update check.
 
 ## The two files
 
@@ -36,8 +38,10 @@ An app is a catalog entry here and a manifest in its author's repository.
 }
 ```
 
-Never a version, which is why a stale catalog costs nothing. An `icon.png`,
-`screenshot.png` or `video.mp4` in the same directory is picked up by name --
+No version, so a stale catalog costs nothing -- unless the author has stopped
+publishing, in which case the entry carries `rev`, `url` and `sha256` itself
+and is the only source there is. An `icon.png`, `screenshot.png` or
+`video.mp4` in the same directory is picked up by name --
 [the catalog's README](https://github.com/chriopter/pspdx-catalog#encoding-a-video)
 has the encoding the PSP can decode.
 
@@ -72,10 +76,37 @@ Copy: [`app.pspdx.template`](app.pspdx.template)
 
 </details>
 
+## What is listed
+
+Four entries, which between them cover every shape the catalog has:
+
+| | |
+|---|---|
+| [Extreme Tux Racer](https://github.com/chriopter/psp-tuxracer) | a real port: 44 MB, 639 files, GPL-2.0, manifest kept by its author |
+| [Rust Raytracer](https://github.com/chriopter/psp-rust-raytracer) | a real demo, and the smallest thing that still looks like something |
+| [PSPDX Test App](https://github.com/chriopter/psp-dx-testapp) | 69 KB of hello world, so a `rev` comparison can be watched without downloading 44 MB |
+| [Abandoned Test App](https://github.com/chriopter/psp-dx-testapp-abandoned) | the same, with no manifest and no author: the index carries its release itself |
+
+## Open
+
+- **Entries that carry their own release.** The client reads `manifest` and
+  nothing else, so an abandoned app is listed but not installable. It should
+  take `rev`, `url` and `sha256` straight from the entry when they are there --
+  which costs no request at all, the catalog is already in hand.
+- **One connection for the whole update check.** Every manifest is on the same
+  host; the client still opens a handshake per package. Twenty lines, and the
+  largest win left.
+- **A release watcher.** Nothing notices when an abandoned app upstream cuts a
+  new release. A job in the catalog repository should, and open a commit.
+- **Icons and video on the device.** `app/gui/image.c` draws stills. The Media
+  Engine decodes H.264 in hardware and the catalog already carries the clips.
+- **Real hardware.** It has only ever run in PPSSPP.
+- **Nothing is signed**, so the index is trusted completely. Fine while one
+  person writes it; not fine once a bot does.
+
 ---
 
-<sup>The update path is exercised against
-[psp-dx-testapp](https://github.com/chriopter/psp-dx-testapp), a hello world
-whose only job is to get a new version now and then. Bump its `VERSION`, cut a
-release, raise `rev` in its `app.pspdx`, and the client has an update to
-find -- 69 KB instead of the 44 MB of a real package.</sup>
+<sup>To watch an update happen: bump `VERSION` in psp-dx-testapp, cut a release,
+raise `rev` in its `app.pspdx`, and the client finds it within minutes. For the
+abandoned one the same test runs the other way round -- the release is cut
+upstream and the catalog entry is what gets edited.</sup>
