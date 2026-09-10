@@ -7,7 +7,7 @@ CFLAGS = -O2 -G0 -Wall -I$(WOLFSSL_PREFIX)/include
 ASFLAGS = $(CFLAGS)
 
 LIBDIR = $(WOLFSSL_PREFIX)/lib
-LIBS = -lwolfssl -lz -lpspsemaphore_660 -lpsppower \
+LIBS = -lwolfssl -lcjson -lz -lpspsemaphore_660 -lpsppower \
        -lpspnet_resolver -lpspnet_apctl -lpspnet_inet -lpspnet \
        -lpsputility -lpspdebug -lpspdisplay -lpspge -lpspctrl
 

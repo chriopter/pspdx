@@ -27,6 +27,7 @@
 #include <pspctrl.h>
 #include <wolfssl/options.h>
 #include <wolfssl/ssl.h>
+#include <cjson/cJSON.h>
 
 PSP_MODULE_INFO("pspdx", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
@@ -35,7 +36,7 @@ PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
 PSP_HEAP_SIZE_KB(4 * 1024);
 
 #define HOST "chriopter.github.io"
-#define PATH "/pspdx/"
+#define PATH "/pspdx/catalog.json"
 #define PORT 443
 
 #define COLS 60
@@ -61,6 +62,7 @@ static long g_status = 0;
 static const char *g_body = NULL;
 static size_t g_bodylen = 0;
 static int g_truncated = 0;
+static unsigned g_handshake_ms = 0;
 
 static void logline(const char *fmt, ...) {
     char line[LOGCOLS];
@@ -743,6 +745,7 @@ static int fetch(void) {
         wait_socket(sock, e == WOLFSSL_ERROR_WANT_WRITE, 1);
     }
     t_handshake = now_ms() - start;
+    g_handshake_ms = t_handshake;
 
     {
         const char *group = wolfSSL_get_curve_name(ssl);
@@ -879,6 +882,53 @@ static void animate_forever(void) {
 }
 
 
+
+/* --------------------------------------------------------------- catalog */
+
+/* Draws what the catalog says exists. Returns the number of apps listed, or
+   -1 if the body was not a catalog. Only fields the client acts on are read;
+   everything else is display, and an unknown field is not an error. */
+static int draw_catalog(const char *body, size_t len, int row, int maxrows) {
+    cJSON *root = cJSON_ParseWithLength(body, len);
+    if (!root) {
+        logline("catalog: not json");
+        return -1;
+    }
+    cJSON *apps = cJSON_GetObjectItemCaseSensitive(root, "apps");
+    if (!cJSON_IsArray(apps)) {
+        logline("catalog: no apps array");
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    int n = cJSON_GetArraySize(apps), shown = 0;
+    cJSON *app;
+    cJSON_ArrayForEach(app, apps) {
+        if (row + 1 >= maxrows) break;
+        cJSON *name = cJSON_GetObjectItemCaseSensitive(app, "name");
+        cJSON *summary = cJSON_GetObjectItemCaseSensitive(app, "summary");
+        cJSON *cat = cJSON_GetObjectItemCaseSensitive(app, "category");
+        cJSON *lic = cJSON_GetObjectItemCaseSensitive(app, "license");
+        if (!cJSON_IsString(name)) continue;
+
+        pspDebugScreenSetXY(0, row++);
+        pspDebugScreenSetTextColor(COL_TEXT);
+        pspDebugScreenPrintf("  %-38.38s %-10.10s %-8.8s",
+                             name->valuestring,
+                             cJSON_IsString(cat) ? cat->valuestring : "",
+                             cJSON_IsString(lic) ? lic->valuestring : "");
+        pspDebugScreenSetXY(0, row++);
+        pspDebugScreenSetTextColor(COL_DIM);
+        pspDebugScreenPrintf("    %-56.56s",
+                             cJSON_IsString(summary) ? summary->valuestring : "");
+        shown++;
+    }
+    pspDebugScreenSetTextColor(COL_TEXT);
+    logline("catalog: %d apps, %d shown", n, shown);
+    cJSON_Delete(root);
+    return n;
+}
+
 /* ------------------------------------------------------------- screenshot */
 
 /* Dumps the debug-screen framebuffer as a 24-bit BMP. Development aid: the
@@ -955,7 +1005,14 @@ int main(void) {
     pspDebugScreenSetXY(0, 0);
     pspDebugScreenPrintf("PSPDX  https://" HOST PATH "\n");
 
-    if (rc >= 0 && g_body) {
+    if (rc == 0 && g_body && g_status == 200) {
+        pspDebugScreenSetTextColor(COL_DIM);
+        pspDebugScreenPrintf("%lu bytes, %u ms handshake\n",
+                             (unsigned long)g_bodylen, g_handshake_ms);
+        pspDebugScreenSetTextColor(COL_TEXT);
+        if (draw_catalog(g_body, g_bodylen, 3, ANIM_ROW - 1) < 0)
+            draw_wrapped(g_body, g_bodylen, 4, ANIM_ROW - 1);
+    } else if (rc >= 0 && g_body) {
         pspDebugScreenPrintf("HTTP %ld  %s  %lu bytes\n", g_status,
                              g_truncated ? "truncated" : "complete",
                              (unsigned long)g_bodylen);
