@@ -587,6 +587,11 @@ static void ui_phase(void *ctx, const char *phase) {
     strncpy(u->phase, phase, sizeof(u->phase) - 1);
     u->last_draw = 0;
     draw_bar(u->row, 0, 0, u->phase);
+    /* PPSSPP writes an emulated file to the host only when it is closed, so
+       the log is rewritten whole at each phase. On the console this is a few
+       hundred bytes; in the emulator it is the only way to watch a long
+       install from outside. */
+    dump_to_stick();
 }
 
 static void ui_progress(void *ctx, size_t done, size_t total) {

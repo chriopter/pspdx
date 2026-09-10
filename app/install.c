@@ -29,7 +29,12 @@
 #define DB_DIR    ROOT "/PSP/PSPDX/db"
 #define GAME_DIR  ROOT "/PSP/GAME"
 #define ARCHIVE   TMP_DIR "/download.zip"
-#define STAGE     TMP_DIR "/stage"
+/* The staging directory is a sibling of the destination, not a child of
+   PSP/PSPDX/tmp: sceIoRename cannot move anything between directories. It
+   takes the basename of its second argument and renames within the first
+   one's directory, silently -- a rename from tmp/stage to PSP/GAME/Foo
+   reports success and leaves tmp/Foo behind. */
+#define STAGE     GAME_DIR "/.pspdx-stage"
 
 /* ------------------------------------------------------------- manifest */
 
@@ -302,6 +307,7 @@ int install(const char *manifest_url, struct install_report *rep,
     rep->rev = m.rev;
 
     mkdir_p(TMP_DIR);
+    mkdir_p(GAME_DIR);
     rm_rf(STAGE);
 
     if (phase) phase(pctx, "download");
@@ -328,15 +334,15 @@ int install(const char *manifest_url, struct install_report *rep,
     /* The commit. A previous copy steps aside as .old until the new one is in
        place; without a mirror that is the only rollback there is. */
     if (phase) phase(pctx, "commit");
-    char dest[128], old[128];
+    char dest[128], old[128], oldname[80];
     snprintf(dest, sizeof(dest), GAME_DIR "/%s", dir);
     snprintf(old, sizeof(old), GAME_DIR "/%s.old", dir);
+    snprintf(oldname, sizeof(oldname), "%s.old", dir);
     rm_rf(old);
-    sceIoRename(dest, old);                   /* fails harmlessly if absent */
-    mkdir_p(GAME_DIR);
-    if (sceIoRename(STAGE, dest) < 0) {
+    sceIoRename(dest, oldname);               /* fails harmlessly if absent */
+    if (sceIoRename(STAGE, dir) < 0) {
         logline("commit: rename failed, restoring");
-        sceIoRename(old, dest);
+        sceIoRename(old, dir);
         rm_rf(STAGE);
         return -5;
     }

@@ -179,7 +179,8 @@ static const char *header(const char *head, size_t len, const char *name) {
 
 /* ------------------------------------------------------------------- url */
 
-struct url { char host[128]; char path[512]; };
+/* A GitHub release download redirects to a signed URL well over 512 bytes. */
+struct url { char host[128]; char path[1600]; };
 
 static int url_parse(const char *s, struct url *u) {
     if (strncmp(s, "https://", 8) != 0) { logline("url: not https: %.40s", s); return -1; }
@@ -198,7 +199,7 @@ static int url_parse(const char *s, struct url *u) {
 /* Location may be absolute or a path on the same host. */
 static int url_resolve(const struct url *base, const char *loc, size_t loclen,
                        struct url *out) {
-    char tmp[640];
+    char tmp[1800];
     if (loclen >= sizeof(tmp)) return -1;
     memcpy(tmp, loc, loclen);
     tmp[loclen] = '\0';

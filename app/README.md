@@ -24,9 +24,11 @@ the wolfSSL step.
 The app writes what it did to the memory stick, so a run needs no window:
 
 ```sh
-SDL_VIDEODRIVER=offscreen PPSSPPSDL "$PWD/EBOOT.PBP"
-cat ~/.config/ppsspp/PSPDX.LOG
+sh run-ppsspp.sh 300     # seconds to let it run
 ```
+
+It copies the EBOOT to the emulator's memory stick, replays the recorded
+sweep, and leaves `PSPDX.LOG` and `shot.png` beside itself.
 
 PPSSPP only flushes an emulated file to the host on close, which is why the log
 is written in one go at the end rather than line by line.
@@ -44,4 +46,7 @@ desktop is locked.
 | `PSPDX.REPLAY` | if present, the sweep replays `PSPDX.TRACE` instead of reading the stick |
 | `PSPDX.LOG` | what the run did |
 | `PSPDX.HTTP` | the raw response of the last fetch |
-| `PSPDX.BMP` | the final screen, 480x272, 24-bit |
+| `PSPDX.BMP` | the catalog screen, 480x272, 24-bit |
+| `PSPDX2.BMP` | the screen after an install |
+| `PSPDX.INSTALL` | a manifest URL here installs that app unattended, for testing |
+| `PSP/PSPDX/db/<id>.json` | what was installed: rev, directory, manifest URL |
