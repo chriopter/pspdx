@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REQUIRED = ("id", "name", "summary", "category", "license", "manifest")
+REQUIRED = ("id", "name", "author", "summary", "category", "license", "manifest")
 
 
 def load(path):

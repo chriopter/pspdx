@@ -12,6 +12,7 @@ harmless.
 |---|---|
 | `id` | reverse-DNS, stable forever, also the file name |
 | `name`, `summary` | what the client lists; summary fits in one PSP line |
+| `author` | who publishes the PSP build, not the upstream project |
 | `category` | `games`, `emulators`, `apps`, `plugins`, `demos` |
 | `license` | SPDX id, or `proprietary` -- mandatory, see docs/open-questions.md |
 | `homepage` | where a human goes |

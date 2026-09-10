@@ -20,7 +20,6 @@ release workflow rewrites it, nothing else touches it.
   "requires": { "ram_mb": 64 },
   "display": {
     "version":  "0.16.0",
-    "homepage": "https://github.com/chriopter/psp-tuxracer",
     "notes":    "Fixes the crash when loading large courses."
   }
 }
@@ -57,11 +56,12 @@ The registry stores what rarely changes plus a pointer, and never a version:
 {
   "id": "de.chriopter.extremetuxracer",
   "name": "Extreme Tux Racer",
+  "author": "chriopter",
   "summary": "Downhill racing with a penguin.",
   "category": "games",
   "license": "GPL-2.0",
-  "manifest": "https://cdn.jsdelivr.net/gh/chriopter/psp-tuxracer@main/etr.pspdx",
-  "last_seen_ok": "2026-09-09T10:44:47Z"
+  "homepage": "https://github.com/chriopter/psp-tuxracer",
+  "manifest": "https://cdn.jsdelivr.net/gh/chriopter/psp-tuxracer@main/etr.pspdx"
 }
 ```
 
