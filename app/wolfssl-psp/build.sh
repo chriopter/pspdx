@@ -27,7 +27,8 @@ SHA=2de93e8af588ee856fe67a6d7fce23fc1b226b74d710b0e3946bc8061f6aa18f
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="$HERE/prefix"
 
-cd /tmp
+WORK="$HERE/work"
+mkdir -p "$WORK" && cd "$WORK"
 TARBALL="v${VER}-stable.tar.gz"
 [ -f "$TARBALL" ] || wget -q "https://github.com/wolfSSL/wolfssl/archive/refs/tags/$TARBALL"
 

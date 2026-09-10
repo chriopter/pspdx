@@ -26,8 +26,8 @@ mirror becomes untrusted infrastructure that can fail or omit, but not lie.
 
 Handshakes cost more than bytes here. On a 222 MHz MIPS core the TLS handshake
 dominates a small request, so the number of distinct *hosts* matters far more
-than the number of requests. `sceHttpEnableKeepAlive` exists in the rust-psp
-bindings and is the single most valuable call for an update check.
+than the number of requests. Keeping one TLS connection open across requests
+is the single most valuable optimisation for an update check.
 
 ## Memory
 

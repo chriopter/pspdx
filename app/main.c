@@ -8,6 +8,7 @@
 #include <pspkernel.h>
 #include <pspdebug.h>
 #include <pspdisplay.h>
+#include <pspge.h>
 #include <pspiofilemgr.h>
 #include <psprtc.h>
 #include <psputility.h>
@@ -877,6 +878,46 @@ static void animate_forever(void) {
     }
 }
 
+
+/* ------------------------------------------------------------- screenshot */
+
+/* Dumps the debug-screen framebuffer as a 24-bit BMP. Development aid: the
+   host may have no window to capture (locked screen, headless run), and a
+   real PSP has no screen capture at all. pspDebugScreen draws 8888 into VRAM
+   with a 512-pixel stride. */
+static void screenshot_to_stick(const char *path) {
+    enum { W = 480, H = 272, STRIDE = 512 };
+    const unsigned *vram = (const unsigned *)(0x40000000 | (unsigned)sceGeEdramGetAddr());
+    int fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+    if (fd < 0) return;
+
+    unsigned rowbytes = W * 3;                    /* 1440, already 4-aligned */
+    unsigned datasize = rowbytes * H;
+    unsigned char hdr[54] = { 'B', 'M' };
+    unsigned v;
+    v = 54 + datasize; memcpy(hdr + 2, &v, 4);
+    v = 54;            memcpy(hdr + 10, &v, 4);
+    v = 40;            memcpy(hdr + 14, &v, 4);
+    v = W;             memcpy(hdr + 18, &v, 4);
+    v = H;             memcpy(hdr + 22, &v, 4);
+    hdr[26] = 1; hdr[28] = 24;
+    v = datasize;      memcpy(hdr + 34, &v, 4);
+    sceIoWrite(fd, hdr, sizeof(hdr));
+
+    static unsigned char row[W * 3];
+    for (int y = H - 1; y >= 0; y--) {            /* BMP is bottom-up */
+        const unsigned *src = vram + y * STRIDE;
+        for (int x = 0; x < W; x++) {
+            unsigned px = src[x];                 /* 0xAABBGGRR */
+            row[x * 3 + 0] = (px >> 16) & 0xff;   /* B */
+            row[x * 3 + 1] = (px >> 8) & 0xff;    /* G */
+            row[x * 3 + 2] = px & 0xff;           /* R */
+        }
+        sceIoWrite(fd, row, sizeof(row));
+    }
+    sceIoClose(fd);
+}
+
 /* ------------------------------------------------------------------ main */
 
 int main(void) {
@@ -926,6 +967,9 @@ int main(void) {
             pspDebugScreenPrintf("%s", g_log[i]);
         }
     }
+
+    sceDisplayWaitVblankStart();
+    screenshot_to_stick("ms0:/PSPDX.BMP");
 
     animate_forever();
     return 0;
