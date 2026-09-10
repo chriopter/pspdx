@@ -2,17 +2,11 @@
 
 **PSP Download Index** — the missing package manager for PSP homebrew.
 
-The client on the console fetches a catalog of apps from this repository,
-installs the one you pick, and tells you when a new version is out. It runs
-under PPSSPP; nobody has put it on real hardware yet.
+PSPDX polls a catalog of apps in this repository, each one pointing at the
+author's own repository, where the download lives.
 
-The catalog only says what exists and where to look. Every app -- yours too, if
-you want in -- has an `app.pspdx` in its author's own repository saying what
-the current release is, and the download comes from there.
-
-That catalog URL is compiled into the EBOOT; everything behind it is static, so
-nothing has to keep running. A PSP pays per handshake, not per byte -- the
-whole index is one request.
+Every app has an `app.pspdx` saying what its current release is. Yours too, if
+you want in.
 
 ## What it does
 
