@@ -1,19 +1,38 @@
 # pspdx-app
 
-The on-device client, built with [rust-psp](https://github.com/overdrivenpotato/rust-psp).
-Right now it draws four lines and waits for HOME.
+The on-device client. Right now it collects entropy, opens a TLS 1.3 connection
+and prints the response — the groundwork under a package manager that does not
+exist yet.
 
 ## Building
 
-Needs `rustup`, the nightly rust-psp pins, and `cargo-psp`:
-
 ```sh
-rustup toolchain install nightly-2026-08-26 --component rust-src
-cargo install --git https://github.com/overdrivenpotato/rust-psp cargo-psp
-RUSTUP_TOOLCHAIN=nightly-2026-08-26 cargo psp
+docker run --rm -v "$PWD:/src" -w /src pspdev/pspdev:latest sh wolfssl-psp/build.sh
+docker run --rm -v "$PWD:/src" -w /src pspdev/pspdev:latest make
 ```
 
-The result is `target/mipsel-sony-psp/debug/pspdx-app.EBOOT.PBP`. Copy it to
-`ms0:/PSP/GAME/pspdx/EBOOT.PBP`, or open it in PPSSPP.
+The first line builds wolfSSL into `wolfssl-psp/prefix` (a few minutes, once);
+the second produces `EBOOT.PBP`. Copy it to `ms0:/PSP/GAME/pspdx/`, or open it
+in PPSSPP.
 
-CI builds the same thing on every push and attaches it as an artifact.
+## Running it without a screen
+
+The app writes what it did to the memory stick, so a run needs no window:
+
+```sh
+SDL_VIDEODRIVER=offscreen PPSSPPSDL "$PWD/EBOOT.PBP"
+cat ~/.config/ppsspp/PSPDX.LOG
+```
+
+PPSSPP only flushes an emulated file to the host on close, which is why the log
+is written in one go at the end rather than line by line.
+
+## Files it leaves on the stick
+
+| Path | What |
+|---|---|
+| `PSPDX.SEED` | 20 bytes of pool state, so the entropy ritual happens once |
+| `PSPDX.TRACE` | every pad sample of the last sweep, for replay |
+| `PSPDX.REPLAY` | if present, the sweep replays `PSPDX.TRACE` instead of reading the stick |
+| `PSPDX.LOG` | what the run did |
+| `PSPDX.HTTP` | the raw response of the last fetch |
