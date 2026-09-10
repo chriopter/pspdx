@@ -2,7 +2,9 @@
 
 **PSP Download Index** — the missing package manager for PSP homebrew.
 
-Gives you a [catalog](https://github.com/chriopter/pspdx-catalog) of sick & current Brews for the PSP including updating them from a central place!
+Gives you a [catalog](https://chriopter.github.io/pspdx-catalog/) of sick & current Brews for the PSP including updating them from a central place!
+
+**[Browse the catalog →](https://chriopter.github.io/pspdx-catalog/)**
 
 <img src="media/catalog.png" width="480" alt="The catalog, one app listed with category and licence">
 
