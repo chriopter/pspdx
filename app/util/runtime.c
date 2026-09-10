@@ -1,3 +1,4 @@
+#include <pspkernel.h>
 #include <pspiofilemgr.h>
 #include <psprtc.h>
 #include <stdarg.h>
@@ -6,11 +7,13 @@
 
 #include "util/runtime.h"
 
-#define LOGLINES 26
-#define LOGCOLS 61            /* one 60-column debug-screen row plus NUL */
+#define LOGLINES 40
+#define LOGCOLS 100           /* the debug screen clips at 60; the file gets it all */
 
+/* The last LOGLINES lines, as a ring: a session that runs for an hour
+   still leaves behind what happened last, not what happened first. */
 static char lines[LOGLINES][LOGCOLS];
-static int line_count;
+static int line_total;
 
 void logline(const char *fmt, ...) {
     char line[LOGCOLS];
@@ -18,31 +21,70 @@ void logline(const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(line, sizeof(line), fmt, ap);
     va_end(ap);
-    if (line_count < LOGLINES) strcpy(lines[line_count++], line);
+    strcpy(lines[line_total % LOGLINES], line);
+    line_total++;
     sceIoWrite(1, line, strlen(line));
     sceIoWrite(1, "\n", 1);
 }
 
-void log_dump(void) {
-    int fd = sceIoOpen("ms0:/PSPDX.LOG", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
-    if (fd < 0) return;
-    for (int i = 0; i < line_count; i++) {
-        sceIoWrite(fd, lines[i], strlen(lines[i]));
-        sceIoWrite(fd, "\n", 1);
+static SceUID g_flush_thread = -1, g_flush_sema = -1;
+
+static int flush_thread(SceSize args, void *argp) {
+    (void)args; (void)argp;
+    for (;;) {
+        sceKernelWaitSema(g_flush_sema, 1, 0);
+        log_dump();
     }
-    sceIoClose(fd);
+    return 0;
 }
 
-int log_count(void) { return line_count; }
+void log_dump_later(void) {
+    if (g_flush_thread < 0) {
+        g_flush_sema = sceKernelCreateSema("log_flush", 0, 0, 8, 0);
+        g_flush_thread = sceKernelCreateThread("log_flush", flush_thread, 0x24, 0x4000,
+                                               PSP_THREAD_ATTR_USER, 0);
+        if (g_flush_thread < 0 || g_flush_sema < 0) { log_dump(); return; }
+        sceKernelStartThread(g_flush_thread, 0, 0);
+    }
+    sceKernelSignalSema(g_flush_sema, 1);
+}
+
+int log_count(void) { return line_total < LOGLINES ? line_total : LOGLINES; }
 
 const char *log_at(int index) {
-    return index >= 0 && index < line_count ? lines[index] : "";
+    int count = log_count();
+    if (index < 0 || index >= count) return "";
+    return lines[(line_total - count + index) % LOGLINES];
+}
+
+/* One write, not two per line: eighty small writes to the stick cost a
+   frame, one of four kilobytes does not. */
+void log_dump(void) {
+    static char out[LOGLINES * LOGCOLS];
+    size_t n = 0;
+    for (int i = 0; i < log_count(); i++) {
+        const char *l = log_at(i);
+        size_t len = strlen(l);
+        memcpy(out + n, l, len);
+        n += len;
+        out[n++] = '\n';
+    }
+    int fd = sceIoOpen("ms0:/PSPDX.LOG", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+    if (fd < 0) return;
+    sceIoWrite(fd, out, (SceSize)n);
+    sceIoClose(fd);
 }
 
 unsigned now_ms(void) {
     u64 tick = 0;
     sceRtcGetCurrentTick(&tick);
     return (unsigned)(tick / 1000);
+}
+
+unsigned now_us(void) {
+    u64 tick = 0;
+    sceRtcGetCurrentTick(&tick);
+    return (unsigned)tick;
 }
 
 int expired(unsigned start, unsigned budget_ms) {

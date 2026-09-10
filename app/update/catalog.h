@@ -16,9 +16,10 @@ struct app_entry {
     char category[12];
     char license[16];
     char manifest[256];
-    /* Absolute already: the catalog serves this one relative to itself, and
-       resolving it once at parse time keeps the base URL in this file. */
+    /* Absolute already: the catalog serves these relative to itself, and
+       resolving them once at parse time keeps the base URL in this file. */
     char screenshot[256];
+    char video[256];
     enum app_state state;
     unsigned local_rev, remote_rev;
     char local_version[32], remote_version[32];

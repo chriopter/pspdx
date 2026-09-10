@@ -38,6 +38,6 @@ void gui_failure(void) {
     gui_header("failed");
     for (int i = 0; i < log_count() && i + 2 < STATUS_ROW; i++) {
         pspDebugScreenSetXY(0, 2 + i);
-        pspDebugScreenPrintf("%s", log_at(i));
+        pspDebugScreenPrintf("%.60s", log_at(i));
     }
 }

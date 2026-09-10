@@ -37,6 +37,16 @@ if [ -f "$FONTS/ltn8.pgf" ]; then
 	cp "$FONTS/ltn8.pgf" "$MS/PSP/PSPDX/font/ltn8.pgf"
 fi
 
+# Clips the catalog repo holds but the published catalog does not link yet
+# go straight into the client's cache, which it consults before any URL.
+# That is how the player gets exercised ahead of a deploy.
+for clip in "$HERE"/../catalog/apps/*/video.mp4; do
+	[ -f "$clip" ] || continue
+	id="$(basename "$(dirname "$clip")")"
+	mkdir -p "$MS/PSP/PSPDX/cache"
+	cp "$clip" "$MS/PSP/PSPDX/cache/$id.mp4"
+done
+
 if [ "$SWEEP" = 1 ]; then
 	cp "$HERE/testdata/sweep.trace" "$MS/PSPDX.TRACE"
 	touch "$MS/PSPDX.REPLAY"
@@ -50,12 +60,16 @@ else
 fi
 rm -f "$MS/PSPDX.LOG" "$MS/PSPDX.BMP"
 
-SDL_VIDEODRIVER=wayland flatpak run --socket=wayland --share=network \
+# In its own session, so that the kill below reaches the emulator inside
+# the flatpak sandbox and not only the launcher: an instance that survives
+# keeps writing the same files as the next run, and two runs then share one
+# log.
+SDL_VIDEODRIVER=wayland setsid flatpak run --socket=wayland --share=network \
   --filesystem="$MS" org.ppsspp.PPSSPP --fullscreen=0 \
   "$MS/PSP/GAME/pspdx/EBOOT.PBP" >"$HERE/ppsspp.out" 2>&1 &
 PID=$!
 sleep "$SECS"
-kill $PID 2>/dev/null || true
+kill -- -"$PID" 2>/dev/null || kill "$PID" 2>/dev/null || true
 sleep 2
 
 cp "$MS/PSPDX.LOG" "$HERE/PSPDX.LOG" 2>/dev/null || echo "no log written"
