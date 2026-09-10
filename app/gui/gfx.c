@@ -33,8 +33,10 @@
    nor show the tile. */
 #define RIPPLE_SIZE 128
 #define RIPPLE_FRAMES 8
-#define RIPPLE_LEVELS 5
-#define RIPPLE_BYTES (21824)    /* 128^2 + 64^2 + 32^2 + 16^2 + 8^2 */
+/* Four levels, down to 16x16: the GE reads a texture in 16-byte units,
+   so a T8 level narrower than 16 texels has a stride it cannot address. */
+#define RIPPLE_LEVELS 4
+#define RIPPLE_BYTES (21760)    /* 128^2 + 64^2 + 32^2 + 16^2 */
 
 static unsigned int __attribute__((aligned(16))) g_list[64 * 1024];
 static unsigned g_frames;
