@@ -115,6 +115,8 @@ static int setup_callbacks(void) {
     return sceKernelStartThread(thid, 0, 0);
 }
 
+static void screenshot_to_stick(const char *path);
+
 /* ------------------------------------------------------------- psprandom */
 
 /* Kept deliberately free of wolfSSL types so it can be lifted into its own
@@ -280,6 +282,34 @@ static void draw_cell(int x, int y, char ch, unsigned col) {
     pspDebugScreenPrintf("%c", ch);
 }
 
+/* ------------------------------------------------------------- recording */
+
+/* With a file named PSPDX.RECORD on the stick, every fourth frame of the sweep
+   is written to PSPDX_REC/ as a BMP, and the host turns them into a video. The
+   emulator's own frame dump produces an unreadable file in this build, and a
+   real console has no capture at all -- so the app records itself, the same
+   way it takes its own screenshots. Roughly 400 files and 150 MB for one
+   sweep, which is why it is off unless the file is there. */
+#define REC_DIR "ms0:/PSPDX_REC"
+#define REC_EVERY 4
+
+static int g_recording = 0;
+
+static void record_init(void) {
+    int fd = sceIoOpen("ms0:/PSPDX.RECORD", PSP_O_RDONLY, 0777);
+    if (fd < 0) return;
+    sceIoClose(fd);
+    g_recording = 1;
+    sceIoMkdir(REC_DIR, 0777);
+}
+
+static void record_frame(int frame) {
+    if (!g_recording || (frame % REC_EVERY)) return;
+    char path[64];
+    snprintf(path, sizeof(path), REC_DIR "/F%05d.BMP", frame / REC_EVERY);
+    screenshot_to_stick(path);
+}
+
 /* Runs the sweep and leaves the pool filled. Returns credited bits. */
 static int psprandom_sweep(void) {
     grid_reset();
@@ -386,6 +416,7 @@ static int psprandom_sweep(void) {
 
         frame++;
         sceDisplayWaitVblankStart();
+        record_frame(frame);
     }
 
     trace_save();
@@ -458,8 +489,6 @@ int psprandom_seed_raw(unsigned char *seed, unsigned int sz) {
     }
     return 0;
 }
-
-static void screenshot_to_stick(const char *path);
 
 /* --------------------------------------------------------------- catalog */
 
@@ -770,6 +799,7 @@ int main(void) {
     /* Before anything touches the network: fill the entropy pool, then hand
        wolfSSL the source. Without this every key it derives is guessable. */
     psprandom_init();
+    record_init();
     trace_load();
     if (!g_replay && psprandom_load()) {
         g_pool_bits = ENTROPY_BITS;              /* carried over from last run */
