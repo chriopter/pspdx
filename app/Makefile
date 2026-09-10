@@ -1,5 +1,5 @@
 TARGET = pspdx
-OBJS = main.o
+OBJS = main.o https.o install.o zipread.o
 
 WOLFSSL_PREFIX = $(CURDIR)/wolfssl-psp/prefix
 

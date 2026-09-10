@@ -1,0 +1,347 @@
+/*
+ * Installing a package: manifest, download, hash, unpack, one rename.
+ *
+ * Nothing is created in place. FAT32 has no transactions and PSP users pull
+ * the battery, so the archive is downloaded and unpacked under
+ * PSP/PSPDX/tmp/ and only a finished directory is renamed into
+ * PSP/GAME/. The rename is the commit.
+ *
+ * Only the PSP/GAME/<dir>/ subtree of the archive is installed. Everything
+ * beside it -- PSP/SYSTEM/*.ini, LICENSES/, a build.json -- is the user's or
+ * nobody's, and is never written.
+ */
+
+#include <pspkernel.h>
+#include <pspiofilemgr.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <wolfssl/options.h>
+#include <wolfssl/wolfcrypt/sha256.h>
+#include <cjson/cJSON.h>
+
+#include "pspdx.h"
+#include "install.h"
+#include "zipread.h"
+
+#define ROOT "ms0:"
+#define TMP_DIR   ROOT "/PSP/PSPDX/tmp"
+#define DB_DIR    ROOT "/PSP/PSPDX/db"
+#define GAME_DIR  ROOT "/PSP/GAME"
+#define ARCHIVE   TMP_DIR "/download.zip"
+#define STAGE     TMP_DIR "/stage"
+
+/* ------------------------------------------------------------- manifest */
+
+static char g_manifest[8 * 1024];
+static size_t g_manifest_len;
+
+static int mem_sink(void *ctx, const void *data, size_t len) {
+    (void)ctx;
+    if (g_manifest_len + len >= sizeof(g_manifest)) return -1;
+    memcpy(g_manifest + g_manifest_len, data, len);
+    g_manifest_len += len;
+    return 0;
+}
+
+static int hexval(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+int manifest_fetch(const char *url, struct manifest *m) {
+    struct https_result r;
+    g_manifest_len = 0;
+    memset(m, 0, sizeof(*m));
+
+    int rc = https_get(url, mem_sink, NULL, NULL, NULL, &r);
+    if (rc != 0 || r.status != 200) {
+        logline("manifest: fetch rc=%d status=%ld", rc, r.status);
+        return -1;
+    }
+
+    cJSON *root = cJSON_ParseWithLength(g_manifest, g_manifest_len);
+    if (!root) { logline("manifest: not json"); return -2; }
+
+    cJSON *schema = cJSON_GetObjectItemCaseSensitive(root, "schema");
+    cJSON *rev    = cJSON_GetObjectItemCaseSensitive(root, "rev");
+    cJSON *u      = cJSON_GetObjectItemCaseSensitive(root, "url");
+    cJSON *sha    = cJSON_GetObjectItemCaseSensitive(root, "sha256");
+    cJSON *size   = cJSON_GetObjectItemCaseSensitive(root, "size");
+    cJSON *id     = cJSON_GetObjectItemCaseSensitive(root, "id");
+    cJSON *disp   = cJSON_GetObjectItemCaseSensitive(root, "display");
+
+    rc = -3;
+    if (!cJSON_IsNumber(schema) || schema->valueint != 1) { logline("manifest: schema"); goto out; }
+    if (!cJSON_IsNumber(rev) || !cJSON_IsString(u) || !cJSON_IsString(sha) ||
+        !cJSON_IsNumber(size) || !cJSON_IsString(id)) {
+        logline("manifest: missing field");
+        goto out;
+    }
+    if (strlen(sha->valuestring) != 64) { logline("manifest: sha256 length"); goto out; }
+    for (int i = 0; i < 32; i++) {
+        int hi = hexval(sha->valuestring[2 * i]), lo = hexval(sha->valuestring[2 * i + 1]);
+        if (hi < 0 || lo < 0) { logline("manifest: sha256 hex"); goto out; }
+        m->sha256[i] = (unsigned char)(hi * 16 + lo);
+    }
+    m->rev = (unsigned)rev->valuedouble;
+    m->size = (size_t)size->valuedouble;
+    strncpy(m->id, id->valuestring, sizeof(m->id) - 1);
+    strncpy(m->url, u->valuestring, sizeof(m->url) - 1);
+    if (cJSON_IsObject(disp)) {
+        cJSON *v = cJSON_GetObjectItemCaseSensitive(disp, "version");
+        if (cJSON_IsString(v)) strncpy(m->version, v->valuestring, sizeof(m->version) - 1);
+    }
+    logline("manifest: %s rev %u, %lu bytes", m->id, m->rev, (unsigned long)m->size);
+    rc = 0;
+out:
+    cJSON_Delete(root);
+    return rc;
+}
+
+/* ------------------------------------------------------------- download */
+
+struct dl {
+    int fd;
+    wc_Sha256 sha;
+    size_t written;
+};
+
+static int file_sink(void *ctx, const void *data, size_t len) {
+    struct dl *d = ctx;
+    if (wc_Sha256Update(&d->sha, data, (word32)len) != 0) return -1;
+    while (len) {
+        int n = sceIoWrite(d->fd, data, len);
+        if (n <= 0) { logline("write failed %d", n); return -1; }
+        data = (const char *)data + n;
+        len -= (size_t)n;
+        d->written += (size_t)n;
+    }
+    return 0;
+}
+
+static int download(const struct manifest *m, https_progress progress, void *pctx) {
+    struct dl d;
+    struct https_result r;
+    d.written = 0;
+    if (wc_InitSha256(&d.sha) != 0) return -1;
+
+    d.fd = sceIoOpen(ARCHIVE, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+    if (d.fd < 0) { logline("cannot create %s", ARCHIVE); return -2; }
+
+    unsigned start = now_ms();
+    int rc = https_get(m->url, file_sink, &d, progress, pctx, &r);
+    sceIoClose(d.fd);
+    unsigned ms = now_ms() - start;
+    logline("download: rc=%d status=%ld %lu bytes in %u.%us", rc, r.status,
+            (unsigned long)d.written, ms / 1000, (ms % 1000) / 100);
+    if (rc != 0 || r.status != 200) return -3;
+    if (d.written != m->size) {
+        logline("download: size %lu, manifest says %lu",
+                (unsigned long)d.written, (unsigned long)m->size);
+        return -4;
+    }
+
+    unsigned char digest[32];
+    wc_Sha256Final(&d.sha, digest);
+    if (memcmp(digest, m->sha256, 32) != 0) { logline("download: sha256 MISMATCH"); return -5; }
+    logline("download: sha256 ok");
+    return 0;
+}
+
+/* -------------------------------------------------------------- unpack */
+
+static int mkdir_p(const char *path) {
+    char tmp[256];
+    strncpy(tmp, path, sizeof(tmp) - 1);
+    tmp[sizeof(tmp) - 1] = '\0';
+    for (char *p = tmp + 5; *p; p++) {       /* skip "ms0:/" */
+        if (*p == '/') { *p = '\0'; sceIoMkdir(tmp, 0777); *p = '/'; }
+    }
+    sceIoMkdir(tmp, 0777);
+    return 0;
+}
+
+static int rm_rf(const char *path) {
+    SceUID d = sceIoDopen(path);
+    if (d < 0) return sceIoRemove(path) < 0 ? -1 : 0;
+    SceIoDirent e;
+    memset(&e, 0, sizeof(e));
+    while (sceIoDread(d, &e) > 0) {
+        if (strcmp(e.d_name, ".") == 0 || strcmp(e.d_name, "..") == 0) continue;
+        char sub[256];
+        snprintf(sub, sizeof(sub), "%s/%s", path, e.d_name);
+        if (FIO_S_ISDIR(e.d_stat.st_mode)) rm_rf(sub);
+        else sceIoRemove(sub);
+        memset(&e, 0, sizeof(e));
+    }
+    sceIoDclose(d);
+    return sceIoRmdir(path) < 0 ? -1 : 0;
+}
+
+/* Finds the one PSP/GAME/<dir>/ in the archive. More than one is refused:
+   a package is a directory, and a bundle that ships two is two packages. */
+static int find_game_dir(struct zipread *z, char *dir, size_t dirsz) {
+    struct zipentry e;
+    int rc;
+    dir[0] = '\0';
+    for (rc = zip_first(z, &e); rc > 0; rc = zip_next(z, &e)) {
+        if (strncmp(e.name, "PSP/GAME/", 9) != 0) continue;
+        const char *rest = e.name + 9;
+        const char *slash = strchr(rest, '/');
+        if (!slash) continue;                     /* a file directly in GAME/ */
+        size_t len = (size_t)(slash - rest);
+        if (len == 0 || len >= dirsz) continue;
+        if (dir[0] == '\0') { memcpy(dir, rest, len); dir[len] = '\0'; }
+        else if (strlen(dir) != len || strncmp(dir, rest, len) != 0) {
+            logline("unpack: two game dirs, %s and %.*s", dir, (int)len, rest);
+            return -1;
+        }
+    }
+    if (rc < 0) return -1;
+    if (dir[0] == '\0') { logline("unpack: no PSP/GAME/<dir>/ in archive"); return -1; }
+    return 0;
+}
+
+/* A path component that walks anywhere but down is refused. */
+static int safe_relative(const char *rel) {
+    if (rel[0] == '/' || strstr(rel, "..")) return 0;
+    if (strchr(rel, ':')) return 0;
+    return 1;
+}
+
+struct out_file { int fd; size_t *done; };
+
+static int out_sink(void *ctx, const void *data, size_t len) {
+    struct out_file *o = ctx;
+    int n = sceIoWrite(o->fd, data, len);
+    if (n != (int)len) return -1;
+    *o->done += len;
+    return 0;
+}
+
+static int unpack(struct zipread *z, const char *dir, struct install_report *rep,
+                  https_progress progress, void *pctx) {
+    char prefix[128];
+    snprintf(prefix, sizeof(prefix), "PSP/GAME/%s/", dir);
+    size_t plen = strlen(prefix);
+    struct zipentry e;
+    int rc, files = 0;
+    size_t total = 0, done = 0;
+
+    for (rc = zip_first(z, &e); rc > 0; rc = zip_next(z, &e))
+        if (strncmp(e.name, prefix, plen) == 0) total += e.usize;
+    if (rc < 0) return -1;
+    if (progress) progress(pctx, 0, total);
+
+    for (rc = zip_first(z, &e); rc > 0; rc = zip_next(z, &e)) {
+        if (strncmp(e.name, prefix, plen) != 0) continue;   /* not ours */
+        const char *rel = e.name + plen;
+        if (*rel == '\0') continue;
+        if (e.name_truncated || !safe_relative(rel)) { logline("unpack: refusing %s", e.name); return -1; }
+
+        char path[256];
+        snprintf(path, sizeof(path), STAGE "/%s", rel);
+        size_t L = strlen(path);
+        if (path[L - 1] == '/') { path[L - 1] = '\0'; mkdir_p(path); continue; }
+
+        char *slash = strrchr(path, '/');
+        if (slash) { *slash = '\0'; mkdir_p(path); *slash = '/'; }
+
+        struct out_file o;
+        o.done = &done;
+        o.fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+        if (o.fd < 0) { logline("unpack: cannot create %s", rel); return -1; }
+        int xrc = zip_extract(z, &e, out_sink, &o);
+        sceIoClose(o.fd);
+        if (xrc < 0) { logline("unpack: failed on %s", rel); return -1; }
+        files++;
+        if (progress) progress(pctx, done, total);
+    }
+    if (rc < 0) return -1;
+
+    rep->files = files;
+    rep->bytes = done;
+    logline("unpack: %d files, %lu bytes", files, (unsigned long)done);
+    return 0;
+}
+
+/* ------------------------------------------------------------------- db */
+
+/* What the client will need to uninstall or update later: which directory it
+   actually wrote, and which manifest to ask. */
+static int db_write(const struct manifest *m, const char *dir) {
+    char path[256];
+    snprintf(path, sizeof(path), DB_DIR "/%s.json", m->id);
+    mkdir_p(DB_DIR);
+    int fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
+    if (fd < 0) return -1;
+    char line[512];
+    int n = snprintf(line, sizeof(line),
+                     "{\"id\":\"%s\",\"rev\":%u,\"dir\":\"%s\",\"manifest\":\"%s\",\"version\":\"%s\"}\n",
+                     m->id, m->rev, dir, m->manifest_url, m->version);
+    sceIoWrite(fd, line, (SceSize)n);
+    sceIoClose(fd);
+    return 0;
+}
+
+/* --------------------------------------------------------------- install */
+
+int install(const char *manifest_url, struct install_report *rep,
+            install_phase_cb phase, https_progress progress, void *pctx) {
+    struct manifest m;
+    memset(rep, 0, sizeof(*rep));
+
+    if (phase) phase(pctx, "manifest");
+    if (manifest_fetch(manifest_url, &m) < 0) return -1;
+    strncpy(m.manifest_url, manifest_url, sizeof(m.manifest_url) - 1);
+    strncpy(rep->id, m.id, sizeof(rep->id) - 1);
+    strncpy(rep->version, m.version, sizeof(rep->version) - 1);
+    rep->rev = m.rev;
+
+    mkdir_p(TMP_DIR);
+    rm_rf(STAGE);
+
+    if (phase) phase(pctx, "download");
+    if (download(&m, progress, pctx) < 0) { sceIoRemove(ARCHIVE); return -2; }
+
+    if (phase) phase(pctx, "unpack");
+    char dir[64];
+    struct zipread z;
+    if (zip_open(&z, ARCHIVE) < 0) {
+        logline("unpack: cannot open archive");
+        sceIoRemove(ARCHIVE);
+        return -3;
+    }
+    int rc = find_game_dir(&z, dir, sizeof(dir));
+    if (rc == 0) {
+        strncpy(rep->dir, dir, sizeof(rep->dir) - 1);
+        mkdir_p(STAGE);
+        rc = unpack(&z, dir, rep, progress, pctx);
+    }
+    zip_close(&z);
+    sceIoRemove(ARCHIVE);
+    if (rc < 0) { rm_rf(STAGE); return -4; }
+
+    /* The commit. A previous copy steps aside as .old until the new one is in
+       place; without a mirror that is the only rollback there is. */
+    if (phase) phase(pctx, "commit");
+    char dest[128], old[128];
+    snprintf(dest, sizeof(dest), GAME_DIR "/%s", dir);
+    snprintf(old, sizeof(old), GAME_DIR "/%s.old", dir);
+    rm_rf(old);
+    sceIoRename(dest, old);                   /* fails harmlessly if absent */
+    mkdir_p(GAME_DIR);
+    if (sceIoRename(STAGE, dest) < 0) {
+        logline("commit: rename failed, restoring");
+        sceIoRename(old, dest);
+        rm_rf(STAGE);
+        return -5;
+    }
+    rm_rf(old);
+    db_write(&m, dir);
+    logline("installed %s -> PSP/GAME/%s", m.id, dir);
+    return 0;
+}

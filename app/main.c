@@ -1,8 +1,6 @@
 /*
- * PSPDX -- fetches a page over TLS and shows it on the PSP screen.
- *
- * Everything here is scaffolding for the real client; what it proves is that
- * the console can complete a modern TLS handshake and read an HTTPS response.
+ * PSPDX -- the on-device client. Gathers entropy, fetches the catalog over
+ * TLS 1.3 and shows it. https.c carries the network, this file the rest.
  */
 
 #include <pspkernel.h>
@@ -12,22 +10,14 @@
 #include <pspiofilemgr.h>
 #include <psprtc.h>
 #include <psputility.h>
-#include <psputility_netmodules.h>
-#include <pspnet.h>
-#include <pspnet_apctl.h>
-#include <pspnet_inet.h>
-#include <pspnet_resolver.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 #include <pspctrl.h>
-#include <wolfssl/options.h>
-#include <wolfssl/ssl.h>
 #include <cjson/cJSON.h>
+
+#include "pspdx.h"
+#include "install.h"
 
 PSP_MODULE_INFO("pspdx", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
@@ -35,16 +25,9 @@ PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
    record buffers. Leaving the rest to the system keeps a PSP-1000 comfortable. */
 PSP_HEAP_SIZE_KB(4 * 1024);
 
-#define HOST "chriopter.github.io"
-#define PATH "/pspdx/catalog.json"
-#define PORT 443
+#define CATALOG_URL "https://chriopter.github.io/pspdx/catalog.json"
 
-#define COLS 60
 #define ANIM_ROW 32
-
-#define CONNECT_TIMEOUT_MS   10000
-#define HANDSHAKE_TIMEOUT_MS 20000
-#define TRANSFER_TIMEOUT_MS  30000
 
 /* --------------------------------------------------------------- logging */
 
@@ -54,17 +37,12 @@ PSP_HEAP_SIZE_KB(4 * 1024);
 static char g_log[LOGLINES][LOGCOLS];
 static int g_logn = 0;
 
-static char g_resp[24 * 1024];
+/* The catalog body. ~200 bytes per app; this holds a thousand. */
+static char g_resp[200 * 1024];
 static size_t g_resplen = 0;
+static struct https_result g_fetch;
 
-/* Set once the response has been parsed. */
-static long g_status = 0;
-static const char *g_body = NULL;
-static size_t g_bodylen = 0;
-static int g_truncated = 0;
-static unsigned g_handshake_ms = 0;
-
-static void logline(const char *fmt, ...) {
+void logline(const char *fmt, ...) {
     char line[LOGCOLS];
     va_list ap;
     va_start(ap, fmt);
@@ -100,13 +78,13 @@ static void dump_to_stick(void) {
 
 /* ------------------------------------------------------------------ time */
 
-static unsigned now_ms(void) {
+unsigned now_ms(void) {
     u64 tick = 0;
     sceRtcGetCurrentTick(&tick);
     return (unsigned)(tick / 1000);
 }
 
-static int expired(unsigned start, unsigned budget_ms) {
+int expired(unsigned start, unsigned budget_ms) {
     return (now_ms() - start) > budget_ms;
 }
 
@@ -137,172 +115,6 @@ static int setup_callbacks(void) {
     return sceKernelStartThread(thid, 0, 0);
 }
 
-/* --------------------------------------------------------------- network */
-
-/* Each flag records one initialisation step, so a failure part-way through can
-   unwind exactly what came up. */
-static struct {
-    int net, inet, resolver, apctl, connected;
-} g_net;
-
-static void net_down(void) {
-    if (g_net.connected) { sceNetApctlDisconnect(); g_net.connected = 0; }
-    if (g_net.apctl)     { sceNetApctlTerm();       g_net.apctl = 0; }
-    if (g_net.resolver)  { sceNetResolverTerm();    g_net.resolver = 0; }
-    if (g_net.inet)      { sceNetInetTerm();        g_net.inet = 0; }
-    if (g_net.net)       { sceNetTerm();            g_net.net = 0; }
-    sceUtilityUnloadNetModule(PSP_NET_MODULE_INET);
-    sceUtilityUnloadNetModule(PSP_NET_MODULE_COMMON);
-}
-
-static int net_up(void) {
-    int rc;
-
-    if ((rc = sceUtilityLoadNetModule(PSP_NET_MODULE_COMMON)) < 0) return -1;
-    if ((rc = sceUtilityLoadNetModule(PSP_NET_MODULE_INET)) < 0)   return -2;
-
-    if (sceNetInit(128 * 1024, 42, 4 * 1024, 42, 4 * 1024) < 0) goto fail;
-    g_net.net = 1;
-    if (sceNetInetInit() < 0) goto fail;
-    g_net.inet = 1;
-    if (sceNetResolverInit() < 0) goto fail;
-    g_net.resolver = 1;
-    if (sceNetApctlInit(0x1600, 42) < 0) goto fail;
-    g_net.apctl = 1;
-
-    /* Connection profile 1, the first one configured on the console. */
-    if (sceNetApctlConnect(1) < 0) goto fail;
-    g_net.connected = 1;
-
-    unsigned start = now_ms();
-    for (;;) {
-        int state = 0;
-        if (sceNetApctlGetState(&state) < 0) goto fail;
-        if (state == 4) return 0;                    /* got an IP */
-        if (expired(start, CONNECT_TIMEOUT_MS)) goto fail;
-        sceKernelDelayThread(50 * 1000);
-    }
-
-fail:
-    net_down();
-    return -3;
-}
-
-/* The PSP resolver rather than getaddrinfo: newlib's lookup path yields
-   "Trying 0.0.0.0" here, so it is not to be trusted. */
-static int resolve(const char *host, struct in_addr *out) {
-    static char buf[1024];
-    int rid = -1;
-    if (sceNetResolverCreate(&rid, buf, sizeof(buf)) < 0) return -1;
-    int rc = sceNetResolverStartNtoA(rid, host, out, 2 * 1000 * 1000, 5);
-    sceNetResolverDelete(rid);
-    return rc < 0 ? -2 : 0;
-}
-
-/* PSPSDK declares these as returning size_t even though they report failure as
-   a negative value, so the cast back to int is deliberate and load-bearing. */
-static int psp_recv(int fd, void *buf, int len) {
-    return (int)sceNetInetRecv(fd, buf, (size_t)len, 0);
-}
-
-static int psp_send(int fd, const void *buf, int len) {
-    return (int)sceNetInetSend(fd, buf, (size_t)len, 0);
-}
-
-/* sceNetInetSelect hangs on this stack, so waiting is a short sleep. The
-   interval is the polling granularity of every retry loop below. */
-static void wait_socket(int fd, int for_write, int ms) {
-    (void)fd; (void)for_write;
-    sceKernelDelayThread((unsigned)ms * 1000);
-}
-
-/* ------------------------------------------------------------------- tls */
-
-static int io_recv(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
-    (void)ssl;
-    if (sz <= 0) return 0;
-    int fd = *(int *)ctx;
-
-    int n = psp_recv(fd, buf, sz);
-    if (n > 0) return n;
-    if (n == 0) return WOLFSSL_CBIO_ERR_CONN_CLOSE;
-
-    int e = sceNetInetGetErrno();
-    if (e == ECONNRESET) return WOLFSSL_CBIO_ERR_CONN_RST;
-    if (e == ETIMEDOUT) return WOLFSSL_CBIO_ERR_TIMEOUT;
-    /* EINTR is documented to map to CBIO_ERR_ISR, but returning WANT_READ hands
-       control back to the caller, where a deadline governs the retry. Retrying
-       inside the callback has no bound and hangs the handshake. */
-    if (e == EAGAIN || e == EWOULDBLOCK || e == EINTR)
-        return WOLFSSL_CBIO_ERR_WANT_READ;
-    return WOLFSSL_CBIO_ERR_GENERAL;
-}
-
-static int io_send(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
-    (void)ssl;
-    if (sz <= 0) return 0;
-    int fd = *(int *)ctx;
-
-    int n = psp_send(fd, buf, sz);
-    if (n >= 0) return n;
-
-    int e = sceNetInetGetErrno();
-    if (e == EPIPE || e == ECONNRESET) return WOLFSSL_CBIO_ERR_CONN_RST;
-    if (e == EAGAIN || e == EWOULDBLOCK || e == EINTR)
-        return WOLFSSL_CBIO_ERR_WANT_WRITE;
-    return WOLFSSL_CBIO_ERR_GENERAL;
-}
-
-/* PSP newlib has no memmem. */
-static const char *mem_find(const char *hay, size_t hlen,
-                            const char *needle, size_t nlen) {
-    if (nlen == 0 || hlen < nlen) return NULL;
-    for (size_t i = 0; i + nlen <= hlen; i++) {
-        if (hay[i] == needle[0] && memcmp(hay + i, needle, nlen) == 0)
-            return hay + i;
-    }
-    return NULL;
-}
-
-/* ------------------------------------------------------------------ http */
-
-/* Just enough HTTP to know whether the response is complete. Chunked transfer
-   is rejected rather than mis-parsed; this server does not use it. */
-static int parse_response(void) {
-    static const char sep[] = "\r\n\r\n";
-    const char *head_end = mem_find(g_resp, g_resplen, sep, 4);
-    if (!head_end) {
-        logline("http: no header terminator");
-        return -1;
-    }
-
-    if (sscanf(g_resp, "HTTP/%*d.%*d %ld", &g_status) != 1) {
-        logline("http: bad status line");
-        return -2;
-    }
-
-    size_t headlen = (size_t)(head_end - g_resp) + 4;
-    g_body = g_resp + headlen;
-    g_bodylen = g_resplen - headlen;
-
-    /* Header names are case-insensitive, but this server is predictable and a
-       full parser is not what this program is for. */
-    if (mem_find(g_resp, headlen, "Transfer-Encoding: chunked", 26)) {
-        logline("http: chunked not supported");
-        return -3;
-    }
-
-    const char *cl = mem_find(g_resp, headlen, "Content-Length:", 15);
-    if (cl) {
-        long want = strtol(cl + 15, NULL, 10);
-        if (want >= 0 && (size_t)want != g_bodylen) {
-            logline("http: %lu of %ld body bytes", (unsigned long)g_bodylen, want);
-            g_truncated = 1;
-        }
-    }
-    return 0;
-}
-
 /* ------------------------------------------------------------- psprandom */
 
 /* Kept deliberately free of wolfSSL types so it can be lifted into its own
@@ -320,7 +132,7 @@ static int parse_response(void) {
 
 static unsigned char g_pool[POOL_BYTES];
 static unsigned int g_pool_counter = 0;
-static int g_pool_bits = 0;
+int g_pool_bits = 0;
 
 /* The console's own SHA-1, not wolfSSL's SHA-256: the seed callback is invoked
    from inside wolfCrypt_Init, before wolfSSL's digests are usable -- doing it
@@ -636,7 +448,7 @@ int psprandom_seed_raw(unsigned char *seed, unsigned int sz) {
         sceKernelUtilsSha1Digest(buf, sizeof(buf), out);
         g_pool_counter++;
 
-        word32 n = sz < sizeof(out) ? sz : (word32)sizeof(out);
+        unsigned n = sz < sizeof(out) ? sz : (unsigned)sizeof(out);
         memcpy(seed, out, n);
         seed += n;
         sz -= n;
@@ -647,286 +459,197 @@ int psprandom_seed_raw(unsigned char *seed, unsigned int sz) {
     return 0;
 }
 
-/* ----------------------------------------------------------------- fetch */
+static void screenshot_to_stick(const char *path);
 
-static int fetch(void) {
-    int sock = -1, rc = -1, ret = -1;
-    WOLFSSL_CTX *ctx = NULL;
-    WOLFSSL *ssl = NULL;
-    int wolf_up = 0;
-    unsigned t_connect = 0, t_handshake = 0;
+/* --------------------------------------------------------------- catalog */
 
+#define MAX_APPS 64
+
+struct app_entry {
+    char name[40];
+    char summary[COLS];
+    char category[12];
+    char license[16];
+    char manifest[256];
+};
+
+static struct app_entry g_apps[MAX_APPS];
+static int g_napps = 0;
+static int g_ntotal = 0;
+
+static void copy_str(char *dst, size_t sz, cJSON *v) {
+    if (cJSON_IsString(v)) { strncpy(dst, v->valuestring, sz - 1); dst[sz - 1] = '\0'; }
+    else dst[0] = '\0';
+}
+
+/* Only fields the client acts on are read; everything else is display, and
+   an unknown field is not an error. Returns the number of apps, -1 if the
+   body was not a catalog. */
+static int catalog_parse(const char *body, size_t len) {
+    cJSON *root = cJSON_ParseWithLength(body, len);
+    if (!root) { logline("catalog: not json"); return -1; }
+    cJSON *apps = cJSON_GetObjectItemCaseSensitive(root, "apps");
+    if (!cJSON_IsArray(apps)) { logline("catalog: no apps array"); cJSON_Delete(root); return -1; }
+
+    g_napps = 0;
+    g_ntotal = cJSON_GetArraySize(apps);
+    cJSON *app;
+    cJSON_ArrayForEach(app, apps) {
+        if (g_napps >= MAX_APPS) break;
+        struct app_entry *e = &g_apps[g_napps];
+        copy_str(e->name, sizeof(e->name), cJSON_GetObjectItemCaseSensitive(app, "name"));
+        copy_str(e->summary, sizeof(e->summary), cJSON_GetObjectItemCaseSensitive(app, "summary"));
+        copy_str(e->category, sizeof(e->category), cJSON_GetObjectItemCaseSensitive(app, "category"));
+        copy_str(e->license, sizeof(e->license), cJSON_GetObjectItemCaseSensitive(app, "license"));
+        copy_str(e->manifest, sizeof(e->manifest), cJSON_GetObjectItemCaseSensitive(app, "manifest"));
+        if (e->name[0] && e->manifest[0]) g_napps++;
+    }
+    cJSON_Delete(root);
+    logline("catalog: %d apps, %d usable", g_ntotal, g_napps);
+    return g_napps;
+}
+
+static int catalog_sink(void *ctx, const void *data, size_t len) {
+    (void)ctx;
+    if (g_resplen + len >= sizeof(g_resp)) return -1;
+    memcpy(g_resp + g_resplen, data, len);
+    g_resplen += len;
+    return 0;
+}
+
+static int catalog_fetch(void) {
     g_resplen = 0;
-
-    struct in_addr ip;
-    if (resolve(HOST, &ip) < 0) { logline("dns failed"); return -1; }
-    {
-        unsigned char *o = (unsigned char *)&ip.s_addr;
-        logline("dns %u.%u.%u.%u", o[0], o[1], o[2], o[3]);
-    }
-
-    sock = sceNetInetSocket(AF_INET, SOCK_STREAM, 0);
-    if (sock < 0) { logline("socket failed"); return -2; }
-
-    /* PSPSDK exposes no portable way to set O_NONBLOCK, and SO_NONBLOCK /
-       SO_ERROR are not defined by its headers at all -- setting them picks up
-       constants from elsewhere and quietly configures the wrong option. The
-       stack behaves as non-blocking here (recv reports EAGAIN), which is what
-       the IO callbacks are written for; the deadlines below bound the rest. */
-
-    struct sockaddr_in sa;
-    memset(&sa, 0, sizeof(sa));
-    sa.sin_family = AF_INET;
-    sa.sin_port = htons(PORT);
-    sa.sin_addr = ip;
-
-    /* This stack completes the connect synchronously; the in-progress case is
-       handled by waiting in fixed steps rather than by selecting for
-       writability, which does not behave reliably here. */
-    unsigned start = now_ms();
-    if (sceNetInetConnect(sock, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
-        int e = sceNetInetGetErrno();
-        if (e != EINPROGRESS && e != EALREADY && e != EWOULDBLOCK) {
-            logline("connect failed errno=%d", e);
-            goto out;
-        }
-        while (!expired(start, CONNECT_TIMEOUT_MS))
-            sceKernelDelayThread(50 * 1000);
-    }
-    t_connect = now_ms() - start;
-    logline("tcp connected in %u ms", t_connect);
-
-    int irc = wolfSSL_Init();
-    logline("wolfssl %s init=%d pool=%d bits",
-            wolfSSL_lib_version(), irc, g_pool_bits);
-    if (irc != WOLFSSL_SUCCESS) goto out;
-    wolf_up = 1;
-
-    ctx = wolfSSL_CTX_new(wolfTLSv1_3_client_method());
-    if (!ctx) { logline("no TLS 1.3 in this build"); goto out; }
-
-    /* No CA bundle on the stick yet. The handshake is real, the chain is not
-       checked; pinning our own issuer is the next step. */
-    wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_NONE, NULL);
-    wolfSSL_CTX_SetIORecv(ctx, io_recv);
-    wolfSSL_CTX_SetIOSend(ctx, io_send);
-
-    /* X25519 costs far less than P-256 on a 32-bit core with no crypto
-       hardware, and offering its key share up front avoids a
-       HelloRetryRequest, which would be an entire extra round trip. Neither
-       call is fatal: a library built without curve25519 still hands back a
-       working handshake on the default group. */
-    static int groups[] = { WOLFSSL_ECC_X25519, WOLFSSL_ECC_SECP256R1 };
-    if (wolfSSL_CTX_set_groups(ctx, groups, 2) != WOLFSSL_SUCCESS)
-        logline("x25519 unavailable, using default groups");
-
-    ssl = wolfSSL_new(ctx);
-    if (!ssl) { logline("wolfSSL_new failed"); goto out; }
-
-    wolfSSL_SetIOReadCtx(ssl, &sock);
-    wolfSSL_SetIOWriteCtx(ssl, &sock);
-    if (wolfSSL_UseSNI(ssl, WOLFSSL_SNI_HOST_NAME, HOST,
-                       (unsigned short)strlen(HOST)) != WOLFSSL_SUCCESS)
-        logline("SNI rejected");
-    if (wolfSSL_UseKeyShare(ssl, WOLFSSL_ECC_X25519) != WOLFSSL_SUCCESS)
-        logline("x25519 key share unavailable");
-
-    start = now_ms();
-    while ((rc = wolfSSL_connect(ssl)) != WOLFSSL_SUCCESS) {
-        int e = wolfSSL_get_error(ssl, rc);
-        if (e != WOLFSSL_ERROR_WANT_READ && e != WOLFSSL_ERROR_WANT_WRITE) {
-            char msg[80];
-            wolfSSL_ERR_error_string((unsigned long)e, msg);
-            logline("handshake failed %d", e);
-            logline("%s", msg);
-            goto out;
-        }
-        if (expired(start, HANDSHAKE_TIMEOUT_MS)) { logline("handshake timeout"); goto out; }
-        wait_socket(sock, e == WOLFSSL_ERROR_WANT_WRITE, 1);
-    }
-    t_handshake = now_ms() - start;
-    g_handshake_ms = t_handshake;
-
-    {
-        const char *group = wolfSSL_get_curve_name(ssl);
-        logline("%s  %s", wolfSSL_get_version(ssl), wolfSSL_get_cipher(ssl));
-        logline("%s, handshake %u ms", group ? group : "?", t_handshake);
-    }
-
-    char req[256];
-    int reqlen = snprintf(req, sizeof(req),
-                          "GET " PATH " HTTP/1.1\r\n"
-                          "Host: " HOST "\r\n"
-                          "User-Agent: pspdx/0.0\r\n"
-                          "Connection: close\r\n\r\n");
-    if (reqlen <= 0 || reqlen >= (int)sizeof(req)) { logline("request too long"); goto out; }
-
-    start = now_ms();
-    for (int sent = 0; sent < reqlen; ) {
-        rc = wolfSSL_write(ssl, req + sent, reqlen - sent);
-        if (rc > 0) { sent += rc; continue; }
-        int e = wolfSSL_get_error(ssl, rc);
-        if (e != WOLFSSL_ERROR_WANT_READ && e != WOLFSSL_ERROR_WANT_WRITE) {
-            logline("write failed %d", e);
-            goto out;
-        }
-        if (expired(start, TRANSFER_TIMEOUT_MS)) { logline("write timeout"); goto out; }
-        wait_socket(sock, e == WOLFSSL_ERROR_WANT_WRITE, 1);
-    }
-
-    start = now_ms();
-    for (;;) {
-        if (g_resplen >= sizeof(g_resp) - 1) { g_truncated = 1; break; }
-
-        rc = wolfSSL_read(ssl, g_resp + g_resplen,
-                          (int)(sizeof(g_resp) - 1 - g_resplen));
-        if (rc > 0) { g_resplen += (size_t)rc; continue; }
-
-        int e = wolfSSL_get_error(ssl, rc);
-        if (e == WOLFSSL_ERROR_NONE || e == WOLFSSL_ERROR_ZERO_RETURN)
-            break;                                   /* clean close_notify */
-        if (e != WOLFSSL_ERROR_WANT_READ && e != WOLFSSL_ERROR_WANT_WRITE) {
-            /* A reset after the body has arrived is common enough to tolerate,
-               but it must not be reported as a clean read. */
-            logline("read error %d after %lu bytes", e, (unsigned long)g_resplen);
-            g_truncated = 1;
-            break;
-        }
-        if (expired(start, TRANSFER_TIMEOUT_MS)) { logline("read timeout"); g_truncated = 1; break; }
-        wait_socket(sock, 0, 1);
+    int rc = https_get(CATALOG_URL, catalog_sink, NULL, NULL, NULL, &g_fetch);
+    if (rc != 0 || g_fetch.status != 200) {
+        logline("catalog: rc=%d status=%ld", rc, g_fetch.status);
+        return -1;
     }
     g_resp[g_resplen] = '\0';
-    logline("read %lu bytes in %u ms", (unsigned long)g_resplen, now_ms() - start);
-
-    if (parse_response() == 0) {
-        logline("HTTP %ld, body %lu bytes%s", g_status, (unsigned long)g_bodylen,
-                g_truncated ? " (truncated)" : "");
-        ret = g_truncated ? 1 : 0;
-    }
-
-out:
-    if (ssl) {
-        if (ret >= 0) wolfSSL_shutdown(ssl);
-        wolfSSL_free(ssl);
-    }
-    if (ctx) wolfSSL_CTX_free(ctx);
-    if (wolf_up) wolfSSL_Cleanup();
-    if (sock >= 0) sceNetInetClose(sock);
-    return ret;
+    return catalog_parse(g_resp, g_resplen);
 }
 
 /* ---------------------------------------------------------------- screen */
 
-static int draw_wrapped(const char *text, size_t len, int row, int maxrows) {
-    size_t i = 0;
-    while (row < maxrows && i < len) {
-        char line[COLS + 1];
-        int c = 0;
-        while (c < COLS && i < len && text[i] != '\n') {
-            char ch = text[i++];
-            if (ch == '\r') continue;
-            line[c++] = (ch >= 32 && ch < 127) ? ch : '.';
-        }
-        line[c] = '\0';
-        if (i < len && text[i] == '\n') i++;         /* consume the newline */
-        pspDebugScreenSetXY(0, row++);
-        pspDebugScreenPrintf("%s", line);
-    }
-    return row;
+#define LIST_ROW 3
+#define STATUS_ROW (ANIM_ROW - 2)
+
+static void draw_header(const char *right) {
+    pspDebugScreenSetXY(0, 0);
+    pspDebugScreenSetTextColor(COL_TEXT);
+    pspDebugScreenPrintf("PSPDX  ");
+    pspDebugScreenSetTextColor(COL_DIM);
+    pspDebugScreenPrintf("%-53.53s", right ? right : "");
+    pspDebugScreenSetTextColor(COL_TEXT);
 }
 
-static void animate_forever(void) {
-    static const char spin[] = "|/-\\";
-    int frame = 0;
-    int hinted = 0;
-
-    for (;;) {
-        /* Once the connection stands, the entropy can be thrown away and
-           gathered again -- useful after moving the stick to another console,
-           or simply to see the field once more. */
-        SceCtrlData pad;
-        sceCtrlPeekBufferPositive(&pad, 1);
-        if (pad.Buttons & PSP_CTRL_SELECT) {
-            psprandom_forget();
-            pspDebugScreenClear();
-            pspDebugScreenSetXY(0, 0);
-            pspDebugScreenPrintf("PSPDX  entropy discarded\n");
-            psprandom_sweep();
-            psprandom_save();
-            pspDebugScreenClear();
-            pspDebugScreenSetTextColor(COL_TEXT);
-            pspDebugScreenSetXY(0, 0);
-            pspDebugScreenPrintf("PSPDX  entropy regenerated. %d bits.\n", g_pool_bits);
-            memset(shadow_ch, 0, sizeof(shadow_ch));
-            hinted = 0;
-        }
-        if (!hinted) {
-            pspDebugScreenSetTextColor(COL_DIM);
-            pspDebugScreenSetXY(0, ANIM_ROW - 2);
-            pspDebugScreenPrintf("SELECT: discard entropy and sweep again");
-            pspDebugScreenSetTextColor(COL_TEXT);
-            hinted = 1;
-        }
-        int pos = frame % 40;
-        if ((frame / 40) % 2) pos = 39 - pos;
-
-        pspDebugScreenSetXY(0, ANIM_ROW);
-        pspDebugScreenPrintf("%c ", spin[frame % 4]);
-        for (int x = 0; x < 40; x++) pspDebugScreenPrintf("%c", x == pos ? '#' : '-');
-
-        frame++;
-        sceDisplayWaitVblankStart();
-        sceDisplayWaitVblankStart();
-        sceDisplayWaitVblankStart();
-    }
-}
-
-
-
-/* --------------------------------------------------------------- catalog */
-
-/* Draws what the catalog says exists. Returns the number of apps listed, or
-   -1 if the body was not a catalog. Only fields the client acts on are read;
-   everything else is display, and an unknown field is not an error. */
-static int draw_catalog(const char *body, size_t len, int row, int maxrows) {
-    cJSON *root = cJSON_ParseWithLength(body, len);
-    if (!root) {
-        logline("catalog: not json");
-        return -1;
-    }
-    cJSON *apps = cJSON_GetObjectItemCaseSensitive(root, "apps");
-    if (!cJSON_IsArray(apps)) {
-        logline("catalog: no apps array");
-        cJSON_Delete(root);
-        return -1;
-    }
-
-    int n = cJSON_GetArraySize(apps), shown = 0;
-    cJSON *app;
-    cJSON_ArrayForEach(app, apps) {
-        if (row + 1 >= maxrows) break;
-        cJSON *name = cJSON_GetObjectItemCaseSensitive(app, "name");
-        cJSON *summary = cJSON_GetObjectItemCaseSensitive(app, "summary");
-        cJSON *cat = cJSON_GetObjectItemCaseSensitive(app, "category");
-        cJSON *lic = cJSON_GetObjectItemCaseSensitive(app, "license");
-        if (!cJSON_IsString(name)) continue;
-
-        pspDebugScreenSetXY(0, row++);
-        pspDebugScreenSetTextColor(COL_TEXT);
-        pspDebugScreenPrintf("  %-38.38s %-10.10s %-8.8s",
-                             name->valuestring,
-                             cJSON_IsString(cat) ? cat->valuestring : "",
-                             cJSON_IsString(lic) ? lic->valuestring : "");
-        pspDebugScreenSetXY(0, row++);
+static void draw_list(int cursor) {
+    for (int i = 0; i < g_napps && LIST_ROW + 2 * i + 1 < STATUS_ROW - 1; i++) {
+        struct app_entry *e = &g_apps[i];
+        int sel = (i == cursor);
+        pspDebugScreenSetXY(0, LIST_ROW + 2 * i);
+        pspDebugScreenSetTextColor(sel ? COL_CURSOR : COL_TEXT);
+        pspDebugScreenPrintf("%c %-38.38s %-10.10s %-8.8s", sel ? '>' : ' ',
+                             e->name, e->category, e->license);
+        pspDebugScreenSetXY(0, LIST_ROW + 2 * i + 1);
         pspDebugScreenSetTextColor(COL_DIM);
-        pspDebugScreenPrintf("    %-56.56s",
-                             cJSON_IsString(summary) ? summary->valuestring : "");
-        shown++;
+        pspDebugScreenPrintf("    %-56.56s", e->summary);
     }
     pspDebugScreenSetTextColor(COL_TEXT);
-    logline("catalog: %d apps, %d shown", n, shown);
-    cJSON_Delete(root);
-    return n;
+}
+
+static void draw_status(const char *text) {
+    pspDebugScreenSetXY(0, STATUS_ROW);
+    pspDebugScreenSetTextColor(COL_DIM);
+    pspDebugScreenPrintf("%-60.60s", text);
+    pspDebugScreenSetTextColor(COL_TEXT);
+}
+
+static void draw_bar(int row, size_t done, size_t total, const char *label) {
+    pspDebugScreenSetXY(0, row);
+    pspDebugScreenSetTextColor(COL_TEXT);
+    pspDebugScreenPrintf("%-10.10s [", label);
+    int filled = total ? (int)((unsigned long long)done * 40 / total) : 0;
+    for (int x = 0; x < 40; x++) pspDebugScreenPrintf("%c", x < filled ? '#' : '-');
+    if (total) pspDebugScreenPrintf("] %3d%%", (int)((unsigned long long)done * 100 / total));
+    else       pspDebugScreenPrintf("] %5luK", (unsigned long)(done / 1024));
+}
+
+/* --------------------------------------------------------------- install */
+
+struct ui_ctx {
+    char phase[16];
+    unsigned last_draw;
+    int row;
+};
+
+static void ui_phase(void *ctx, const char *phase) {
+    struct ui_ctx *u = ctx;
+    strncpy(u->phase, phase, sizeof(u->phase) - 1);
+    u->last_draw = 0;
+    draw_bar(u->row, 0, 0, u->phase);
+}
+
+static void ui_progress(void *ctx, size_t done, size_t total) {
+    struct ui_ctx *u = ctx;
+    /* Redrawing costs more than the bytes it reports; a few times a second. */
+    unsigned t = now_ms();
+    if (done != total && t - u->last_draw < 250) return;
+    u->last_draw = t;
+    draw_bar(u->row, done, total, u->phase);
+}
+
+static int install_app(int idx, int shot) {
+    struct app_entry *e = &g_apps[idx];
+    struct install_report rep;
+    struct ui_ctx u;
+    memset(&u, 0, sizeof(u));
+    u.row = STATUS_ROW - 3;
+
+    pspDebugScreenSetXY(0, u.row - 1);
+    pspDebugScreenSetTextColor(COL_TEXT);
+    pspDebugScreenPrintf("Installing %s", e->name);
+    draw_status("");
+
+    unsigned start = now_ms();
+    int rc = install(e->manifest, &rep, ui_phase, ui_progress, &u);
+    unsigned secs = (now_ms() - start) / 1000;
+
+    char line[COLS + 1];
+    if (rc == 0) {
+        snprintf(line, sizeof(line), "Installed %s %s: %d files, %luK, %us",
+                 e->name, rep.version, rep.files, (unsigned long)(rep.bytes / 1024), secs);
+    } else {
+        snprintf(line, sizeof(line), "Install failed (%d): %s", rc, g_log[g_logn ? g_logn - 1 : 0]);
+    }
+    pspDebugScreenSetXY(0, u.row);
+    pspDebugScreenPrintf("%-60.60s", "");
+    draw_status(line);
+    if (shot) screenshot_to_stick("ms0:/PSPDX2.BMP");
+    return rc;
+}
+
+/* Development trigger: a file on the stick naming an app id installs it
+   without anyone pressing X. Under replay that makes a whole install run
+   reproducible from the host. */
+static int auto_install_index(void) {
+    char id[96];
+    int fd = sceIoOpen("ms0:/PSPDX.INSTALL", PSP_O_RDONLY, 0777);
+    if (fd < 0) return -1;
+    int n = sceIoRead(fd, id, sizeof(id) - 1);
+    sceIoClose(fd);
+    if (n <= 0) return -1;
+    id[n] = '\0';
+    char *nl = strpbrk(id, "\r\n");
+    if (nl) *nl = '\0';
+    for (int i = 0; i < g_napps; i++) {
+        /* The catalog entry carries no id in RAM; match on the manifest URL's
+           tail instead is fragile, so the trigger names the manifest URL. */
+        if (strcmp(g_apps[i].manifest, id) == 0) return i;
+    }
+    for (int i = 0; i < g_napps; i++)
+        if (strstr(g_apps[i].manifest, id)) return i;
+    logline("PSPDX.INSTALL: no app matches %s", id);
+    return -1;
 }
 
 /* ------------------------------------------------------------- screenshot */
@@ -976,7 +699,7 @@ int main(void) {
         pspDebugScreenPrintf("exit callback failed; HOME will not work\n");
     }
     pspDebugScreenInit();
-    pspDebugScreenPrintf("PSPDX  https://" HOST PATH "\nconnecting...\n");
+    draw_header("gathering entropy");
 
     /* Before anything touches the network: fill the entropy pool, then hand
        wolfSSL the source. Without this every key it derives is guessable. */
@@ -989,45 +712,69 @@ int main(void) {
     }
     psprandom_save();
     pspDebugScreenClear();
+    draw_header("connecting");
 
-    int rc;
+    int n = -1;
     if (net_up() < 0) {
         logline("network failed");
-        rc = -1;
     } else {
         logline("net up");
-        rc = fetch();
-        net_down();
+        n = catalog_fetch();
     }
-    dump_to_stick();
 
     pspDebugScreenClear();
-    pspDebugScreenSetXY(0, 0);
-    pspDebugScreenPrintf("PSPDX  https://" HOST PATH "\n");
-
-    if (rc == 0 && g_body && g_status == 200) {
-        pspDebugScreenSetTextColor(COL_DIM);
-        pspDebugScreenPrintf("%lu bytes, %u ms handshake\n",
-                             (unsigned long)g_bodylen, g_handshake_ms);
-        pspDebugScreenSetTextColor(COL_TEXT);
-        if (draw_catalog(g_body, g_bodylen, 3, ANIM_ROW - 1) < 0)
-            draw_wrapped(g_body, g_bodylen, 4, ANIM_ROW - 1);
-    } else if (rc >= 0 && g_body) {
-        pspDebugScreenPrintf("HTTP %ld  %s  %lu bytes\n", g_status,
-                             g_truncated ? "truncated" : "complete",
-                             (unsigned long)g_bodylen);
-        draw_wrapped(g_body, g_bodylen, 4, ANIM_ROW - 1);
+    if (n >= 0) {
+        char hdr[64];
+        snprintf(hdr, sizeof(hdr), "%d apps  %lu bytes  %u ms handshake",
+                 g_ntotal, (unsigned long)g_resplen, g_fetch.handshake_ms);
+        draw_header(hdr);
+        draw_list(0);
+        draw_status("X: install   SELECT: discard entropy and sweep again");
     } else {
-        draw_wrapped(g_log[0], 0, 2, 2);
-        for (int i = 0; i < g_logn && i + 2 < ANIM_ROW - 1; i++) {
+        draw_header("failed");
+        for (int i = 0; i < g_logn && i + 2 < STATUS_ROW; i++) {
             pspDebugScreenSetXY(0, 2 + i);
             pspDebugScreenPrintf("%s", g_log[i]);
         }
     }
-
     sceDisplayWaitVblankStart();
     screenshot_to_stick("ms0:/PSPDX.BMP");
+    dump_to_stick();
 
-    animate_forever();
+    int cursor = 0;
+    int autoidx = n > 0 ? auto_install_index() : -1;
+    if (autoidx >= 0) {
+        cursor = autoidx;
+        draw_list(cursor);
+        install_app(cursor, 1);
+        dump_to_stick();
+    }
+
+    unsigned last_buttons = 0;
+    for (;;) {
+        SceCtrlData pad;
+        sceCtrlReadBufferPositive(&pad, 1);
+        unsigned pressed = pad.Buttons & ~last_buttons;
+        last_buttons = pad.Buttons;
+
+        if (n > 0 && (pressed & PSP_CTRL_DOWN) && cursor + 1 < g_napps) draw_list(++cursor);
+        if (n > 0 && (pressed & PSP_CTRL_UP) && cursor > 0) draw_list(--cursor);
+        if (n > 0 && (pressed & PSP_CTRL_CROSS)) {
+            install_app(cursor, 0);
+            dump_to_stick();
+        }
+        if (pressed & PSP_CTRL_SELECT) {
+            psprandom_forget();
+            pspDebugScreenClear();
+            draw_header("entropy discarded");
+            psprandom_sweep();
+            psprandom_save();
+            pspDebugScreenClear();
+            draw_header("entropy regenerated");
+            if (n >= 0) draw_list(cursor);
+            memset(shadow_ch, 0, sizeof(shadow_ch));
+        }
+        sceDisplayWaitVblankStart();
+    }
     return 0;
 }

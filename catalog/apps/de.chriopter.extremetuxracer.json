@@ -5,5 +5,5 @@
   "category": "games",
   "license": "GPL-2.0",
   "homepage": "https://github.com/chriopter/psp-tuxracer",
-  "manifest": "https://cdn.jsdelivr.net/gh/chriopter/psp-tuxracer@master/etr.pspdx"
+  "manifest": "https://cdn.jsdelivr.net/gh/chriopter/psp-tuxracer@main/etr.pspdx"
 }
