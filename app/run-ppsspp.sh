@@ -14,6 +14,15 @@ SECS="${1:-45}"
 mkdir -p "$MS/PSP/GAME/pspdx"
 cp "$HERE/EBOOT.PBP" "$MS/PSP/GAME/pspdx/"
 cp "$HERE/testdata/sweep.trace" "$MS/PSPDX.TRACE"
+
+# PPSSPP ships the PSP system fonts but does not mount flash0 for the guest,
+# so put one where the client's fallback looks. Test rig only: on hardware the
+# font comes out of the PSP's own firmware and nothing is copied.
+FONTS="$(flatpak info --show-location org.ppsspp.PPSSPP 2>/dev/null)/files/share/ppsspp/assets/flash0/font"
+if [ -f "$FONTS/ltn8.pgf" ]; then
+	mkdir -p "$MS/PSP/PSPDX/font"
+	cp "$FONTS/ltn8.pgf" "$MS/PSP/PSPDX/font/ltn8.pgf"
+fi
 touch "$MS/PSPDX.REPLAY"
 rm -f "$MS/PSPDX.LOG" "$MS/PSPDX.BMP"
 

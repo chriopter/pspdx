@@ -6,12 +6,9 @@ The client fetches [the catalog](https://chriopter.github.io/pspdx/catalog.json)
 installs a package and checks for updates. It runs under PPSSPP; nobody has put
 it on real hardware yet.
 
-That one URL is compiled into the EBOOT, and everything behind it is a static
-file. A PSP pays for the TLS handshake, not for the bytes, so the index arrives
-in that single request -- about 200 bytes per app, a thousand apps in one fetch
--- and each app's manifest is then found by convention in its author's own
-repository. There is no server to run and no account to hold, so a build keeps
-working as long as the files are served.
+That URL is compiled into the EBOOT; everything behind it is static, so nothing
+has to keep running. A PSP pays per handshake, not per byte -- the whole index
+is one request.
 
 ## What it does
 
