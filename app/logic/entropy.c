@@ -10,6 +10,7 @@
 static unsigned char pool[POOL_BYTES];
 static unsigned int pool_counter;
 static int pool_bits;
+static unsigned char field_seen[(ENTROPY_FIELD_COUNT + 7) / 8];
 
 static void pool_absorb(const void *data, unsigned int len) {
     unsigned char buf[POOL_BYTES + 64];
@@ -35,21 +36,28 @@ void entropy_init(void) {
     pool_absorb(&sp, sizeof(sp));
     pool_absorb_jitter(8);
     pool_bits = 0;
+    memset(field_seen, 0, sizeof(field_seen));
 }
 
-void entropy_absorb_motion(unsigned char lx, unsigned char ly, float x, float y) {
+int entropy_absorb_field(unsigned int field) {
+    if (field >= ENTROPY_FIELD_COUNT) return 0;
+    unsigned int byte = field >> 3;
+    unsigned char bit = (unsigned char)(1u << (field & 7));
+    if (field_seen[byte] & bit) return 0;
+    field_seen[byte] |= bit;
+
+    /* The field number is what the bar is counting. The timestamp rides along
+       because the moment the point is reached is unpredictable too, and the
+       pool is happy to take it; it is not counted, so the tally stays honest. */
     struct {
-        unsigned char lx, ly;
+        unsigned int field;
         unsigned int sys;
-        float x, y;
     } sample;
-    sample.lx = lx;
-    sample.ly = ly;
+    sample.field = field;
     sample.sys = sceKernelGetSystemTimeLow();
-    sample.x = x;
-    sample.y = y;
     pool_absorb(&sample, sizeof(sample));
-    pool_bits += 2;
+    pool_bits += ENTROPY_BITS_PER_FIELD;
+    return 1;
 }
 
 int entropy_bits(void) { return pool_bits; }
@@ -86,6 +94,7 @@ void entropy_forget(void) {
     sceIoRemove(SEED_FILE);
     pool_bits = 0;
     memset(pool, 0, sizeof(pool));
+    memset(field_seen, 0, sizeof(field_seen));
 }
 
 int psprandom_seed_raw(unsigned char *seed, unsigned int size) {

@@ -15,6 +15,7 @@
 #define GRID_X 0
 #define GRID_Y 2
 #define SETTLE 14
+#define BAR_W 36
 
 #define TRACE_MAX 5000
 #define TRACE_FILE  "ms0:/PSPDX.TRACE"
@@ -208,9 +209,7 @@ int entropy_screen_run(void) {
 
     float cx = GRID_W / 2.0f;
     float cy = GRID_H / 2.0f;
-    int covered = 0;
     int frame = 0;
-    const int total = GRID_W * GRID_H;
 
     pspDebugScreenSetTextColor(replaying ? 0xFF4040FF : COL_TEXT);
     pspDebugScreenSetXY(0, 0);
@@ -233,7 +232,9 @@ int entropy_screen_run(void) {
             if (cy < 0) cy = 0;
             if (cx > GRID_W - 1) cx = GRID_W - 1;
             if (cy > GRID_H - 1) cy = GRID_H - 1;
-            entropy_absorb_motion(pad.Lx, pad.Ly, cx, cy);
+            int fx = (int)(cx * (ENTROPY_FIELD_SIDE - 1) / (GRID_W - 1) + 0.5f);
+            int fy = (int)(cy * (ENTROPY_FIELD_SIDE - 1) / (GRID_H - 1) + 0.5f);
+            entropy_absorb_field((unsigned)fy * ENTROPY_FIELD_SIDE + (unsigned)fx);
         }
 
         int ccx = (int)(cx + 0.5f);
@@ -246,7 +247,6 @@ int entropy_screen_run(void) {
                 int px = x - ccx;
                 int py = y - ccy;
                 if (moving && px * px + py * py * 3 <= 9) {
-                    if (!cell_done[y][x] && cell_phase[y][x] == 0) covered++;
                     cell_phase[y][x] = SETTLE;
                     cell_done[y][x] = 1;
                 }
@@ -289,16 +289,18 @@ int entropy_screen_run(void) {
         draw_cell(ccx, ccy, SPIN_GLYPHS[(frame / 2) % 4], COL_CURSOR);
         shadow_ch[ccy][ccx] = 0;
 
-        int percent = covered * 10000 / (total * 95);
-        if (percent > 100) percent = 100;
-        int ready = percent >= 100 && entropy_bits() >= ENTROPY_BITS;
+        int bits = entropy_bits();
+        int ready = bits >= ENTROPY_BITS;
+        int percent = ready ? 100 : bits * 100 / ENTROPY_BITS;
         pspDebugScreenSetTextColor(ready ? COL_DONE : COL_TEXT);
         pspDebugScreenSetXY(0, 33);
         pspDebugScreenPrintf(" [");
-        int filled = percent * 44 / 100;
-        for (int i = 0; i < 44; i++) pspDebugScreenPrintf("%c", i < filled ? '=' : ' ');
-        if (ready) pspDebugScreenPrintf("] %3d%%  X to continue", percent);
-        else pspDebugScreenPrintf("] %3d%%  %4d bits ", percent, entropy_bits());
+        int filled = percent * BAR_W / 100;
+        for (int i = 0; i < BAR_W; i++) pspDebugScreenPrintf("%c", i < filled ? '=' : ' ');
+        /* Past the mark the bar stays full and the count keeps climbing, so
+           sweeping on costs nothing and still shows something. */
+        if (ready) pspDebugScreenPrintf("] %4d bits  X to continue", bits);
+        else pspDebugScreenPrintf("] %3d%%  %4d bits   ", percent, bits);
         if (ready && (pad.Buttons & PSP_CTRL_CROSS)) break;
         frame++;
         sceDisplayWaitVblankStart();
