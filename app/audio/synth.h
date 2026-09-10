@@ -11,7 +11,9 @@
    Only the audio thread may call into here. Other threads post through
    cues.h. */
 
-#define SYNTH_VOICES 12
+/* Pads ring for many seconds and a chord brings five; a dozen voices was
+   a pool that every new note had to steal from. */
+#define SYNTH_VOICES 32
 
 enum synth_timbre { SYNTH_PIANO, SYNTH_GLASS, SYNTH_PAD };
 

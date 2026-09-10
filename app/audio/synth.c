@@ -27,7 +27,7 @@ struct timbre {
 static const struct timbre TIMBRES[] = {
     [SYNTH_PIANO] = { { 1, 2, 3, 4 }, { 1.00f, 0.42f, 0.18f, 0.08f }, { 1, 2, 2, 3 }, 0.0f,  2.4f, 1 },
     [SYNTH_GLASS] = { { 1, 2, 3, 5 }, { 1.00f, 0.22f, 0.10f, 0.04f }, { 1, 1, 1, 1 }, 0.04f, 2.6f, 0 },
-    [SYNTH_PAD]   = { { 1, 2, 3, 4 }, { 1.00f, 0.35f, 0.12f, 0.05f }, { 1, 1, 2, 2 }, 0.9f,  7.0f, 0 },
+    [SYNTH_PAD]   = { { 1, 2, 3, 4 }, { 1.00f, 0.35f, 0.12f, 0.05f }, { 1, 1, 2, 2 }, 0.9f,  5.5f, 0 },
 };
 
 struct voice {
@@ -121,7 +121,7 @@ static void voice_block(struct voice *v) {
         if (v->env >= v->peak) { v->env = v->peak; v->attack = 0.0f; }
     } else {
         v->env *= v->decay;
-        if (v->env < 0.0008f) { v->active = 0; return; }
+        if (v->env < 0.003f) { v->active = 0; return; }
     }
     float e = v->env, e2 = e * e, e3 = e2 * e;
     for (int p = 0; p < PARTIALS; p++) {
