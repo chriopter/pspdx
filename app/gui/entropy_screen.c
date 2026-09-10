@@ -16,7 +16,9 @@
 #include "gui/gfx.h"
 #include "gui/lattice.h"
 #include "gui/palette.h"
+#include "gui/title.h"
 #include "logic/entropy.h"
+#include "util/runtime.h"
 
 /* The stick moves the source across the field at the speed it moved the old
    text cursor across its 60 by 28 cells, so a sweep takes as long as it
@@ -115,21 +117,6 @@ static void record_frame(int frame) {
     gfx_screenshot(path);
 }
 
-/* The name, glossy rather than stamped: a soft light behind it, the face
-   printed a few times at a low alpha so its edge bleeds, then the face
-   itself on top. */
-static void title(const char *text, float cx, float y, float t) {
-    static const float ox[4] = { -1.0f, 1.0f, 0.0f, 0.0f };
-    static const float oy[4] = { 0.0f, 0.0f, -1.0f, 1.0f };
-    float w = font_width(FONT_H1, text);
-    float x = cx - w / 2;
-    float pulse = 0.85f + 0.15f * sinf(t * 1.1f);
-    gfx_glow(cx, y - 7, w + 90, 54, rgb_pack(TINT, (int)(90 * pulse)));
-    unsigned halo = rgb_pack(rgb_mix(TINT, RGB_WHITE, 0.5f), 60);
-    for (int i = 0; i < 4; i++) font_print(FONT_H1, x + ox[i], y + oy[i], halo, text);
-    font_print(FONT_H1, x, y, rgb_pack(rgb_mix(RGB_WHITE, TINT, 0.12f), 255), text);
-}
-
 /* What the user has to know, over the water: what this is for, how far it
    has got, and when it can stop. */
 static void draw_chrome(float t, int percent, int ready) {
@@ -137,7 +124,9 @@ static void draw_chrome(float t, int percent, int ready) {
     unsigned accent = rgb_pack(rgb_mix(TINT, RGB_WHITE, 0.45f), 255);
     unsigned dim = rgb_pack(rgb_mix(TINT, RGB_WHITE, 0.35f), 200);
 
-    title("PSPDX", SCR_W / 2.0f, 58.0f, t);
+    /* The name as the browser sets its words: baked once, on a card in
+       perspective, with the light going through it. */
+    title_draw(SCR_W / 2.0f, 52.0f, t, TINT);
 
     const char *head = replaying
         ? "REPLAY -- recorded input, the entropy here is NOT real"
@@ -163,9 +152,15 @@ int entropy_screen_run(void) {
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
 
     int frame = 0;
+    unsigned worst_us = 0, frame_us = now_us();
     for (;;) {
         SceCtrlData pad;
         if (!next_sample(&pad)) break;
+        {
+            unsigned now = now_us(), took = now - frame_us;
+            frame_us = now;
+            if (frame && took > worst_us) worst_us = took;
+        }
         int dx = (int)pad.Lx - 128;
         int dy = (int)pad.Ly - 128;
         int moving = dx * dx + dy * dy > 14 * 14;
@@ -194,6 +189,7 @@ int entropy_screen_run(void) {
         int percent = ready ? 100 : bits * 100 / ENTROPY_BITS;
 
         float t = gfx_frames() * (1.0f / 60.0f);
+        title_prepare("PSPDX", TINT);
         gfx_frame_begin(0xFF000000);
         gfx_vgrad(0, 0, SCR_W, SCR_H,
                   rgb_pack(rgb_mix(NIGHT_TOP, TINT, 0.05f), 255),
@@ -209,5 +205,6 @@ int entropy_screen_run(void) {
 
     lattice_settle();
     trace_save();
+    logline("sweep: %d frames, worst %u ms", frame, worst_us / 1000);
     return entropy_bits();
 }

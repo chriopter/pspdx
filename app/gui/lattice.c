@@ -366,7 +366,8 @@ static void project_all(float t, float swayx, float lightx) {
             /* A crest stands in the light and a trough hides from it, and a
                face leaning back toward the horizon catches more than a flat
                one. Dry ground keeps only the little it is drawn with. */
-            float raw = 0.05f + w * (0.16f + 0.52f * h - 0.60f * dhz);
+            float raw = 0.05f + w * (0.16f + 0.52f * h - 0.60f * dhz)
+                      + (1.0f - w) * 0.55f;      /* dry ground: the grid, lit */
             if (raw < 0.0f) raw = 0.0f;
             g_lit[i][j] = g_row[i].near2 * raw;
             float a = dhx - lx, b = dhz - lz;

@@ -294,8 +294,9 @@ int main(void) {
             char phases[120];
             shell_profile(phases, sizeof(phases));
             logline("%s", phases);
-            logline("outside draw: tick %u us, audio callback %u us", g_worst_tick,
-                    audio_worst_us());
+            logline("outside draw: tick %u us, audio callback %u us, free %u KB",
+                    g_worst_tick, audio_worst_us(),
+                    (unsigned)sceKernelTotalFreeMemSize() / 1024);
             g_worst_tick = 0;
             frames = worst = late = total = 0;
             bucket[0] = bucket[1] = bucket[2] = bucket[3] = 0;
