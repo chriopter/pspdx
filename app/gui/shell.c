@@ -83,6 +83,9 @@ static struct rgb draw_lot(void) {
     float step = 0.33f + 0.34f * ((g_lot >> 8) & 0xFFFF) / 65536.0f;
     g_hue += step;
     g_hue -= (float)(int)g_hue;
+    /* Not the yellows: water lit yellow is mud. The band from orange-yellow
+       to yellow-green is stepped over. */
+    if (g_hue > 0.10f && g_hue < 0.22f) g_hue += 0.12f;
     /* Softened a little: pure spectral colours read as a warning light. */
     return rgb_mix(hue_rgb(g_hue), RGB_WHITE, 0.18f);
 }
