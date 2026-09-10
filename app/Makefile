@@ -1,6 +1,6 @@
 TARGET = pspdx
 OBJS = main.o gui/screen.o gui/entropy_screen.o gui/gfx.o gui/font.o \
-       gui/image.o gui/shell.o logic/entropy.o network/https.o \
+       gui/image.o gui/lattice.o gui/shell.o logic/entropy.o network/https.o \
        update/catalog.o update/shots.o install/install.o \
        install/zipread.o util/runtime.o
 

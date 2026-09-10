@@ -68,3 +68,10 @@ file is elsewhere.
 Copy: [`app.pspdx.template`](app.pspdx.template)
 
 </details>
+
+---
+
+<sup>The update path is exercised against
+[psp-dx-testapp](https://github.com/chriopter/psp-dx-testapp), a hello world
+whose only job is to get a new version now and then. It is not in the catalog;
+put its manifest URL in `PSPDX.INSTALL` on the stick to install it.</sup>
