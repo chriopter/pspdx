@@ -8,7 +8,7 @@ the catalog and its generator in [`catalog/`](../catalog/).
 |---|---|
 | [constraints.md](constraints.md) | What the PSP can actually do. Everything else follows from this. |
 | [architecture.md](architecture.md) | Two layers: per-package manifests for updates, a catalog for discovery. |
-| [manifest.md](manifest.md) | The `.pspdx` file and the catalog entry, as built. |
+| [manifest.md](../manifest.md) | The `app.pspdx` file and the catalog entry, as built. |
 | [updates.md](updates.md) | How a new version becomes visible, and how fast. |
 | [installing.md](installing.md) | What lands on the Memory Stick, and what must never be touched. |
 | [open-questions.md](open-questions.md) | Signing, and why not yet. Mirroring, GPL, multiple registries. |

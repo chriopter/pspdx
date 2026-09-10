@@ -14,7 +14,7 @@ Gives you a catalog (living in this repo) of sick & current Brews for the PSP in
 ## The two files
 
 An app is a catalog entry here and a manifest in its author's repository.
-[docs/manifest.md](docs/manifest.md) is the long version.
+[manifest.md](manifest.md) is the long version.
 
 <details>
 <summary><b>Catalog entry</b> — what exists. Here, in <code>catalog/apps/&lt;id&gt;/app.json</code>.</summary>
@@ -31,7 +31,7 @@ An app is a catalog entry here and a manifest in its author's repository.
 Never a version, which is why a stale catalog costs nothing. An `icon.png` or
 `screenshot.png` in the same directory is picked up by name.
 
-Template: [`docs/templates/app.json`](docs/templates/app.json)
+Template: [`app.json.template`](app.json.template)
 
 </details>
 
@@ -51,6 +51,6 @@ Template: [`docs/templates/app.json`](docs/templates/app.json)
 Found at `app.pspdx` on the repository's default branch, so a catalog entry
 names a manifest only when the file is elsewhere.
 
-Template: [`docs/templates/app.pspdx`](docs/templates/app.pspdx)
+Template: [`app.pspdx.template`](app.pspdx.template)
 
 </details>

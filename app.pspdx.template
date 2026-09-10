@@ -1,5 +1,5 @@
 {
-  "schema": "https://github.com/chriopter/pspdx/blob/master/docs/manifest.md",
+  "schema": "https://github.com/chriopter/pspdx/blob/master/manifest.md",
   "id": "io.github.<user>.<app>",
   "rev": 1789044630,
   "url": "https://github.com/<user>/<repo>/releases/download/<tag>/<file>.zip",

@@ -1,6 +1,6 @@
 # The two formats
 
-Both files name the format they are in: `schema` is `https://github.com/chriopter/pspdx/blob/master/docs/manifest.md`,
+Both files name the format they are in: `schema` is `https://github.com/chriopter/pspdx/blob/master/manifest.md`,
 this file. An integer said as much to us and nothing at all to whoever finds
 one of these on a Memory Stick in ten years. It points at github.com rather
 than the Pages site because GitHub redirects a renamed repository and Pages
@@ -17,7 +17,7 @@ release workflow rewrites it, nothing else touches it.
 
 ```json
 {
-  "schema": "https://github.com/chriopter/pspdx/blob/master/docs/manifest.md",
+  "schema": "https://github.com/chriopter/pspdx/blob/master/manifest.md",
   "id":     "io.github.chriopter.extremetuxracer",
   "rev":    1789034687,
   "url":    "https://github.com/…/extremetuxracer-psp.zip",

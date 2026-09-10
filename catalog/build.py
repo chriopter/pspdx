@@ -26,7 +26,7 @@ MANIFEST = "https://raw.githubusercontent.com/{owner}/{repo}/HEAD/app.pspdx"
 
 # The format names itself: a file found on a stick years from now says where
 # it came from and which version of the format it is.
-SCHEMA = "https://github.com/chriopter/pspdx/blob/master/docs/manifest.md"
+SCHEMA = "https://github.com/chriopter/pspdx/blob/master/manifest.md"
 GITHUB = re.compile(r"https://github\.com/([^/]+)/([^/]+?)/?$")
 
 # Optional file in an app directory -> where it is served, and the field that
