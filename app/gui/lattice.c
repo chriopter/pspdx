@@ -8,7 +8,7 @@
    side, which only come into view where the rows have narrowed enough. The
    nineteen are the field the sweep fills; the twelve are open sea. */
 #define NX_INNER 19
-#define NX_OUTER 12
+#define NX_OUTER 16
 #define NX (NX_INNER + NX_OUTER)
 #define J0 (NX_OUTER / 2)       /* first inner column */
 #define J1 (J0 + NX_INNER - 1)  /* last inner column */
@@ -29,6 +29,7 @@
 #define EYE_Y (150.0f / GFX_FOCAL)
 #define H_SCALE (52.0f / GFX_FOCAL)
 #define TILES 3.2f
+#define RIPPLE_TEXELS 128.0f    /* one tile, as gfx builds it */
 #define DY_CAP 42.0f
 /* Past this much width per unit of depth a row is far off screen, and its
    corner can sit there rather than thousands of pixels out. */
@@ -98,6 +99,9 @@ static float fexp(float x) {
    worth there in pixels, and how much of the light a row still carries. */
 static struct {
     float z, y0, yh, near, near2;
+    float v;                    /* where the row sits in the ripple tile */
+    float lod;                  /* the mip level a texel per pixel wants */
+    float thin;                 /* 0 where the row is under a pixel tall */
 } g_row[NZ];
 
 static float g_u[NX];       /* across, sorted; -1..1 in front, wider outside */
@@ -144,8 +148,35 @@ void lattice_init(void) {
         g_row[i].yh = H_SCALE * GFX_FOCAL * inv;
         g_row[i].near = 1.0f - depth;
         g_row[i].near2 = (1.0f - depth) * (1.0f - depth);
+        /* The tile goes into the distance by the log of the depth, not the
+           depth: laid down by depth alone, a far row a few pixels tall
+           would cross hundreds of texel rows, and one bright texel row is
+           a streak across the screen. This keeps the front row's density
+           and lets the tile grow with distance, which the perspective
+           takes back out. */
+        g_row[i].v = TILES * Z_NEAR * logf(z);
+        /* Texels per pixel, across and away, both grow with depth: across
+           it is the tile's density over the pixels a unit of width gets,
+           away it is the tile's density over the pixels a unit of depth
+           gets, and the coarser of the two picks the level. */
+        float across = TILES * RIPPLE_TEXELS * z / GFX_FOCAL;
+        float away = TILES * Z_NEAR * RIPPLE_TEXELS / z * z * z / (EYE_Y * GFX_FOCAL);
+        float dense = across > away ? across : away;
+        g_row[i].lod = dense > 1.0f ? logf(dense) * (1.0f / 0.6931472f) : 0.0f;
     }
-    static const float OUTER[NX_OUTER / 2] = { 1.25f, 1.6f, 2.1f, 2.8f, 4.0f, 6.0f };
+    /* The last rows before the horizon are under a pixel apart, and where
+       two strips share an edge the rasteriser may paint it from both;
+       added on, that is a line of bright dots. Rows that thin go out, and
+       the horizon's own light stands in for them. */
+    for (int i = 0; i < NZ; i++) {
+        float tall = i + 1 < NZ ? g_row[i].y0 - g_row[i + 1].y0 : 0.0f;
+        float thin = (tall - 1.0f) / 2.5f;
+        g_row[i].thin = thin < 0.0f ? 0.0f : thin > 1.0f ? 1.0f : thin;
+    }
+    /* Out to fourteen: the far rows are forty deep, and the screen's edge
+       is a third of the depth out, so anything less leaves a corner of
+       the horizon bare. */
+    static const float OUTER[NX_OUTER / 2] = { 1.25f, 1.6f, 2.1f, 2.8f, 4.0f, 6.0f, 9.0f, 14.0f };
     int j = 0;
     for (int k = NX_OUTER / 2 - 1; k >= 0; k--) g_u[j++] = -OUTER[k];
     for (int k = 0; k < NX_INNER; k++) g_u[j++] = (float)k / (NX_INNER - 1) * 2.0f - 1.0f;
@@ -351,7 +382,11 @@ static void project_all(float t, float swayx, float lightx) {
                water keeps most of it into the distance -- water does not
                stop being water halfway to the horizon -- and it is the alpha
                that carries the shore and the fade. */
-            float s = (raw - 0.16f) * 2.2f;
+            /* The swell's own shading. A far row is a pixel or two tall
+               and its crossings a few pixels apart, so there it is
+               dropped: lit crossing by crossing, a row that thin reads as
+               a dashed line along the horizon. */
+            float s = (raw - 0.16f) * 2.2f * g_row[i].near2;
             if (s < 0.0f) s = 0.0f;
             else if (s > 1.0f) s = 1.0f;
             float dr = d * 0.8f;
@@ -359,8 +394,26 @@ static void project_all(float t, float swayx, float lightx) {
                         + 0.90f * g_spec[i][j];
             if (level > 1.0f) level = 1.0f;
             int lit = (int)(level * 255.0f);
-            int alpha = (int)(w * 200.0f * (0.35f + 0.65f * g_row[i].near));
+            int alpha = (int)(w * 200.0f * (0.35f + 0.65f * g_row[i].near) * g_row[i].thin);
             g_fill[i][j] = RGBA(lit, lit, lit, alpha);
+        }
+    }
+
+    /* No row may climb over the one behind it. Where a crest would, the
+       strip between the two folds and lands on itself, and added on
+       twice it is a bright line straight across the screen. So from the
+       horizon forward each row is held a pixel and a half below the last
+       -- a whole pixel put the two edges on the same pixel rows, and the
+       rasteriser painted a dot from each --
+       and the world position is taken back from the pixel so the mesh and
+       the flat things over it still agree. */
+    for (int j = 0; j < NX; j++) {
+        for (int i = NZ - 2; i >= 0; i--) {
+            float floor = g_y[i + 1][j] + 1.5f;
+            if (g_y[i][j] < floor) {
+                g_y[i][j] = floor;
+                g_wy[i][j] = (GFX_HORIZON - floor) * g_row[i].z / GFX_FOCAL;
+            }
         }
     }
 }
@@ -373,14 +426,14 @@ static void project_all(float t, float swayx, float lightx) {
 static void draw_surface(float t) {
     struct gfx_water_vertex *mesh = gfx_water_mesh((NZ - 1) * NX * 2);
     if (!mesh) return;
-    float du = t * 0.05f, dv = -t * 0.55f;
+    float du = t * 0.05f, dv = -t * 0.33f;
     struct gfx_water_vertex *p = mesh;
     for (int i = 0; i < NZ - 1; i++) {
         for (int j = 0; j < NX; j++) {
             for (int k = 0; k < 2; k++) {
                 int r = i + k;
                 p->u = g_wx[r][j] * TILES + du;
-                p->v = g_row[r].z * TILES + dv;
+                p->v = g_row[r].v + dv;
                 p->color = g_fill[r][j];
                 p->x = g_wx[r][j];
                 p->y = g_wy[r][j];
@@ -388,7 +441,8 @@ static void draw_surface(float t) {
                 p++;
             }
         }
-        gfx_water_strip(mesh + i * NX * 2, NX * 2);
+        gfx_water_strip(mesh + i * NX * 2, NX * 2,
+                        0.5f * (g_row[i].lod + g_row[i + 1].lod));
     }
 }
 

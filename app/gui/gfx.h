@@ -87,7 +87,10 @@ void gfx_water_light(float lx, float ly, float lz,
    frame picks one of the ripple's animation steps. */
 struct gfx_water_vertex *gfx_water_mesh(int verts);
 void gfx_water_begin(int frame);
-void gfx_water_strip(const struct gfx_water_vertex *v, int n);
+/* level is the mip level the strip is sampled at, 0 = the full tile: the
+   GE would pick one per triangle from the triangle's shape, and a strip a
+   pixel tall and the screen wide is the wrong shape to ask. */
+void gfx_water_strip(const struct gfx_water_vertex *v, int n, float level);
 void gfx_water_end(void);
 
 /* A soft radial light, added onto what is behind it. The alpha in color is

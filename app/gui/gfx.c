@@ -510,15 +510,17 @@ void gfx_water_begin(int frame) {
     }
     sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
     sceGuTexFilter(GU_LINEAR_MIPMAP_LINEAR, GU_LINEAR);
-    sceGuTexLevelMode(GU_TEXTURE_AUTO, 0.0f);
     sceGuTexWrap(GU_REPEAT, GU_REPEAT);
     sceGuTexScale(1.0f, 1.0f);
     sceGuTexOffset(0.0f, 0.0f);
     additive();
 }
 
-void gfx_water_strip(const struct gfx_water_vertex *v, int n) {
+void gfx_water_strip(const struct gfx_water_vertex *v, int n, float level) {
     if (!g_ripple || n < 4) return;
+    if (level < 0.0f) level = 0.0f;
+    else if (level > RIPPLE_LEVELS - 1) level = RIPPLE_LEVELS - 1;
+    sceGuTexLevelMode(GU_TEXTURE_CONST, level);
     sceGumDrawArray(GU_TRIANGLE_STRIP,
                     GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF |
                     GU_TRANSFORM_3D, n, 0, v);
