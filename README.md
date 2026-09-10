@@ -18,13 +18,14 @@ To get your open source licensed brew listed, send a PR to
 - TLS 1.3, with the seed collected off the analog stick at startup, because the PSP has no usable PRNG.
 - Every manifest sits on the same GitHub host, so one handshake covers the whole update check.
 
-## The two files
+## What an app is
 
-An app is a catalog entry here and a manifest in its author's repository.
-[manifest.md](manifest.md) is the long version.
+One entry in the catalog, and — if its author feels like it — one file in their
+own repository. [manifest.md](manifest.md) is the long version,
+[architecture.md](architecture.md) is why.
 
 <details>
-<summary><b>Catalog entry</b> — what exists. In <a href="https://github.com/chriopter/pspdx-catalog">pspdx-catalog</a>, as <code>apps/&lt;id&gt;/app.json</code>.</summary>
+<summary><b>Catalog entry</b> — required. In <a href="https://github.com/chriopter/pspdx-catalog">pspdx-catalog</a>, as <code>apps/&lt;id&gt;/app.json</code>.</summary>
 
 ```json
 {
@@ -38,19 +39,18 @@ An app is a catalog entry here and a manifest in its author's repository.
 }
 ```
 
-No version, so a stale catalog costs nothing -- unless the author has stopped
-publishing, in which case the entry carries `rev`, `url` and `sha256` itself
-and is the only source there is. An `icon.png`, `screenshot.png` or
-`video.mp4` in the same directory is picked up by name --
-[the catalog's README](https://github.com/chriopter/pspdx-catalog#encoding-a-video)
-has the encoding the PSP can decode.
+That is the whole human half, written once. `scan.py` adds `release` — the
+`rev`, `url`, `sha256` and `size` of whatever GitHub is serving — and keeps it
+current, so nobody types a hash. An `icon.png`, `screenshot.png` or
+`video.mp4` in the same directory is picked up by name;
+[manifest.md](manifest.md) has the encoding the PSP can decode.
 
 Copy: [`app.json.template`](app.json.template)
 
 </details>
 
 <details>
-<summary><b><code>app.pspdx</code></b> — what is current. In the author's repository.</summary>
+<summary><b><code>app.pspdx</code></b> — optional. In the author's repository.</summary>
 
 ```json
 {
@@ -68,9 +68,9 @@ Copy: [`app.json.template`](app.json.template)
 }
 ```
 
-`rev` is unix seconds and the only field compared. Found at `app.pspdx` on the
-repository's default branch, so a catalog entry names a manifest only when the
-file is elsewhere.
+For an author who would rather not wait for the next scan. The console asks for
+it only when you select that app, and the higher `rev` wins — so a stale one is
+harmless, which matters, because they go stale.
 
 Copy: [`app.pspdx.template`](app.pspdx.template)
 
