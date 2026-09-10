@@ -7,7 +7,7 @@
 #include "install/install.h"
 #include "util/runtime.h"
 
-#define CATALOG_URL "https://chriopter.github.io/pspdx/catalog.json"
+#define CATALOG_URL "https://chriopter.github.io/pspdx-catalog/catalog.json"
 
 static char response[200 * 1024];
 static size_t response_len;
@@ -62,6 +62,8 @@ static int parse(struct catalog *catalog) {
         char shot[256];
         copy_str(shot, sizeof(shot), cJSON_GetObjectItemCaseSensitive(app, "screenshot"));
         asset_url(shot, entry->screenshot, sizeof(entry->screenshot));
+        copy_str(shot, sizeof(shot), cJSON_GetObjectItemCaseSensitive(app, "video"));
+        asset_url(shot, entry->video, sizeof(entry->video));
 
         if (!entry->id[0] || !entry->name[0] || !entry->manifest[0]) continue;
 

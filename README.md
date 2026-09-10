@@ -2,13 +2,14 @@
 
 **PSP Download Index** — the missing package manager for PSP homebrew.
 
-Gives you a catalog (living in this repo) of sick & current Brews for the PSP including updating them from a central place!
+Gives you a [catalog](https://github.com/chriopter/pspdx-catalog) of sick & current Brews for the PSP including updating them from a central place!
 
 <img src="media/catalog.png" width="480" alt="The catalog, one app listed with category and licence">
 
 Runs under PPSSPP; nobody has put it on real hardware yet.
 
-To get your open source licensed brew listed, send a PR or open an issue.
+To get your open source licensed brew listed, send a PR to
+[pspdx-catalog](https://github.com/chriopter/pspdx-catalog) or open an issue.
 
 ## Technical
 - PSPDX polls a catalog / index of apps in this repository, each one pointing at the author's own repository and a manifest file, where the download lives.
@@ -21,7 +22,7 @@ An app is a catalog entry here and a manifest in its author's repository.
 [manifest.md](manifest.md) is the long version.
 
 <details>
-<summary><b>Catalog entry</b> — what exists. Here, in <code>catalog/apps/&lt;id&gt;/app.json</code>.</summary>
+<summary><b>Catalog entry</b> — what exists. In <a href="https://github.com/chriopter/pspdx-catalog">pspdx-catalog</a>, as <code>apps/&lt;id&gt;/app.json</code>.</summary>
 
 ```json
 {
@@ -35,8 +36,10 @@ An app is a catalog entry here and a manifest in its author's repository.
 }
 ```
 
-Never a version, which is why a stale catalog costs nothing. An `icon.png` or
-`screenshot.png` in the same directory is picked up by name.
+Never a version, which is why a stale catalog costs nothing. An `icon.png`,
+`screenshot.png` or `video.mp4` in the same directory is picked up by name --
+[the catalog's README](https://github.com/chriopter/pspdx-catalog#encoding-a-video)
+has the encoding the PSP can decode.
 
 Copy: [`app.json.template`](app.json.template)
 

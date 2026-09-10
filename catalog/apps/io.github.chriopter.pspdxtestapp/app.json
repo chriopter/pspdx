@@ -1,9 +1,0 @@
-{
-  "id": "io.github.chriopter.pspdxtestapp",
-  "name": "PSPDX Test App",
-  "author": "chriopter",
-  "summary": "A hello world that exists to be updated.",
-  "category": "apps",
-  "license": "MIT",
-  "repo": "https://github.com/chriopter/psp-dx-testapp"
-}
