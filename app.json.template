@@ -1,9 +1,9 @@
 {
-  "id": "io.github.<user>.<app>",
-  "name": "<App Name>",
-  "author": "<who publishes the PSP build>",
-  "summary": "<one line, fits the width of a PSP screen>",
+  "id": "io.github.chriopter.extremetuxracer",
+  "name": "Extreme Tux Racer",
+  "author": "chriopter",
+  "summary": "Downhill racing with a penguin.",
   "category": "games",
-  "license": "MIT",
-  "repo": "https://github.com/<user>/<repo>"
+  "license": "GPL-2.0",
+  "repo": "https://github.com/chriopter/psp-tuxracer"
 }

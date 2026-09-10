@@ -6,6 +6,8 @@ Gives you a catalog (living in this repo) of sick & current Brews for the PSP in
 
 <img src="media/catalog.png" width="480" alt="The catalog, one app listed with category and licence">
 
+To get your open source licensed brew listed, send a PR or open an issue.
+
 ## Technical
 - PSPDX polls a catalog / index of apps in this repository, each one pointing at the author's own repository and a manifest file, where the download lives.
 - TLS: PSPDX supports TLS1.3, Seedgeneration (bc. missing PRNG) on start.
@@ -19,38 +21,48 @@ An app is a catalog entry here and a manifest in its author's repository.
 <details>
 <summary><b>Catalog entry</b> — what exists. Here, in <code>catalog/apps/&lt;id&gt;/app.json</code>.</summary>
 
-| Field | |
-|---|---|
-| `id` | reverse-DNS, stable forever, also the directory name |
-| `name`, `summary` | what the client lists; summary fits one PSP line |
-| `author` | who publishes the PSP build, not the upstream project |
-| `category` | `games`, `emulators`, `apps`, `plugins`, `demos` |
-| `license` | SPDX id, or `proprietary` |
-| `repo` | the project, and by convention where its `app.pspdx` lives |
+```json
+{
+  "id": "io.github.chriopter.extremetuxracer",
+  "name": "Extreme Tux Racer",
+  "author": "chriopter",
+  "summary": "Downhill racing with a penguin.",
+  "category": "games",
+  "license": "GPL-2.0",
+  "repo": "https://github.com/chriopter/psp-tuxracer"
+}
+```
 
 Never a version, which is why a stale catalog costs nothing. An `icon.png` or
 `screenshot.png` in the same directory is picked up by name.
 
-Template: [`app.json.template`](app.json.template)
+Copy: [`app.json.template`](app.json.template)
 
 </details>
 
 <details>
 <summary><b><code>app.pspdx</code></b> — what is current. In the author's repository.</summary>
 
-| Field | |
-|---|---|
-| `schema` | the URL of the document describing this format |
-| `id` | the same id as the catalog entry |
-| `rev` | unix seconds, set by the publish step; the only field compared |
-| `url` | the release archive, rooted at `PSP/` |
-| `sha256`, `size` | what the client verifies, and what it warns about first |
-| `requires` | `ram_mb`, so a 64 MB package is not offered to a PSP-1000 |
-| `display` | shown, never acted on: `version`, `notes` |
+```json
+{
+  "schema": "https://github.com/chriopter/pspdx/blob/master/manifest.md",
+  "id": "io.github.chriopter.extremetuxracer",
+  "rev": 1789034382,
+  "url": "https://github.com/chriopter/psp-tuxracer/releases/download/v0.16.0/extremetuxracer-psp.zip",
+  "sha256": "2cd0a663535b613a2449fcd68c111b9f4301465aefdda4c6c3fce33e5cd8d231",
+  "size": 44048460,
+  "requires": { "ram_mb": 64 },
+  "display": {
+    "version": "0.16.0",
+    "notes": "First release listed in PSPDX."
+  }
+}
+```
 
-Found at `app.pspdx` on the repository's default branch, so a catalog entry
-names a manifest only when the file is elsewhere.
+`rev` is unix seconds and the only field compared. Found at `app.pspdx` on the
+repository's default branch, so a catalog entry names a manifest only when the
+file is elsewhere.
 
-Template: [`app.pspdx.template`](app.pspdx.template)
+Copy: [`app.pspdx.template`](app.pspdx.template)
 
 </details>
