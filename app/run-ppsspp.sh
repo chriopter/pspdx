@@ -2,7 +2,11 @@
 # Runs EBOOT.PBP under the PPSSPP flatpak, without needing a visible desktop,
 # and leaves PSPDX.LOG and PSPDX.BMP (as shot.png) next to this script.
 #
-#   sh app/run-ppsspp.sh [seconds] [--sweep]     default 25
+#   sh app/run-ppsspp.sh [seconds] [--sweep] [--keys FILE]     default 25
+#
+# --keys FILE scripts input: one "<ms> <key>" per line, counted from the
+# moment the catalog is up; keys are up, down, cross, select and shot, the
+# last of which leaves a settled screenshot as shot1.png next to shot.png.
 #
 # By default the emulator's stick gets a fixed test seed, so the client does
 # what it does on a PSP after its first run: load the seed, skip the sweep,
@@ -21,11 +25,14 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 MS="$HOME/.var/app/org.ppsspp.PPSSPP/config/ppsspp"
 SECS=25
 SWEEP=0
-for arg in "$@"; do
-	case "$arg" in
+KEYS=""
+while [ $# -gt 0 ]; do
+	case "$1" in
 		--sweep) SWEEP=1 ;;
-		*) SECS="$arg" ;;
+		--keys) KEYS="$2"; shift ;;
+		*) SECS="$1" ;;
 	esac
+	shift
 done
 
 mkdir -p "$MS/PSP/GAME/pspdx"
@@ -61,7 +68,8 @@ else
 	# hide a bug in that.
 	[ -f "$MS/PSPDX.SEED" ] || printf 'PSPDX-TEST-SEED-0000' >"$MS/PSPDX.SEED"
 fi
-rm -f "$MS/PSPDX.LOG" "$MS/PSPDX.BMP" "$MS/PSPDX.BENCH" "$MS/PSPDX.KEYS"
+rm -f "$MS/PSPDX.LOG" "$MS/PSPDX.BMP" "$MS/PSPDX1.BMP" "$MS/PSPDX.BENCH" "$MS/PSPDX.KEYS"
+[ -n "$KEYS" ] && cp "$KEYS" "$MS/PSPDX.KEYS"
 
 # In its own session, so that the kill below reaches the emulator inside
 # the flatpak sandbox and not only the launcher: an instance that survives
@@ -80,4 +88,6 @@ sleep 2
 
 cp "$MS/PSPDX.LOG" "$HERE/PSPDX.LOG" 2>/dev/null || echo "no log written"
 [ -f "$MS/PSPDX.BMP" ] && magick "$MS/PSPDX.BMP" -scale 200% "$HERE/shot.png"
+rm -f "$HERE/shot1.png"
+[ -f "$MS/PSPDX1.BMP" ] && magick "$MS/PSPDX1.BMP" -scale 200% "$HERE/shot1.png"
 cat "$HERE/PSPDX.LOG" 2>/dev/null

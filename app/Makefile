@@ -1,6 +1,6 @@
 TARGET = pspdx
 OBJS = main.o gui/screen.o gui/entropy_screen.o gui/gfx.o gui/font.o \
-       gui/image.o gui/lattice.o gui/title.o gui/preview.o gui/shell.o logic/entropy.o network/https.o network/bench.o \
+       gui/image.o gui/lattice.o gui/title.o gui/preview.o gui/icons.o gui/shell.o logic/entropy.o network/https.o network/bench.o \
        update/catalog.o update/assets.o update/sync.o install/install.o \
        install/zipread.o audio/audio.o audio/synth.o audio/music.o \
        audio/cues.o video/mp4.o video/psmf.o video/player.o util/runtime.o
@@ -18,7 +18,7 @@ LIBDIR = $(WOLFSSL_PREFIX)/lib
 # intraFont draws through the GE, so it has to come before -lpspgu; libpng
 # leans on the zlib that is already here for the package archives.
 LIBS = -lwolfssl -lcjson -lintrafont -lpng -lz -lm \
-       -lpspgu -lpspgum -lpspmpeg -lpspaudiolib -lpspaudio -lpspsemaphore_660 -lpsppower \
+       -lpspgu -lpspgum -lpspmpeg -lpspaudio -lpspsemaphore_660 -lpsppower \
        -lpspnet_resolver -lpspnet_apctl -lpspnet_inet -lpspnet \
        -lpsputility -lpspdebug -lpspdisplay -lpspge -lpspctrl
 

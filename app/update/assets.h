@@ -3,7 +3,7 @@
 
 #include <stddef.h>
 
-/* The pictures a catalog entry links to: a still, and a moving one. Every
+/* The pictures a catalog entry links to: its icon, a still, and a moving one. Every
    fetch costs a TLS handshake, and on a PSP over 802.11b that is the
    expensive part, so an asset is fetched once and then read off the stick
    under PSP/PSPDX/cache for the life of the installation.
@@ -13,6 +13,7 @@
    hand is shown too, which is how the test rig feeds the player. */
 
 enum asset_kind {
+    ASSET_ICON,         /* PNG, the bundle's 144x80 ICON0 */
     ASSET_SHOT,         /* PNG, at most 480x272 */
     ASSET_VIDEO         /* H.264 baseline, 480x272 at 30, ten seconds or so */
 };

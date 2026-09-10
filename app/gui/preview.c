@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "gui/preview.h"
+#include "gui/icons.h"
 #include "gui/image.h"
 #include "update/assets.h"
 #include "util/runtime.h"
@@ -27,9 +28,9 @@
 #define FILM_H 272
 #define FILM_STRIDE 512
 
-/* Below the decoder's 0x22: the wrap is a big memcpy and can wait for the
+/* Below the decoder's 0x23: the wrap is a big memcpy and can wait for the
    pictures already in flight. */
-#define MEDIA_PRIORITY 0x23
+#define MEDIA_PRIORITY 0x24
 #define MEDIA_STACK (64 * 1024)
 
 enum still_state { STILL_NONE, STILL_LOADING, STILL_READY, STILL_FAILED };
@@ -113,6 +114,14 @@ static void load_film(unsigned gen) {
     g_film_state = FILM_PLAYING;
 }
 
+/* The list's icons come after the card: one at a time, and only while no
+   newer selection is waiting, so a scroll through the list is never held
+   up by the icons of the rows it left. */
+static void load_icons(unsigned gen) {
+    int index;
+    while (!stale(gen) && (index = icons_pending()) >= 0) icons_load(index);
+}
+
 /* One request at a time, the newest. Between requests the decoder is
    stopped and the last film let go of, so nothing here ever runs two
    films or two fetches at once. */
@@ -124,7 +133,7 @@ static int media_thread(SceSize args, void *argp) {
         if (g_quit) break;
         if (g_hold) { sceKernelSignalSema(g_idle, 1); continue; }
         unsigned gen = g_want.gen;
-        if (gen == served) continue;
+        if (gen == served) { load_icons(gen); continue; }
         served = gen;
 
         player_stop();
@@ -148,6 +157,7 @@ static int media_thread(SceSize args, void *argp) {
         }
         if (gen == g_want.gen) g_done_gen = gen;
         else if (g_film_state == FILM_PLAYING) { player_stop(); free(g_psmf); g_psmf = 0; g_film_state = FILM_NONE; }
+        load_icons(gen);
     }
     player_stop();
     free(g_psmf);
@@ -269,6 +279,8 @@ int preview_tick(void) {
 }
 
 void preview_load(void) {}
+
+void preview_poke(void) { wake(); }
 
 const struct gfx_texture *preview_still(int *alpha) {
     const struct gfx_texture *t = g_still_pub;

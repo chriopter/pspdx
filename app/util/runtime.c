@@ -41,7 +41,7 @@ static int flush_thread(SceSize args, void *argp) {
 void log_dump_later(void) {
     if (g_flush_thread < 0) {
         g_flush_sema = sceKernelCreateSema("log_flush", 0, 0, 8, 0);
-        g_flush_thread = sceKernelCreateThread("log_flush", flush_thread, 0x24, 0x4000,
+        g_flush_thread = sceKernelCreateThread("log_flush", flush_thread, 0x25, 0x4000,
                                                PSP_THREAD_ATTR_USER, 0);
         if (g_flush_thread < 0 || g_flush_sema < 0) { log_dump(); return; }
         sceKernelStartThread(g_flush_thread, 0, 0);

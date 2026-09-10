@@ -81,6 +81,8 @@ static int parse(struct catalog *catalog) {
         }
 
         char shot[256];
+        copy_str(shot, sizeof(shot), cJSON_GetObjectItemCaseSensitive(app, "icon"));
+        asset_url(shot, entry->icon, sizeof(entry->icon));
         copy_str(shot, sizeof(shot), cJSON_GetObjectItemCaseSensitive(app, "screenshot"));
         asset_url(shot, entry->screenshot, sizeof(entry->screenshot));
         copy_str(shot, sizeof(shot), cJSON_GetObjectItemCaseSensitive(app, "video"));

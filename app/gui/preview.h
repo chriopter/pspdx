@@ -30,6 +30,10 @@ void preview_show(const struct app_entry *entry, int immediately);
 int preview_tick(void);
 void preview_load(void);
 
+/* Wakes the media thread for work that is not the card's: the list's
+   icons, once the rows on screen have changed. */
+void preview_poke(void);
+
 /* Parks the media thread between fetches, so the network and the asset
    buffer are free for whoever asks -- an install, say -- and lets it go
    again. quiesce waits for a fetch in flight to finish. */

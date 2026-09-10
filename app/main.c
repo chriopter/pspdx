@@ -193,6 +193,21 @@ static void keys_load(void) {
     logline("keys: %d scripted", g_key_count);
 }
 
+/* A direction held down scrolls: after a third of a second it repeats,
+   slowly at first and then, as it is held, at a rate that gets through a
+   long list -- twenty-five rows a second -- without ever skipping one. */
+static unsigned repeat(unsigned held) {
+    static unsigned was, since, fired;
+    unsigned now = now_ms();
+    if (held != was) { was = held; since = now; fired = 0; return 0; }
+    if (!held || now - since < 330) return 0;
+    unsigned along = now - since - 330;
+    unsigned interval = along < 800 ? 110 : along < 2000 ? 65 : 40;
+    if (now - fired < interval) return 0;
+    fired = now;
+    return held;
+}
+
 static unsigned keys_pressed(void) {
     unsigned pressed = 0;
     while (g_key_next < g_key_count && now_ms() - g_keys_since >= g_keys[g_key_next].at)
@@ -259,6 +274,9 @@ int main(void) {
         frame_us = now;
         frames++; total += took / 1000;
         if (took > worst) worst = took;
+        if (took > 100000)
+            logline("frame %u: %u ms, %u ms since the shell came up",
+                    gfx_frames(), took / 1000, now_ms() - shell_since);
         if (took > 17000) late++;
         if (took > 35000) bucket[3]++;
         else if (took > 25000) bucket[2]++;
@@ -272,7 +290,7 @@ int main(void) {
                     "(17-20 %u, 20-25 %u, 25-35 %u, 35+ %u)",
                     frames, frames ? total / frames : 0, worst / 1000, late,
                     bucket[0], bucket[1], bucket[2], bucket[3]);
-            char phases[80];
+            char phases[120];
             shell_profile(phases, sizeof(phases));
             logline("%s", phases);
             logline("outside draw: tick %u us, audio callback %u us", g_worst_tick,
@@ -323,6 +341,7 @@ int main(void) {
         sceCtrlReadBufferPositive(&pad, 1);
         unsigned pressed = pad.Buttons & ~last_buttons;
         last_buttons = pad.Buttons;
+        pressed |= repeat(pad.Buttons & (PSP_CTRL_UP | PSP_CTRL_DOWN));
         if (synced) pressed |= keys_pressed();
         int count = shown()->count;
 

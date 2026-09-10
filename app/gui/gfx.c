@@ -238,13 +238,26 @@ void gfx_frame_begin(unsigned clear) {
     sceGuClear(GU_COLOR_BUFFER_BIT | GU_FAST_CLEAR_BIT);
 }
 
+static unsigned g_worst_ge, g_worst_vblank;
+
 void gfx_frame_end(void) {
     gfx_batch_end();
     sceGuFinish();
+    unsigned t0 = now_us();
     sceGuSync(0, 0);
+    unsigned t1 = now_us();
     sceDisplayWaitVblankStart();
+    unsigned t2 = now_us();
+    if (t1 - t0 > g_worst_ge) g_worst_ge = t1 - t0;
+    if (t2 - t1 > g_worst_vblank) g_worst_vblank = t2 - t1;
     g_draw = sceGuSwapBuffers();
     g_frames++;
+}
+
+void gfx_frame_worst(unsigned *ge_us, unsigned *vblank_us) {
+    *ge_us = g_worst_ge;
+    *vblank_us = g_worst_vblank;
+    g_worst_ge = g_worst_vblank = 0;
 }
 
 unsigned gfx_frames(void) { return g_frames; }

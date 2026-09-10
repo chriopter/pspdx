@@ -1,5 +1,6 @@
 #include "audio/cues.h"
 #include "audio/synth.h"
+#include "util/runtime.h"
 
 #define RING 16
 
@@ -22,10 +23,18 @@ static void play(enum cue cue, int index) {
     switch (cue) {
     case CUE_MOVE: {
         /* A soft chime: the note, a fifth above it quieter and to one
-           side, the octave below as body. Nothing sharp in it. */
+           side, the octave below as body. Nothing sharp in it. A held
+           direction runs through rows many times a second, and then it
+           is the note alone and quieter: a run, not a pile-up, and a
+           third of the voices. */
+        static unsigned last_ms;
+        unsigned now = now_ms();
+        int run = now - last_ms < 90;
+        last_ms = now;
         int note = 74 - SCALE[index % 5] - 12 * (index / 5);
         if (note < 55) note = 55;
-        synth_strike(note, 0.16f, SYNTH_GLASS, 0.2f, 0);
+        synth_strike(note, run ? 0.09f : 0.16f, SYNTH_GLASS, 0.2f, 0);
+        if (run) break;
         synth_strike(note + 7, 0.06f, SYNTH_GLASS, 0.6f, 0);
         synth_strike(note - 12, 0.07f, SYNTH_PAD, -0.4f, 0);
         break;

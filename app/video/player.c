@@ -17,7 +17,7 @@
 
 /* Below the main thread and below the network: a picture of the film is
    the first thing that should give way. */
-#define FILM_PRIORITY 0x22
+#define FILM_PRIORITY 0x23
 #define FILM_STACK 0x4000
 
 static const unsigned char *g_psmf;     /* the whole stream, header and all */

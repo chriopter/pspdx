@@ -16,7 +16,8 @@
 static unsigned char g_buf[ASSET_MAX];
 static size_t g_len;
 
-static const char *EXT[] = { [ASSET_SHOT] = "png", [ASSET_VIDEO] = "mp4" };
+static const char *EXT[] = { [ASSET_ICON] = "icon.png", [ASSET_SHOT] = "png",
+                             [ASSET_VIDEO] = "mp4" };
 
 static int sink(void *ctx, const void *data, size_t len) {
     (void)ctx;

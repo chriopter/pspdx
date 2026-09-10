@@ -23,6 +23,11 @@ void gfx_frame_begin(unsigned clear);
 void gfx_frame_end(void);
 unsigned gfx_frames(void);
 
+/* The worst wait for the GE to finish and the worst wait for vblank since
+   last asked, in microseconds: how much of a frame the drawing itself takes
+   and how much is slack. */
+void gfx_frame_worst(unsigned *ge_us, unsigned *vblank_us);
+
 void gfx_rect(int x, int y, int w, int h, unsigned color);
 void gfx_vgrad(int x, int y, int w, int h, unsigned top, unsigned bottom);
 void gfx_hgrad(int x, int y, int w, int h, unsigned left, unsigned right);

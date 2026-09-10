@@ -24,6 +24,7 @@ struct app_entry {
     char manifest[256];
     /* Absolute already: the catalog serves these relative to itself, and
        resolving them once at parse time keeps the base URL in this file. */
+    char icon[256];
     char screenshot[256];
     char video[256];
     enum app_state state;

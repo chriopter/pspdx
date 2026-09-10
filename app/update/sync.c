@@ -9,7 +9,7 @@
    the network runs in the time the browser spends waiting for vblank,
    which is most of every frame. A handshake takes a moment longer and
    nothing on screen stutters for it. */
-#define SYNC_PRIORITY 0x21
+#define SYNC_PRIORITY 0x22
 #define SYNC_STACK (128 * 1024)
 
 static struct catalog *g_catalog;

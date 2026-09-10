@@ -1,8 +1,8 @@
 /*
  * The browser: a list of names on the left, the selected package on the
  * right, both standing on the lattice. Layout lives here; everything that
- * moves on its own lives in lattice.c; the colour of the room follows the
- * selected category.
+ * moves on its own lives in lattice.c; the room takes a new colour with
+ * every selection, drawn by lot.
  *
  * Nothing here holds state the catalog already has. What lives across frames
  * is motion -- the eased selection, the theme mid-crossfade -- and the one
@@ -16,6 +16,7 @@
 #include "gui/shell.h"
 #include "gui/font.h"
 #include "gui/gfx.h"
+#include "gui/icons.h"
 #include "gui/lattice.h"
 #include "gui/title.h"
 #include "gui/palette.h"
@@ -29,9 +30,14 @@
 #define FOOTER_Y 252
 
 #define LIST_X 16
-#define LIST_W 186
+#define LIST_W 200
 #define LIST_Y 44
 #define ITEM_H 32
+/* The bundle's icon, 144x80 shown at a third: as tall as the row allows
+   with a little air, and the name starts after it. */
+#define ICON_W 43
+#define ICON_H 24
+#define NAME_X (LIST_X + ICON_W + 9)
 #define VISIBLE ((FOOTER_Y - 6 - LIST_Y) / ITEM_H)
 
 #define PANEL_X 232
@@ -45,20 +51,40 @@
 static const struct rgb NIGHT_TOP = { 2, 3, 9 };
 static const struct rgb NIGHT_BOTTOM = { 6, 8, 22 };
 
-/* Each category lights the room its own way. */
-static const struct { const char *category; struct rgb tint; } THEMES[] = {
-    { "games",     { 255, 120,  50 } },
-    { "demos",     {  50, 200, 255 } },
-    { "tools",     { 100, 255, 150 } },
-    { "emulators", { 190, 110, 255 } },
-    { "music",     { 255,  80, 160 } },
-};
 static const struct rgb DEFAULT_TINT = { 80, 140, 255 };
 
-static struct rgb theme_for(const char *category) {
-    for (unsigned i = 0; i < sizeof(THEMES) / sizeof(*THEMES); i++)
-        if (strcmp(THEMES[i].category, category) == 0) return THEMES[i].tint;
-    return DEFAULT_TINT;
+/* Every selection lights the room a colour drawn by lot: a hue at full
+   saturation, always at least a third of the wheel from the last one, so
+   the change is a change. The lot is a plain generator seeded by the clock
+   and has nothing to do with the entropy pool. */
+static unsigned g_lot;
+static float g_hue = 0.58f;
+
+static struct rgb hue_rgb(float h) {
+    h -= (float)(int)h;
+    float x = h * 6.0f;
+    int sector = (int)x;
+    float f = x - sector;
+    int up = (int)(f * 255.0f), down = 255 - up;
+    switch (sector) {
+    case 0: return (struct rgb){ 255, up, 0 };
+    case 1: return (struct rgb){ down, 255, 0 };
+    case 2: return (struct rgb){ 0, 255, up };
+    case 3: return (struct rgb){ 0, down, 255 };
+    case 4: return (struct rgb){ up, 0, 255 };
+    default: return (struct rgb){ 255, 0, down };
+    }
+}
+
+static struct rgb draw_lot(void) {
+    if (!g_lot) g_lot = now_us() | 1;
+    g_lot = g_lot * 1664525u + 1013904223u;
+    /* A third to two thirds of the wheel away, either direction. */
+    float step = 0.33f + 0.34f * ((g_lot >> 8) & 0xFFFF) / 65536.0f;
+    g_hue += step;
+    g_hue -= (float)(int)g_hue;
+    /* Softened a little: pure spectral colours read as a warning light. */
+    return rgb_mix(hue_rgb(g_hue), RGB_WHITE, 0.18f);
 }
 
 /* The palette of the current frame, derived from the eased tint once per
@@ -99,6 +125,7 @@ int shell_init(void) {
 
 void shell_shutdown(void) {
     preview_shutdown();
+    icons_reset();
     font_shutdown();
     gfx_shutdown();
 }
@@ -211,23 +238,39 @@ static void draw_list(const struct catalog *catalog, int cursor, float t) {
     gfx_glow(LIST_X + LIST_W / 2, g_sel_y + ITEM_H - 3, LIST_W + 30, 10,
              rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.7f), 160));
 
+    icons_bind(catalog);
+    if (icons_want(g_first, VISIBLE)) preview_poke();
+
     for (int i = g_first; i < catalog->count && i < g_first + VISIBLE; i++) {
         const struct app_entry *entry = &catalog->apps[i];
         int y = LIST_Y + (i - g_first) * ITEM_H;
         int selected = i == cursor;
 
-        /* A mark, not a word: the stick for what is on the stick, lit
-           green when an update waits, nothing for the rest. */
+        /* The bundle's own icon, dimmed with the name; a dark plate where
+           it has not arrived, so the column reads as a column. */
+        const struct gfx_texture *icon = icons_get(i);
+        int iy = y + (ITEM_H - ICON_H) / 2;
+        if (icon)
+            gfx_texture_draw(icon, LIST_X, iy, ICON_W, ICON_H,
+                             selected ? RGB(255, 255, 255) : RGB(150, 150, 150));
+        else
+            gfx_rect(LIST_X, iy, ICON_W, ICON_H, RGBA(255, 255, 255, selected ? 24 : 12));
+
+        /* A mark, not a word, on the icon's corner: the stick for what is
+           on the stick, lit green when an update waits, nothing for the
+           rest. */
+        int sx = LIST_X + ICON_W - 9, sy = iy + ICON_H - 13;
         if (entry->state == APP_UPDATE) {
-            gfx_glow(LIST_X + 2, y + ITEM_H / 2, 22, 22, RGBA(140, 255, 170, 150));
-            draw_memory_stick(LIST_X - 2, y + ITEM_H / 2 - 6, RGB(150, 255, 180),
-                              RGB(20, 70, 40));
+            gfx_glow(sx + 4, sy + 6, 26, 26, RGBA(140, 255, 170, 170));
+            gfx_rect(sx - 1, sy - 1, 9, 13, RGB(10, 40, 20));
+            draw_memory_stick(sx, sy, RGB(150, 255, 180), RGB(20, 70, 40));
         } else if (entry->state != APP_NOT_INSTALLED) {
-            draw_memory_stick(LIST_X - 2, y + ITEM_H / 2 - 6, g_accent,
+            gfx_rect(sx - 1, sy - 1, 9, 13, rgb_pack(NIGHT_BOTTOM, 255));
+            draw_memory_stick(sx, sy, g_accent,
                               rgb_pack(rgb_mix(NIGHT_BOTTOM, g_tint, 0.3f), 255));
         }
 
-        font_print_clipped(FONT_BODY, LIST_X + 12, y + 21, LIST_W - 16,
+        font_print_clipped(FONT_BODY, NAME_X, y + 21, LIST_X + LIST_W - NAME_X,
                            selected ? g_text : g_dim, entry->name);
     }
 
@@ -243,15 +286,15 @@ static void draw_list(const struct catalog *catalog, int cursor, float t) {
 /* ------------------------------------------------------------------ panel */
 
 static void draw_panel(const struct app_entry *entry, float t) {
-    /* The card floats: a slow drift on two incommensurate periods, so the
-       path never repeats, and it leans into its own motion. */
+    /* The card stands still: a picture that drifts is a picture that is
+       hard to look at. What moves is the light over it. */
     struct gfx_card card;
-    card.cx = PANEL_X + SHOT_W / 2 + sinf(t * 0.61f) * 3.0f + sinf(t * 0.23f) * 2.0f;
-    card.cy = SHOT_Y + SHOT_H / 2 + cosf(t * 0.47f) * 2.5f + sinf(t * 0.19f) * 1.5f;
+    card.cx = PANEL_X + SHOT_W / 2;
+    card.cy = SHOT_Y + SHOT_H / 2;
     card.w = SHOT_W;
     card.h = SHOT_H;
-    card.yaw = sinf(t * 0.37f) * 0.075f + sinf(t * 0.11f) * 0.03f;
-    card.pitch = cosf(t * 0.29f) * 0.045f;
+    card.yaw = 0.0f;
+    card.pitch = 0.0f;
     card.reflect_h = REFLECT_H + 6;
     /* One sweep of light every twelve seconds, taking two of them. */
     float cycle = fmodf(t, 12.0f);
@@ -365,8 +408,10 @@ static void draw_footer(void) {
 static unsigned g_worst_total, g_worst_back, g_worst_front, g_worst_end;
 
 void shell_profile(char *out, int size) {
-    snprintf(out, size, "slowest draw %u us: back %u, front %u, end %u",
-             g_worst_total, g_worst_back, g_worst_front, g_worst_end);
+    unsigned ge, vblank;
+    gfx_frame_worst(&ge, &vblank);
+    snprintf(out, size, "slowest draw %u us: back %u, front %u, end %u (ge %u, vblank %u)",
+             g_worst_total, g_worst_back, g_worst_front, g_worst_end, ge, vblank);
     g_worst_total = g_worst_back = g_worst_front = g_worst_end = 0;
 }
 
@@ -378,8 +423,10 @@ void shell_draw(const struct catalog *catalog, int cursor) {
 
     /* The room changes colour with the selection, but slowly: an eighth of
        the way per frame is a crossfade, not a flash. */
-    struct rgb target = catalog->count > 0
-        ? theme_for(catalog->apps[cursor].category) : DEFAULT_TINT;
+    static struct rgb target = { 80, 140, 255 };
+    static int lit_for = -1;
+    if (catalog->count <= 0) target = DEFAULT_TINT;
+    else if (cursor != lit_for) { lit_for = cursor; target = draw_lot(); }
     g_tint = rgb_mix(g_tint, target, 0.12f);
     derive_palette();
 
