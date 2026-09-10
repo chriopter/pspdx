@@ -58,7 +58,7 @@ else
 	# hide a bug in that.
 	[ -f "$MS/PSPDX.SEED" ] || printf 'PSPDX-TEST-SEED-0000' >"$MS/PSPDX.SEED"
 fi
-rm -f "$MS/PSPDX.LOG" "$MS/PSPDX.BMP"
+rm -f "$MS/PSPDX.LOG" "$MS/PSPDX.BMP" "$MS/PSPDX.BENCH" "$MS/PSPDX.KEYS"
 
 # In its own session, so that the kill below reaches the emulator inside
 # the flatpak sandbox and not only the launcher: an instance that survives

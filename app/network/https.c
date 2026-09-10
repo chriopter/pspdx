@@ -41,9 +41,15 @@
    must not be cut off for being slow, only for being stuck. */
 #define STALL_TIMEOUT_MS     30000
 
-static const char *g_suites;
+/* ChaCha20-Poly1305 first: on a core with no AES instructions it moves
+   bytes at two and a half times the rate of AES-GCM through this stack,
+   which is the difference between a download that costs a third of the
+   CPU and one that costs an eighth. AES stays for a server without it. */
+#define DEFAULT_SUITES "TLS13-CHACHA20-POLY1305-SHA256:TLS13-AES128-GCM-SHA256"
 
-void https_prefer(const char *suites) { g_suites = suites; }
+static const char *g_suites = DEFAULT_SUITES;
+
+void https_prefer(const char *suites) { g_suites = suites ? suites : DEFAULT_SUITES; }
 
 /* ------------------------------------------------------------------- net */
 
@@ -207,7 +213,7 @@ static const char *header(const char *head, size_t len, const char *name) {
 /* ------------------------------------------------------------------- url */
 
 /* A GitHub release download redirects to a signed URL well over 512 bytes. */
-struct url { char host[128]; char path[1600]; };
+struct url { char host[128]; char path[1600]; unsigned short port; };
 
 static int url_parse(const char *s, struct url *u) {
     if (strncmp(s, "https://", 8) != 0) { logline("url: not https: %.40s", s); return -1; }
@@ -217,6 +223,15 @@ static int url_parse(const char *s, struct url *u) {
     if (hl == 0 || hl >= sizeof(u->host)) { logline("url: bad host"); return -1; }
     memcpy(u->host, s, hl);
     u->host[hl] = '\0';
+    /* host:port, for a server that is not on 443 -- a test one, mostly. */
+    u->port = PORT;
+    char *colon = strchr(u->host, ':');
+    if (colon) {
+        *colon = '\0';
+        unsigned long port = strtoul(colon + 1, NULL, 10);
+        if (port == 0 || port > 65535) { logline("url: bad port"); return -1; }
+        u->port = (unsigned short)port;
+    }
     if (!slash) { strcpy(u->path, "/"); return 0; }
     if (strlen(slash) >= sizeof(u->path)) { logline("url: path too long"); return -1; }
     strcpy(u->path, slash);
@@ -307,7 +322,7 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
     struct sockaddr_in sa;
     memset(&sa, 0, sizeof(sa));
     sa.sin_family = AF_INET;
-    sa.sin_port = htons(PORT);
+    sa.sin_port = htons(u->port);
     sa.sin_addr = ip;
 
     unsigned start = now_ms();
