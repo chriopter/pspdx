@@ -15,6 +15,7 @@
 static struct catalog *g_catalog;
 static volatile enum sync_state g_state = SYNC_IDLE;
 static char g_message[64];
+static SceUID g_thread = -1;
 
 static int run(SceSize args, void *argp) {
     (void)args; (void)argp;
@@ -43,15 +44,23 @@ static int run(SceSize args, void *argp) {
 }
 
 int sync_start(struct catalog *catalog) {
+    /* Started again after a failure: the last thread has run its course
+       and only has to be let go of. */
+    if (g_thread >= 0) {
+        if (!sync_done()) return -1;
+        sceKernelWaitThreadEnd(g_thread, 0);
+        sceKernelDeleteThread(g_thread);
+        g_thread = -1;
+    }
     g_catalog = catalog;
     g_state = SYNC_IDLE;
-    SceUID thread = sceKernelCreateThread("sync", run, SYNC_PRIORITY, SYNC_STACK,
-                                          PSP_THREAD_ATTR_USER, 0);
-    if (thread < 0) {
-        logline("sync: no thread %08x", thread);
+    g_thread = sceKernelCreateThread("sync", run, SYNC_PRIORITY, SYNC_STACK,
+                                     PSP_THREAD_ATTR_USER, 0);
+    if (g_thread < 0) {
+        logline("sync: no thread %08x", (unsigned)g_thread);
         return -1;
     }
-    sceKernelStartThread(thread, 0, 0);
+    sceKernelStartThread(g_thread, 0, 0);
     return 0;
 }
 

@@ -112,6 +112,7 @@ static char g_install_phase[16];
 static size_t g_install_done, g_install_total;
 static unsigned g_install_drawn_ms;
 static char g_status[96];
+static char g_word[24] = "Connecting";
 static const struct catalog *g_catalog;
 static int g_cursor;
 
@@ -431,7 +432,7 @@ void shell_draw(const struct catalog *catalog, int cursor) {
     derive_palette();
 
     /* The word for the wait is baked between frames, once per word. */
-    if (catalog->count <= 0 && g_status[0]) title_prepare("Connecting", g_tint);
+    if (catalog->count <= 0 && g_status[0]) title_prepare(g_word, g_tint);
 
     gfx_frame_begin(0xFF000000);
     gfx_vgrad(0, 0, SCR_W, SCR_H, rgb_pack(rgb_mix(NIGHT_TOP, g_tint, 0.05f), 255),
@@ -496,6 +497,10 @@ void shell_shot_sync(const struct catalog *catalog, int cursor) {
         shell_draw(catalog, cursor);        /* say so before we block */
         preview_load();
     }
+}
+
+void shell_word(const char *word) {
+    snprintf(g_word, sizeof(g_word), "%s", word ? word : "Connecting");
 }
 
 void shell_status(const char *text) {

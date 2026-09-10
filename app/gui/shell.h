@@ -35,6 +35,10 @@ void shell_shot_sync(const struct catalog *catalog, int cursor);
    result it also carries. */
 void shell_status(const char *text);
 
+/* The word that stands in the room while there is no catalog: Connecting
+   by default, or what the caller says the wait has become. */
+void shell_word(const char *word);
+
 /* Install progress, drawn over the browser. The two middle ones match the
    callback types install() expects. */
 void shell_install_begin(const char *name);

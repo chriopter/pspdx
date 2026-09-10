@@ -93,6 +93,13 @@ int net_up(void) {
     wolfSSL_SetLoggingCb(wolf_log);
     wolfSSL_Debugging_ON();
 #endif
+    /* Asked again with the link already up -- a retry after the catalog
+       failed, not the wifi -- there is nothing to bring up. */
+    if (g_net.connected) {
+        int state = 0;
+        if (sceNetApctlGetState(&state) >= 0 && state == 4) return 0;
+        net_down();
+    }
     phase("wifi");
     if (sceUtilityLoadNetModule(PSP_NET_MODULE_COMMON) < 0) return -1;
     if (sceUtilityLoadNetModule(PSP_NET_MODULE_INET) < 0) {

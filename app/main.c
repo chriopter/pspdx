@@ -260,6 +260,7 @@ int main(void) {
        go up; the status line follows along. */
     int cursor = 0;
     int synced = 0;
+    int rounds = 0;                     /* times the sync has come back */
     int automatic = -1;
     unsigned shell_since = now_ms();
     int shot_connecting = 0;
@@ -312,7 +313,18 @@ int main(void) {
             if (sync_done()) {
                 synced = 1;
                 if (sync_state() == SYNC_DONE) shell_status("");
+                else {
+                    /* Nothing came: say so, and offer the one thing that
+                       can be done about it. */
+                    char again[96];
+                    snprintf(again, sizeof(again), "%s   X to try again", sync_message());
+                    shell_word("Offline");
+                    shell_status(again);
+                }
                 dump_diagnostics();
+                /* The rig's hooks, once: a retry that comes through does
+                   not get to install or replay the keys a second time. */
+                if (rounds++ > 0) continue;
                 screenshot_settled(cursor, "ms0:/PSPDX.BMP");
                 dump_diagnostics();
                 automatic = catalog.count > 0 ? auto_install_index() : -1;
@@ -357,6 +369,11 @@ int main(void) {
         if ((pressed & PSP_CTRL_CROSS) && count > 0) {
             install_app(cursor, 0);
             dump_diagnostics();
+        } else if ((pressed & PSP_CTRL_CROSS) && sync_state() == SYNC_FAILED) {
+            /* Once more from the top: the wait comes back with its word,
+               and the frames below carry on as they did the first time. */
+            shell_word("Connecting");
+            if (sync_start(&catalog) == 0) synced = 0;
         }
         if (pressed & PSP_CTRL_SELECT) {
             /* The field drains and is swept again, in the room the browser
