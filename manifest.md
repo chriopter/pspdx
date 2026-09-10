@@ -51,8 +51,7 @@ Three fields were considered and left out. `channel`, because there is one
 channel. `source`, because the GPL source only matters if we mirror, which we do
 not, and the author's release page carries it anyway. `root`, replaced by a
 convention: what gets installed is the `PSP/` subtree, and a rule beats a field
-every author would have to fill in correctly. And no `key`: nothing is signed
-— see [open-questions.md](open-questions.md).
+every author would have to fill in correctly. And no `key`: nothing is signed.
 
 ## Catalog entry — in the registry
 

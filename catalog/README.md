@@ -15,7 +15,7 @@ harmless.
 | `name`, `summary` | what the client lists; summary fits in one PSP line |
 | `author` | who publishes the PSP build, not the upstream project |
 | `category` | `games`, `emulators`, `apps`, `plugins`, `demos` |
-| `license` | SPDX id, or `proprietary` -- mandatory, see docs/open-questions.md |
+| `license` | SPDX id, or `proprietary` -- mandatory |
 | `repo` | the project, and by convention where its `app.pspdx` lives |
 
 The manifest is not named. `repo` is a GitHub URL, and the client is pointed at

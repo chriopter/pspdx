@@ -4,7 +4,7 @@
 
 Gives you a catalog (living in this repo) of sick & current Brews for the PSP including updating them from a central place!
 
-<img src="docs/media/catalog.png" width="480" alt="The catalog, one app listed with category and licence">
+<img src="media/catalog.png" width="480" alt="The catalog, one app listed with category and licence">
 
 ## Technical
 - PSPDX polls a catalog / index of apps in this repository, each one pointing at the author's own repository and a manifest file, where the download lives.
