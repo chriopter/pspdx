@@ -245,9 +245,18 @@ play the same tune slightly apart.
 The app writes what it did to the memory stick, so a run needs no window:
 
 ```sh
-sh app/run-ppsspp.sh            # 25 seconds, straight to the catalog
-sh app/run-ppsspp.sh 90 --sweep # replay the recorded sweep first
+sh app/run-ppsspp.sh                          # 25 seconds, straight to the catalog
+sh app/run-ppsspp.sh 30 --sweep               # replay the recorded sweep first
+sh app/run-ppsspp.sh 30 --keys keys.txt       # scripted input, see PSPDX.KEYS below
+sh app/tools/localcat/run 60 --keys keys.txt  # the same against forty apps served from the host
 ```
+
+A rig run gets no speakers: the emulator is started without its audio
+socket, and the client's own stream is checked through PPSSPP's `DumpAudio`
+when it has to be. Holding a button is beyond a keys file; for that the
+emulator's WebSocket debugger takes `input.buttons.press` with a duration
+in frames -- and this PPSSPP build aborts when that socket is closed, so a
+driver keeps it open until the emulator is gone.
 
 It copies the EBOOT to the emulator's memory stick and leaves `PSPDX.LOG` and
 `shot.png` beside itself. By default it also plants a fixed seed, so the
@@ -256,8 +265,10 @@ at the catalog a few seconds in; `--sweep` replays `app/testdata/sweep.trace`
 through the entropy screen instead. A replayed sweep never writes a seed,
 because replayed input is not entropy.
 
-That trace is one entry per frame, `{ u8 lx, u8 ly, u16 buttons }`, 1608
-samples of a human actually moving the stick. To replay it by hand instead,
+That trace is one entry per frame, `{ u8 lx, u8 ly, u16 buttons }`: the
+first six seconds of `sweep-full.trace`, 1608 samples of a human actually
+moving the stick, cut just past the 128-bit mark with a press of X after it.
+The full one stays as what the bits-per-field rate was measured on. To replay it by hand instead,
 copy it to `PSPDX.TRACE` on the emulator's stick and touch `PSPDX.REPLAY` next
 to it; remove that file to go back to collecting. A replayed run says so on
 screen and never writes a seed: the path is public, so it is a development
