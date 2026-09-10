@@ -6,7 +6,7 @@
 
 /* What a manifest must say it is. The value is a page describing the format,
    so a file found years from now points at its own documentation. */
-#define PSPDX_SCHEMA "https://github.com/chriopter/pspdx/blob/master/docs/manifest.md"
+#define PSPDX_SCHEMA "https://github.com/chriopter/pspdx/blob/master/manifest.md"
 
 /* The fields the client acts on. Everything under "display" is shown, never
    compared -- version is carried along only to be printed. */

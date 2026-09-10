@@ -6,6 +6,8 @@ Gives you a catalog (living in this repo) of sick & current Brews for the PSP in
 
 <img src="media/catalog.png" width="480" alt="The catalog, one app listed with category and licence">
 
+Runs under PPSSPP; nobody has put it on real hardware yet.
+
 To get your open source licensed brew listed, send a PR or open an issue.
 
 ## Technical

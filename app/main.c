@@ -52,6 +52,16 @@ static void dump_diagnostics(void) {
     catalog_dump_http();
 }
 
+/* Let the transitions finish before photographing the screen, but not
+   forever: two seconds is more than any of them take. */
+static void screenshot_settled(int cursor, const char *path) {
+    for (int i = 0; i < 120 && !shell_settled(); i++) {
+        shell_shot_sync(&catalog, cursor);
+        shell_draw(&catalog, cursor);
+    }
+    gfx_screenshot(path);
+}
+
 static int install_app(int index, int screenshot) {
     struct app_entry *entry = &catalog.apps[index];
     struct install_report report;
@@ -77,7 +87,7 @@ static int install_app(int index, int screenshot) {
     }
     shell_install_end(message);
     shell_draw(&catalog, index);
-    if (screenshot) gfx_screenshot("ms0:/PSPDX2.BMP");
+    if (screenshot) screenshot_settled(index, "ms0:/PSPDX2.BMP");
     return rc;
 }
 
@@ -150,7 +160,7 @@ int main(void) {
     int cursor = 0;
     shell_shot_sync(&catalog, cursor);
     shell_draw(&catalog, cursor);
-    gfx_screenshot("ms0:/PSPDX.BMP");
+    screenshot_settled(cursor, "ms0:/PSPDX.BMP");
     dump_diagnostics();                 /* now with the shell's own lines */
 
     int automatic = auto_install_index();
