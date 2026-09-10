@@ -7,7 +7,9 @@
 #include "install/install.h"
 #include "util/runtime.h"
 
+#ifndef CATALOG_URL   /* a test build may point at a catalog on the host */
 #define CATALOG_URL "https://chriopter.github.io/pspdx-catalog/catalog.json"
+#endif
 
 static char response[200 * 1024];
 static size_t response_len;

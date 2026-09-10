@@ -61,7 +61,8 @@ const void *asset_fetch(enum asset_kind kind, const char *id, const char *url,
 
     g_len = cache_read(kind, id);
     if (g_len) {
-        logline("%s: %lu bytes cached, %s", EXT[kind], (unsigned long)g_len, id);
+        if (kind != ASSET_ICON)
+            logline("%s: %lu bytes cached, %s", EXT[kind], (unsigned long)g_len, id);
         *len = g_len;
         return g_buf;
     }

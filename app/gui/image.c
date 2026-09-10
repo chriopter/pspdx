@@ -137,7 +137,10 @@ int image_decode_png(const void *data, size_t len, struct gfx_texture *out) {
     free(rows);
 
     sceKernelDcacheWritebackRange(out->pixels, (unsigned)out->tw * out->th * 4);
-    logline("png: %dx%d in a %dx%d texture, %d KB", out->w, out->h, out->tw,
-            out->th, out->tw * out->th * 4 / 1024);
+    /* Icons come by the dozen and the log ring is forty lines: only a
+       picture worth a line gets one. */
+    if (out->tw > 256)
+        logline("png: %dx%d in a %dx%d texture, %d KB", out->w, out->h, out->tw,
+                out->th, out->tw * out->th * 4 / 1024);
     return 0;
 }

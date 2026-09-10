@@ -11,7 +11,9 @@ WOLFSSL_PREFIX = $(CURDIR)/wolfssl-psp/prefix
 # comes from is visible at the include line.
 # -MMD writes a .d next to every .o so that a header change rebuilds what
 # includes it; build.mak on its own only looks at the .c.
-CFLAGS = -O2 -G0 -Wall -I. -I$(WOLFSSL_PREFIX)/include -MMD -MP
+# EXTRA_CFLAGS is for a test build: tools/localcat points the client at a
+# catalog on the host and trusts the host's throwaway CA through it.
+CFLAGS = -O2 -G0 -Wall -I. -I$(WOLFSSL_PREFIX)/include -MMD -MP $(EXTRA_CFLAGS)
 ASFLAGS = $(CFLAGS)
 
 LIBDIR = $(WOLFSSL_PREFIX)/lib
