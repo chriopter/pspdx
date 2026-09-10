@@ -37,11 +37,16 @@ enum still_state { STILL_NONE, STILL_LOADING, STILL_READY, STILL_FAILED };
 enum film_state { FILM_NONE, FILM_LOADING, FILM_PLAYING, FILM_FAILED };
 
 /* What the main thread asked for. gen goes up with every new entry; work
-   for an older gen is dropped on the floor when it finishes. */
-static struct {
+   for an older gen is dropped on the floor when it finishes. The thread
+   works from its own copy of the strings, taken when it picks the request
+   up: the main thread writes these while the thread may be reading, and a
+   fetch keyed on a half-written id would cache one app's picture under
+   another's name. */
+struct request {
     char id[96], shot_url[256], video_url[256];
     volatile unsigned gen;
-} g_want;
+};
+static struct request g_want;
 static unsigned g_shown_gen;            /* gen of what the pictures belong to */
 static unsigned g_shown_ms;
 static int g_immediate;
@@ -71,9 +76,9 @@ static volatile unsigned g_done_gen;    /* gen the thread has finished with */
 
 static int stale(unsigned gen) { return gen != g_want.gen || g_quit || g_hold; }
 
-static void load_still(unsigned gen, struct gfx_texture *into) {
+static void load_still(const struct request *req, unsigned gen, struct gfx_texture *into) {
     size_t len = 0;
-    const void *png = asset_fetch(ASSET_SHOT, g_want.id, g_want.shot_url, &len);
+    const void *png = asset_fetch(ASSET_SHOT, req->id, req->shot_url, &len);
     if (stale(gen)) return;
     if (!png || image_decode_png(png, len, into) != 0) {
         g_still_state = STILL_FAILED;
@@ -83,9 +88,9 @@ static void load_still(unsigned gen, struct gfx_texture *into) {
     g_still_state = STILL_READY;
 }
 
-static void load_film(unsigned gen) {
+static void load_film(const struct request *req, unsigned gen) {
     size_t len = 0;
-    const unsigned char *mp4 = asset_fetch(ASSET_VIDEO, g_want.id, g_want.video_url, &len);
+    const unsigned char *mp4 = asset_fetch(ASSET_VIDEO, req->id, req->video_url, &len);
     if (stale(gen)) return;
     if (!mp4) { g_film_state = FILM_FAILED; return; }
     if (mp4_parse(mp4, len, &g_track) != 0) {
@@ -134,6 +139,14 @@ static int media_thread(SceSize args, void *argp) {
         if (g_hold) { sceKernelSignalSema(g_idle, 1); continue; }
         unsigned gen = g_want.gen;
         if (gen == served) { load_icons(gen); continue; }
+        /* The strings, copied whole: the main thread writes them before it
+           raises gen, so a copy that sees the same gen after as before saw
+           a finished request. */
+        struct request req;
+        do {
+            gen = g_want.gen;
+            memcpy(&req, &g_want, sizeof(req));
+        } while (gen != g_want.gen);
         served = gen;
 
         player_stop();
@@ -143,7 +156,7 @@ static int media_thread(SceSize args, void *argp) {
         int slot = g_still_slot ^ 1;
         gfx_texture_free(&g_stills[slot]);
         g_still_state = STILL_LOADING;
-        load_still(gen, &g_stills[slot]);
+        load_still(&req, gen, &g_stills[slot]);
         if (stale(gen)) { gfx_texture_free(&g_stills[slot]); continue; }
         g_still_slot = slot;
 
@@ -151,7 +164,7 @@ static int media_thread(SceSize args, void *argp) {
            every entry; it comes back at once when there is nothing. */
         if (g_film_buf[0]) {
             g_film_state = FILM_LOADING;
-            load_film(gen);
+            load_film(&req, gen);
         } else {
             g_film_state = FILM_FAILED;
         }

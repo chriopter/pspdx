@@ -119,8 +119,10 @@ that the audio thread empties. The code that has to be right and the code
 that has to look good do not share a file.
 
 The card the picture sits on is the one thing drawn in real perspective; it
-drifts and leans a little, and a sweep of light crosses it now and then.
-Once the still is up, the entry's film fades in over it and loops.
+stands still, and a sweep of light crosses it now and then. Once the still
+is up, the entry's film fades in over it and loops. Each row of the list
+carries its bundle's icon, fetched one at a time behind the card for the
+rows on screen, and every selection lights the room a colour drawn by lot.
 
 </details>
 
@@ -318,14 +320,9 @@ that works on a real PSP, and on a host whose desktop is locked.
   `PSP/GAME/<dir>/`, which 2 of 16 surveyed release archives actually use. The
   scanner already works out where the EBOOT sits and records it; the console
   should either be told, or use the same rule.
-- **A race that poisons the picture cache.** `preview.c` hands live pointers to
-  the fetch thread and checks staleness after the cache write, so an app can
-  end up holding another app's screenshot for good.
 - **The catalog path skips checks the manifest path makes.** `manifest_fetch`
   validates the id, the revision range and the size; `catalog.c` takes the same
   fields straight out of the JSON without any of it.
-- **`icon` is fetched by nobody.** Every entry carries one and the client has
-  no field for it.
 - **Real hardware.** It has only ever run in PPSSPP.
 - **Nothing is signed**, so the index is trusted completely. Fine while one
   person writes it; less fine now that a bot does.
