@@ -112,9 +112,11 @@ fields in a file of their own, at `app.pspdx` on the default branch:
 }
 ```
 
-The scanner notices it and the entry gains a `manifest` field, so the console
-knows there is something to ask for. It asks only when you select that app —
-one request, at a moment you are already waiting.
+This is not wired up: the scanner does not look for the file and the entry
+gains no `manifest` field, so nothing on the console asks for one. The shape is
+here because the console still reads a `manifest` field if an entry carries
+one, and because an author who publishes releases often is the case that would
+justify building it.
 
 **The higher `rev` wins.** A stale manifest is therefore harmless, and they do
 go stale: `psp-tuxracer` shipped one saying 0.16.0 while its releases were at
