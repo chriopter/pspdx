@@ -7,17 +7,10 @@
 #define POOL_BYTES 20
 #define SEED_FILE "ms0:/PSPDX.SEED"
 
-/* The PSP leaves through sceKernelExitGame, so there is no reliable moment at
-   the end to write the seed: it has to be written along the way. Sixty-four
-   stirs is a few seconds of traffic, cheap against a 20-byte write. */
-#define STIR_PER_SAVE 64
-
 static unsigned char pool[POOL_BYTES];
 static unsigned int pool_counter;
 static int pool_bits;
 static unsigned char field_seen[(ENTROPY_FIELD_COUNT + 7) / 8];
-static unsigned int stir_count;
-static int replay_lock;
 
 /* sync runs the network on its own thread while the shell keeps the main one,
    and SELECT starts a fresh sweep from there: two threads reach the pool, and
@@ -60,7 +53,6 @@ void entropy_init(void) {
     pool_absorb(&sp, sizeof(sp));
     pool_absorb_jitter(8);
     pool_bits = 0;
-    stir_count = 0;
     memset(field_seen, 0, sizeof(field_seen));
     pool_unlock();
 }
@@ -96,14 +88,7 @@ void entropy_stir(const void *data, unsigned int len) {
     pool_lock();
     pool_absorb(data, len);
     pool_absorb(&sys, sizeof(sys));
-    /* A pool that was never credited full has no business on the stick: a
-       stored seed skips the sweep on the next run and is taken for the whole
-       128 bits. nettest reaches here with a pool that has only ever seen boot
-       jitter, and writing that would quietly downgrade the next start. */
-    int due = ++stir_count >= STIR_PER_SAVE && pool_bits >= ENTROPY_BITS;
-    if (due) stir_count = 0;
     pool_unlock();
-    if (due) entropy_save(replay_lock);
 }
 
 int entropy_bits(void) { return pool_bits; }
@@ -123,14 +108,11 @@ int entropy_load(void) {
     return 1;
 }
 
-/* The first call comes from startup and settles the question for the run: a
-   replayed sweep is public input, so nothing from that session may ever reach
-   the stick, including the automatic saves that entropy_stir makes later. */
+/* Called three times in a run at most: once the pool is ready, again if SELECT
+   throws it away, and once on the way out through HOME. A replayed sweep is
+   public input and never reaches the stick. */
 void entropy_save(int replaying) {
-    if (replaying) {
-        replay_lock = 1;
-        return;
-    }
+    if (replaying) return;
     unsigned char next[POOL_BYTES];
     unsigned int tag = 0x50535058;
     unsigned char buf[POOL_BYTES + sizeof(tag)];
@@ -158,7 +140,6 @@ void entropy_forget(void) {
     pool_bits = 0;
     memset(pool, 0, sizeof(pool));
     memset(field_seen, 0, sizeof(field_seen));
-    stir_count = 0;
     pool_unlock();
 }
 

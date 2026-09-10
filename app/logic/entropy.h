@@ -31,10 +31,17 @@ int entropy_absorb_field(unsigned int field);
    is already full at 128 bits -- so what this buys is not strength but
    freshness. PSPDX.SEED is a readable file on the stick, and a copy of it
    otherwise predicts every later boot, because a stored seed skips the sweep.
-   Stirring the session full of things the device does not control, and
-   writing the seed back as it goes, is what makes a stolen copy go stale.
-   A timestamp is folded in on every call, so a caller may pass the bare
-   value it has. */
+   Stirring the session full of things the device does not control is what
+   makes a stolen copy go stale.
+
+   All of it stays in RAM. The seed is written when the run ends through HOME
+   and not before: the same twenty bytes land on the same sector every time,
+   and a memory stick has no wear levelling worth the name. A run cut short by
+   a flat battery loses the stirring and leaves the seed the startup already
+   rotated, which is no worse than before this existed.
+
+   A timestamp is folded in on every call, so a caller may pass the bare value
+   it has. */
 void entropy_stir(const void *data, unsigned int len);
 
 int entropy_bits(void);

@@ -34,6 +34,11 @@ static unsigned g_worst_tick;       /* worst preview tick (fetch, decode) in us 
 
 static int exit_callback(int a, int b, void *c) {
     (void)a; (void)b; (void)c;
+    /* The one orderly moment in a run. Everything the session stirred into the
+       pool has been sitting in RAM until here, so this is where it reaches the
+       stick -- twenty bytes, once, instead of the same sector every few
+       seconds. */
+    entropy_save(entropy_screen_is_replay());
     sceKernelExitGame();
     return 0;
 }
