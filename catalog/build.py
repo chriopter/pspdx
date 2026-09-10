@@ -23,6 +23,10 @@ REQUIRED = ("id", "name", "author", "summary", "category", "license", "repo")
 # entry from naming a branch, which is main in some repositories and master in
 # others; raw serves the tip of the default branch either way.
 MANIFEST = "https://raw.githubusercontent.com/{owner}/{repo}/HEAD/app.pspdx"
+
+# The format names itself: a file found on a stick years from now says where
+# it came from and which version of the format it is.
+SCHEMA = "https://chriopter.github.io/pspdx/v1"
 GITHUB = re.compile(r"https://github\.com/([^/]+)/([^/]+?)/?$")
 
 # Optional file in an app directory -> where it is served, and the field that
@@ -73,7 +77,7 @@ def main(out):
             shutil.copyfile(src, dest / f"{app['id']}.png")
             app[field] = f"{subdir}/{app['id']}.png"
     catalog = {
-        "schema": 1,
+        "schema": SCHEMA,
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "apps": apps,
     }

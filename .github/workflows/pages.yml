@@ -34,6 +34,20 @@ jobs:
           <h1>PSPDX</h1>
           <p>PSP Download Index. The client fetches <a href="catalog.json">catalog.json</a>.</p>
           HTML
+          mkdir -p _site/v1
+          cat > _site/v1/index.html <<'HTML'
+          <!doctype html>
+          <meta charset="utf-8">
+          <title>PSPDX format v1</title>
+          <h1>PSPDX format v1</h1>
+          <p>Every catalog and every <code>app.pspdx</code> manifest names this
+          page in its <code>schema</code> field, so a file says where it came
+          from without anyone having to recognise it.</p>
+          <p>The two formats are described in
+          <a href="https://github.com/chriopter/pspdx/blob/master/docs/manifest.md">docs/manifest.md</a>.
+          A later version of the format gets its own URL rather than a new
+          number in this one.</p>
+          HTML
 
       - uses: actions/upload-pages-artifact@v3
         with:
