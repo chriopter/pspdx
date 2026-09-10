@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regenerates app/ca_certs.h, the roots the client trusts.
+"""Regenerates app/network/ca_certs.h, the roots the client trusts.
 
 The PSP has no usable CA store: Sony's is from 2007 and its roots expired years
 ago. So the client carries its own. Carrying all ~150 Mozilla roots would be
@@ -80,7 +80,7 @@ SOURCES = [
     "/etc/ssl/cert.pem",
 ]
 
-OUT = Path(__file__).resolve().parent.parent / "ca_certs.h"
+OUT = Path(__file__).resolve().parent.parent / "network" / "ca_certs.h"
 
 
 def describe(pem):

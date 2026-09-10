@@ -7,7 +7,7 @@
  * PSP/GAME/. The rename is the commit.
  *
  * Only the PSP/GAME/<dir>/ subtree of the archive is installed. Everything
- * beside it -- PSP/SYSTEM/*.ini, LICENSES/, a build.json -- is the user's or
+ * beside it -- PSP/SYSTEM configs, LICENSES/, a build.json -- is the user's or
  * nobody's, and is never written.
  */
 
@@ -20,9 +20,9 @@
 #include <wolfssl/wolfcrypt/sha256.h>
 #include <cjson/cJSON.h>
 
-#include "pspdx.h"
-#include "install.h"
-#include "zipread.h"
+#include "util/runtime.h"
+#include "install/install.h"
+#include "install/zipread.h"
 
 #define ROOT "ms0:"
 #define TMP_DIR   ROOT "/PSP/PSPDX/tmp"

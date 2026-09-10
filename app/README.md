@@ -1,13 +1,30 @@
 # pspdx-app
 
-The on-device client. Right now it collects entropy, opens a TLS 1.3 connection
-and prints the response — the groundwork under a package manager that does not
-exist yet.
+The on-device client. It collects entropy, fetches the catalog over TLS 1.3,
+and installs or updates a package from its manifest.
+
+## How it is laid out
+
+One directory per layer; every include names its directory, so the layer a
+header comes from is visible at the include line.
+
+| Directory | What |
+|---|---|
+| `main.c` | the controller: input loop, screens, nothing else |
+| `gui/` | drawing on the debug screen; owns the 60-column layout width |
+| `logic/` | the entropy pool |
+| `update/` | the catalog and what is out of date |
+| `install/` | manifest, download, verify, unpack, the on-stick database |
+| `network/` | HTTPS and the compiled-in roots |
+| `util/` | logging and the millisecond clock |
+
+Dependencies run one way: `gui` → `update` → `install` → `network`, with
+`util` under all of them.
 
 ## What it trusts
 
-The chain is verified against `ca_certs.h`, 17 roots compiled in. The PSP has no
-CA store worth using, so the client carries its own; regenerate it with
+The chain is verified against `network/ca_certs.h`, 17 roots compiled in. The
+PSP has no CA store worth using, so the client carries its own; regenerate it with
 
 ```sh
 python3 tools/make-ca-bundle.py

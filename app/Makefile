@@ -1,9 +1,13 @@
 TARGET = pspdx
-OBJS = main.o https.o install.o zipread.o
+OBJS = main.o gui/screen.o gui/entropy_screen.o logic/entropy.o \
+       network/https.o update/catalog.o install/install.o \
+       install/zipread.o util/runtime.o
 
 WOLFSSL_PREFIX = $(CURDIR)/wolfssl-psp/prefix
 
-CFLAGS = -O2 -G0 -Wall -I$(WOLFSSL_PREFIX)/include
+# -I. only: every local include names its directory, so the layer a header
+# comes from is visible at the include line.
+CFLAGS = -O2 -G0 -Wall -I. -I$(WOLFSSL_PREFIX)/include
 ASFLAGS = $(CFLAGS)
 
 LIBDIR = $(WOLFSSL_PREFIX)/lib

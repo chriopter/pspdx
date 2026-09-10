@@ -2,7 +2,7 @@
 #define PSPDX_INSTALL_H
 
 #include <stddef.h>
-#include "pspdx.h"
+#include "network/https.h"
 
 /* The fields the client acts on. Everything under "display" is shown, never
    compared -- version is carried along only to be printed. */

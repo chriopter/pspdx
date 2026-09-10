@@ -27,8 +27,9 @@
 #include <wolfssl/options.h>
 #include <wolfssl/ssl.h>
 
-#include "pspdx.h"
-#include "ca_certs.h"
+#include "network/https.h"
+#include "util/runtime.h"
+#include "network/ca_certs.h"
 
 #define PORT 443
 #define MAX_REDIRECTS 5
@@ -318,7 +319,7 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
 
     int irc = wolfSSL_Init();
     if (irc != WOLFSSL_SUCCESS) {
-        logline("wolfssl %s init=%d pool=%d bits", wolfSSL_lib_version(), irc, g_pool_bits);
+        logline("wolfssl %s init=%d", wolfSSL_lib_version(), irc);
         goto out;
     }
     wolf_up = 1;

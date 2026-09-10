@@ -11,8 +11,8 @@
 #include <string.h>
 #include <zlib.h>
 
-#include "pspdx.h"
-#include "zipread.h"
+#include "util/runtime.h"
+#include "install/zipread.h"
 
 #define SIG_EOCD    0x06054b50u
 #define SIG_CENTRAL 0x02014b50u
