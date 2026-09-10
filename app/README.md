@@ -11,7 +11,7 @@ header comes from is visible at the include line.
 | Directory | What |
 |---|---|
 | `main.c` | the controller: input loop, screens, nothing else |
-| `gui/` | the browser on the GE: `shell` lays out, `lattice` is the moving backdrop, `preview` owns what is on the card, `gfx` draws, `font` is the PSP's own face; the entropy sweep still runs on the debug screen |
+| `gui/` | the browser on the GE: `shell` lays out, `lattice` is the moving backdrop, `preview` owns what is on the card, `gfx` draws, `font` is the PSP's own face; the entropy sweep floods the same surface and leaves it behind as the backdrop |
 | `video/` | the film on the card: `mp4` finds the H.264 in the catalog's clip, `psmf` wraps it the way the PSP's decoder wants it, `player` runs that decoder; only `player.c` knows it is on a PSP |
 | `audio/` | a piano and a glass, the tune, and the sounds the interface makes; only `audio.c` knows it is on a PSP |
 | `logic/` | the entropy pool |
@@ -66,6 +66,20 @@ gets listened to:
 cc -I. audio/synth.c audio/music.c audio/cues.c tools/render-music.c -lm
 ./a.out music.wav
 ```
+
+## The TLS client
+
+wolfSSL over `sceNetInet` sockets, TLS 1.3 only. It offers X25519 ahead of
+P-256 and ChaCha20-Poly1305 ahead of AES-128-GCM, because this CPU has no AES
+instruction; `network/bench.c` measures the gap on the device itself. The key
+share rides along with the ClientHello, so no HelloRetryRequest and one
+handshake covers the whole catalog.
+
+Its randomness is the sweep: one bit for every newly touched point of an
+invisible 250x250 field, until the pool holds the 128 that X25519 and
+ChaCha20-Poly1305 stand on. The pool goes on taking packet arrival times and
+battery readings for the rest of the run, uncounted, and reaches `PSPDX.SEED`
+once, on the way out through HOME.
 
 ## What it trusts
 
@@ -140,7 +154,7 @@ that works on a real PSP, and on a host whose desktop is locked.
 
 | Path | What |
 |---|---|
-| `PSPDX.SEED` | 20 bytes of pool state, so the entropy ritual happens once |
+| `PSPDX.SEED` | 20 bytes of pool state, so the sweep happens once; rewritten on the way out through HOME |
 | `PSPDX.TRACE` | every pad sample of the last sweep, for replay |
 | `PSPDX.REPLAY` | if present, the sweep replays `PSPDX.TRACE` instead of reading the stick |
 | `PSPDX.LOG` | what the run did |
