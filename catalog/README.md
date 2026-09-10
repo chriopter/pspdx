@@ -19,7 +19,11 @@ harmless.
 | `homepage` | where a human goes |
 | `manifest` | where the client goes for updates |
 
-The icon is a convention, not a field: drop `icon.png` (the 144x80 `ICON0.PNG`
-out of the EBOOT) into the directory and the generated entry gains an `icon`
-path. Leave it out and the entry has none, so the client never spends a request
-discovering that there is no icon.
+Icons and screenshots are a convention, not a field: drop `icon.png` (the
+144x80 `ICON0.PNG` out of the EBOOT) or `screenshot.png` (480x272, the size of
+the screen) into the directory, and the generated entry gains an `icon` or
+`screenshot` path. Leave one out and the entry has none, so the client never
+spends a request discovering that there is nothing there.
+
+Both are fetched per app rather than with the catalog, and only for the app the
+user is looking at -- a list of fifty must stay one request.

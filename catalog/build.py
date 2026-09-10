@@ -18,6 +18,10 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 REQUIRED = ("id", "name", "author", "summary", "category", "license", "manifest")
 
+# Optional file in an app directory -> where it is served, and the field that
+# points at it. Both are 480x272 PNG at most, the size of the screen.
+ASSETS = {"icon.png": ("icons", "icon"), "screenshot.png": ("shots", "screenshot")}
+
 
 def load(path):
     """path is <id>/app.json; the directory name is the id."""
@@ -35,15 +39,17 @@ def main(out):
     out = Path(out)
     apps = [load(p) for p in sorted((HERE / "apps").glob("*/app.json"))]
 
-    # An icon is optional and never named by hand: an entry gets the field only
-    # if the file is there, so the client never spends a request on a 404.
-    icons = out.parent / "icons"
-    for app in apps:
-        src = HERE / "apps" / app["id"] / "icon.png"
-        if src.exists():
-            icons.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(src, icons / f"{app['id']}.png")
-            app["icon"] = f"icons/{app['id']}.png"
+    # Assets are never named by hand: an entry gets the field only if the file
+    # is there, so the client never spends a request discovering a 404.
+    for name, (subdir, field) in ASSETS.items():
+        for app in apps:
+            src = HERE / "apps" / app["id"] / name
+            if not src.exists():
+                continue
+            dest = out.parent / subdir
+            dest.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(src, dest / f"{app['id']}.png")
+            app[field] = f"{subdir}/{app['id']}.png"
     catalog = {
         "schema": 1,
         "generated": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -52,8 +58,10 @@ def main(out):
     # Compact separators: the client holds this in RAM, and the PSP has 24 MB.
     text = json.dumps(catalog, ensure_ascii=False, separators=(",", ":"))
     out.write_text(text + "\n", encoding="utf-8")
-    withicon = sum("icon" in a for a in apps)
-    print(f"{len(apps)} apps ({withicon} with an icon), {len(text)} bytes -> {out}")
+    icons = sum("icon" in a for a in apps)
+    shots = sum("screenshot" in a for a in apps)
+    print(f"{len(apps)} apps, {icons} icons, {shots} screenshots, "
+          f"{len(text)} bytes -> {out}")
 
 
 if __name__ == "__main__":
