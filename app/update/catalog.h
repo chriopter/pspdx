@@ -11,10 +11,14 @@ enum app_state { APP_UNKNOWN, APP_NOT_INSTALLED, APP_CURRENT, APP_UPDATE };
 struct app_entry {
     char id[96];
     char name[40];
+    char author[40];
     char summary[MAX_SUMMARY];
     char category[12];
     char license[16];
     char manifest[256];
+    /* Absolute already: the catalog serves this one relative to itself, and
+       resolving it once at parse time keeps the base URL in this file. */
+    char screenshot[256];
     enum app_state state;
     unsigned local_rev, remote_rev;
     char local_version[32], remote_version[32];

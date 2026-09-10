@@ -1,5 +1,6 @@
 #include <pspiofilemgr.h>
 #include <cjson/cJSON.h>
+#include <stdio.h>
 #include <string.h>
 
 #include "update/catalog.h"
@@ -18,6 +19,19 @@ static void copy_str(char *dst, size_t size, cJSON *value) {
     } else {
         dst[0] = '\0';
     }
+}
+
+/* Entries point at their assets relative to the catalog, so that moving the
+   whole thing to another host stays a one-line change. */
+static void asset_url(const char *rel, char *out, size_t size) {
+    if (!rel || !rel[0]) { out[0] = '\0'; return; }
+    if (strncmp(rel, "http://", 7) == 0 || strncmp(rel, "https://", 8) == 0) {
+        snprintf(out, size, "%s", rel);
+        return;
+    }
+    const char *slash = strrchr(CATALOG_URL, '/');
+    snprintf(out, size, "%.*s%s", (int)(slash - CATALOG_URL) + 1, CATALOG_URL,
+             rel);
 }
 
 static int parse(struct catalog *catalog) {
@@ -39,10 +53,16 @@ static int parse(struct catalog *catalog) {
         memset(entry, 0, sizeof(*entry));
         copy_str(entry->id, sizeof(entry->id), cJSON_GetObjectItemCaseSensitive(app, "id"));
         copy_str(entry->name, sizeof(entry->name), cJSON_GetObjectItemCaseSensitive(app, "name"));
+        copy_str(entry->author, sizeof(entry->author), cJSON_GetObjectItemCaseSensitive(app, "author"));
         copy_str(entry->summary, sizeof(entry->summary), cJSON_GetObjectItemCaseSensitive(app, "summary"));
         copy_str(entry->category, sizeof(entry->category), cJSON_GetObjectItemCaseSensitive(app, "category"));
         copy_str(entry->license, sizeof(entry->license), cJSON_GetObjectItemCaseSensitive(app, "license"));
         copy_str(entry->manifest, sizeof(entry->manifest), cJSON_GetObjectItemCaseSensitive(app, "manifest"));
+
+        char shot[256];
+        copy_str(shot, sizeof(shot), cJSON_GetObjectItemCaseSensitive(app, "screenshot"));
+        asset_url(shot, entry->screenshot, sizeof(entry->screenshot));
+
         if (!entry->id[0] || !entry->name[0] || !entry->manifest[0]) continue;
 
         struct installed installed;

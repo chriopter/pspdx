@@ -7,6 +7,7 @@
 
 #include "logic/entropy.h"
 #include "gui/entropy_screen.h"
+#include "gui/gfx.h"
 #include "gui/screen.h"
 
 #define GRID_W 60
@@ -196,7 +197,7 @@ static void record_frame(int frame) {
     if (!recording || frame % REC_EVERY) return;
     char path[64];
     snprintf(path, sizeof(path), REC_DIR "/F%05d.BMP", frame / REC_EVERY);
-    gui_screenshot(path);
+    gfx_screenshot(path);
 }
 
 int entropy_screen_run(void) {

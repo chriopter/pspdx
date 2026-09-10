@@ -96,7 +96,10 @@ int manifest_fetch(const char *url, const char *expect_id, struct manifest *m) {
     cJSON *disp   = cJSON_GetObjectItemCaseSensitive(root, "display");
 
     rc = -3;
-    if (!cJSON_IsNumber(schema) || schema->valueint != 1) { logline("manifest: schema"); goto out; }
+    if (!cJSON_IsString(schema) || strcmp(schema->valuestring, PSPDX_SCHEMA) != 0) {
+        logline("manifest: schema");
+        goto out;
+    }
     if (!cJSON_IsNumber(rev) || !cJSON_IsString(u) || !cJSON_IsString(sha) ||
         !cJSON_IsNumber(size) || !cJSON_IsString(id)) {
         logline("manifest: missing field");

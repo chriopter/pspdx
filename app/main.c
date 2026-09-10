@@ -9,7 +9,9 @@
 #include <string.h>
 
 #include "gui/entropy_screen.h"
+#include "gui/gfx.h"
 #include "gui/screen.h"
+#include "gui/shell.h"
 #include "install/install.h"
 #include "logic/entropy.h"
 #include "network/https.h"
@@ -18,7 +20,9 @@
 
 PSP_MODULE_INFO("pspdx", 0, 1, 0);
 PSP_MAIN_THREAD_ATTR(THREAD_ATTR_USER);
-PSP_HEAP_SIZE_KB(4 * 1024);
+/* One screenshot decodes into a megabyte of texture and wolfSSL wants its own
+   working set; four megabytes no longer covers both. */
+PSP_HEAP_SIZE_KB(12 * 1024);
 
 static struct catalog catalog;
 
@@ -48,34 +52,17 @@ static void dump_diagnostics(void) {
     catalog_dump_http();
 }
 
-struct install_ui {
-    struct gui_progress progress;
-};
-
-static void install_phase(void *ctx, const char *phase) {
-    struct install_ui *ui = ctx;
-    gui_progress_phase(&ui->progress, phase);
-    log_dump();
-}
-
-static void install_progress(void *ctx, size_t done, size_t total) {
-    struct install_ui *ui = ctx;
-    gui_progress_update(&ui->progress, done, total);
-}
-
 static int install_app(int index, int screenshot) {
     struct app_entry *entry = &catalog.apps[index];
     struct install_report report;
-    struct install_ui ui;
-    gui_install_begin(&ui.progress, entry->name);
 
+    shell_install_begin(entry->name);
     unsigned start = now_ms();
     int rc = install(entry->manifest, entry->id, &report,
-                     install_phase, install_progress, &ui);
-    gui_catalog(&catalog, index);
+                     shell_install_phase, shell_install_progress, NULL);
     unsigned seconds = (now_ms() - start) / 1000;
 
-    char message[SCREEN_COLS + 1];
+    char message[96];
     if (rc == 0) {
         entry->state = APP_CURRENT;
         entry->local_rev = report.rev;
@@ -88,8 +75,9 @@ static int install_app(int index, int screenshot) {
         snprintf(message, sizeof(message), "Install failed (%d): %s",
                  rc, log_at(log_count() - 1));
     }
-    gui_install_end(message);
-    if (screenshot) gui_screenshot("ms0:/PSPDX2.BMP");
+    shell_install_end(message);
+    shell_draw(&catalog, index);
+    if (screenshot) gfx_screenshot("ms0:/PSPDX2.BMP");
     return rc;
 }
 
@@ -111,24 +99,28 @@ static int auto_install_index(void) {
     return -1;
 }
 
-static void show_catalog(int updates) {
+/* The sweep and the failure dump both belong on the debug screen: one is a
+   grid of text cells, the other a wall of log lines. The shell takes the
+   display only once there is a catalog to put on it. */
+static void run_entropy(void) {
+    gui_init();
+    gui_header("gathering entropy");
+    install_recover();
+    entropy_init();
+    entropy_screen_prepare();
+    if (entropy_screen_is_replay() || !entropy_load()) entropy_screen_run();
+    entropy_save(entropy_screen_is_replay());
+}
+
+static int fetch_catalog(void) {
     gui_clear();
-    if (catalog.count >= 0) {
-        char header[64];
-        if (updates) {
-            snprintf(header, sizeof(header), "%d apps, %d update%s available",
-                     catalog.total, updates, updates == 1 ? "" : "s");
-        } else {
-            snprintf(header, sizeof(header), "%d apps  %lu bytes  %u ms handshake",
-                     catalog.total, (unsigned long)catalog.response_len,
-                     catalog.fetch.handshake_ms);
-        }
-        gui_header(header);
-        gui_catalog(&catalog, 0);
-        gui_status("X: install or update   SELECT: discard entropy and sweep again");
-    } else {
-        gui_failure();
+    gui_header("connecting");
+    if (net_up() < 0) {
+        logline("network failed");
+        return -1;
     }
+    logline("net up");
+    return catalog_fetch(&catalog);
 }
 
 int main(void) {
@@ -136,36 +128,33 @@ int main(void) {
         gui_init();
         pspDebugScreenPrintf("exit callback failed; HOME will not work\n");
     }
-    gui_init();
-    gui_header("gathering entropy");
 
-    install_recover();
-    entropy_init();
-    entropy_screen_prepare();
-    if (entropy_screen_is_replay() || !entropy_load()) entropy_screen_run();
-    entropy_save(entropy_screen_is_replay());
+    run_entropy();
 
-    gui_clear();
-    gui_header("connecting");
-    int count = -1;
-    if (net_up() < 0) {
-        logline("network failed");
-    } else {
-        logline("net up");
-        count = catalog_fetch(&catalog);
-    }
+    int count = fetch_catalog();
     catalog.count = count;
-    int updates = count > 0 ? catalog_check_updates(&catalog) : 0;
-    show_catalog(updates);
-    sceDisplayWaitVblankStart();
-    gui_screenshot("ms0:/PSPDX.BMP");
+    if (count > 0) catalog_check_updates(&catalog);
     dump_diagnostics();
 
+    if (count <= 0 || !shell_init()) {
+        /* Nothing to browse, or no system font to browse it with. Either way
+           the log says which, and the log is what gets shown. */
+        gui_clear();
+        gui_failure();
+        sceDisplayWaitVblankStart();
+        gfx_screenshot("ms0:/PSPDX.BMP");
+        dump_diagnostics();
+        for (;;) sceDisplayWaitVblankStart();
+    }
+
     int cursor = 0;
-    int automatic = count > 0 ? auto_install_index() : -1;
+    shell_shot_sync(&catalog, cursor);
+    shell_draw(&catalog, cursor);
+    gfx_screenshot("ms0:/PSPDX.BMP");
+
+    int automatic = auto_install_index();
     if (automatic >= 0) {
         cursor = automatic;
-        gui_catalog(&catalog, cursor);
         install_app(cursor, 1);
         dump_diagnostics();
     }
@@ -176,27 +165,30 @@ int main(void) {
         sceCtrlReadBufferPositive(&pad, 1);
         unsigned pressed = pad.Buttons & ~last_buttons;
         last_buttons = pad.Buttons;
-        if (count > 0 && (pressed & PSP_CTRL_DOWN) && cursor + 1 < catalog.count)
-            gui_catalog(&catalog, ++cursor);
-        if (count > 0 && (pressed & PSP_CTRL_UP) && cursor > 0)
-            gui_catalog(&catalog, --cursor);
-        if (count > 0 && (pressed & PSP_CTRL_CROSS)) {
+
+        if ((pressed & PSP_CTRL_DOWN) && cursor + 1 < catalog.count) cursor++;
+        if ((pressed & PSP_CTRL_UP) && cursor > 0) cursor--;
+        if (pressed & PSP_CTRL_CROSS) {
             install_app(cursor, 0);
             dump_diagnostics();
         }
         if (pressed & PSP_CTRL_SELECT) {
-            entropy_forget();
-            entropy_init();
+            /* Back to the debug screen for the sweep, then hand the display
+               to the shell again. */
+            shell_shutdown();
+            gui_init();
             gui_clear();
             gui_header("entropy discarded");
+            entropy_forget();
+            entropy_init();
             entropy_screen_run();
             entropy_save(entropy_screen_is_replay());
-            gui_clear();
-            gui_header("entropy regenerated");
-            if (count >= 0) gui_catalog(&catalog, cursor);
             entropy_screen_reset_cache();
+            if (!shell_init()) return 0;
         }
-        sceDisplayWaitVblankStart();
+
+        shell_shot_sync(&catalog, cursor);
+        shell_draw(&catalog, cursor);
     }
     return 0;
 }

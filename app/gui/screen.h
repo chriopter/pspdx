@@ -1,8 +1,10 @@
 #ifndef PSPDX_SCREEN_H
 #define PSPDX_SCREEN_H
 
-#include <stddef.h>
-#include "update/catalog.h"
+
+/* What is left of the text UI: the entropy sweep draws itself on the debug
+   screen, and a failed run dumps the log there. Everything else moved to the
+   GE shell in gui/shell.h. */
 
 /* pspDebugScreen is an 8x8 font on a 480x272 panel: 60 columns, 34 rows. */
 #define SCREEN_COLS 60
@@ -17,22 +19,10 @@
 #define COL_TEXT   0xFFFFFFFF
 #define COL_DIM    0xFF909090
 
-struct gui_progress {
-    char phase[16];
-    unsigned last_draw;
-    int row;
-};
-
 void gui_init(void);
 void gui_clear(void);
 void gui_header(const char *right);
-void gui_catalog(const struct catalog *catalog, int cursor);
 void gui_status(const char *text);
 void gui_failure(void);
-void gui_install_begin(struct gui_progress *progress, const char *name);
-void gui_progress_phase(void *ctx, const char *phase);
-void gui_progress_update(void *ctx, size_t done, size_t total);
-void gui_install_end(const char *message);
-void gui_screenshot(const char *path);
 
 #endif
