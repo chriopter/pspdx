@@ -86,6 +86,7 @@ int zip_next(struct zipread *z, struct zipentry *e) {
 
     uint16_t flags = rd16(h + 8);
     e->method = rd16(h + 10);
+    e->crc = rd32(h + 16);
     e->csize = rd32(h + 20);
     e->usize = rd32(h + 24);
     uint16_t nlen = rd16(h + 28), xlen = rd16(h + 30), clen = rd16(h + 32);
@@ -100,6 +101,19 @@ int zip_next(struct zipread *z, struct zipentry *e) {
     z->cd_pos += 46u + nlen + xlen + clen;
     z->index++;
     return 1;
+}
+
+/* The archive was hashed as it came off the network, which says nothing about
+   what reached the stick. The per-entry CRC-32 is the only check that covers
+   the bytes actually written. */
+static int finish(const struct zipentry *e, uint32_t written, unsigned long sum) {
+    if (written != e->usize) {
+        logline("zip: %s is %lu bytes, not %lu",
+                e->name, (unsigned long)written, (unsigned long)e->usize);
+        return -1;
+    }
+    if ((uint32_t)sum != e->crc) { logline("zip: %s fails its crc", e->name); return -1; }
+    return 0;
 }
 
 /* Streams one entry's bytes to sink. The local header's own name and extra
@@ -121,15 +135,19 @@ int zip_extract(struct zipread *z, const struct zipentry *e,
     static unsigned char in[32 * 1024];
     static unsigned char out[64 * 1024];
     uint32_t left = e->csize;
+    uint32_t written = 0;
+    unsigned long sum = crc32(0L, Z_NULL, 0);
 
     if (e->method == 0) {
         while (left) {
             int n = sceIoRead(z->fd, in, left < sizeof(in) ? left : sizeof(in));
             if (n <= 0) return -1;
             if (sink(ctx, in, (size_t)n) != 0) return -1;
+            sum = crc32(sum, in, (uInt)n);
+            written += (uint32_t)n;
             left -= (uint32_t)n;
         }
-        return 0;
+        return finish(e, written, sum);
     }
 
     z_stream s;
@@ -150,9 +168,18 @@ int zip_extract(struct zipread *z, const struct zipentry *e,
         zr = inflate(&s, Z_NO_FLUSH);
         if (zr != Z_OK && zr != Z_STREAM_END) { logline("zip: inflate %d in %s", zr, e->name); break; }
         size_t got = sizeof(out) - s.avail_out;
+        /* A deflate stream can claim any expansion ratio it likes. Writing
+           past the size the central directory declared is how a 42 MB archive
+           fills a Memory Stick, so it ends the entry rather than the stick. */
+        if (written + got > e->usize) {
+            logline("zip: %s expands past its declared size", e->name);
+            break;
+        }
         if (got && sink(ctx, out, got) != 0) break;
+        sum = crc32(sum, out, (uInt)got);
+        written += (uint32_t)got;
     }
-    if (zr == Z_STREAM_END) rc = 0;
+    if (zr == Z_STREAM_END) rc = finish(e, written, sum);
     inflateEnd(&s);
     return rc;
 }

@@ -13,7 +13,7 @@ struct zipread {
 struct zipentry {
     char name[256];
     uint16_t method;             /* 0 stored, 8 deflate */
-    uint32_t csize, usize, local_off;
+    uint32_t csize, usize, crc, local_off;
     int encrypted, name_truncated;
 };
 

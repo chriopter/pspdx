@@ -587,7 +587,7 @@ static int check_updates(void) {
         if (e->state == APP_NOT_INSTALLED) continue;
 
         struct manifest m;
-        if (manifest_fetch(e->manifest, &m) < 0) continue;
+        if (manifest_fetch(e->manifest, e->id, &m) < 0) continue;
         e->remote_rev = m.rev;
         strncpy(e->remote_version, m.version, sizeof(e->remote_version) - 1);
 
@@ -702,7 +702,7 @@ static int install_app(int idx, int shot) {
     draw_status("");
 
     unsigned start = now_ms();
-    int rc = install(e->manifest, &rep, ui_phase, ui_progress, &u);
+    int rc = install(e->manifest, e->id, &rep, ui_phase, ui_progress, &u);
     draw_list(idx);
     unsigned secs = (now_ms() - start) / 1000;
 
@@ -798,6 +798,7 @@ int main(void) {
 
     /* Before anything touches the network: fill the entropy pool, then hand
        wolfSSL the source. Without this every key it derives is guessable. */
+    install_recover();
     psprandom_init();
     record_init();
     trace_load();

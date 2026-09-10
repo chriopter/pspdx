@@ -11,6 +11,7 @@
  */
 
 #include <pspkernel.h>
+#include <pspiofilemgr.h>
 #include <psputility.h>
 #include <psputility_netmodules.h>
 #include <pspnet.h>
@@ -27,6 +28,7 @@
 #include <wolfssl/ssl.h>
 
 #include "pspdx.h"
+#include "ca_certs.h"
 
 #define PORT 443
 #define MAX_REDIRECTS 5
@@ -54,9 +56,29 @@ void net_down(void) {
     sceUtilityUnloadNetModule(PSP_NET_MODULE_COMMON);
 }
 
+#ifdef DEBUG_WOLFSSL
+/* Development only: wolfSSL's own trace, appended to the stick. It is the only
+   way to see which step of a chain check failed. */
+static void wolf_log(const int level, const char *const msg) {
+    (void)level;
+    int fd = sceIoOpen("ms0:/WOLF.LOG", PSP_O_WRONLY | PSP_O_CREAT | PSP_O_APPEND, 0777);
+    if (fd < 0) return;
+    sceIoWrite(fd, msg, strlen(msg));
+    sceIoWrite(fd, "\n", 1);
+    sceIoClose(fd);
+}
+#endif
+
 int net_up(void) {
+#ifdef DEBUG_WOLFSSL
+    wolfSSL_SetLoggingCb(wolf_log);
+    wolfSSL_Debugging_ON();
+#endif
     if (sceUtilityLoadNetModule(PSP_NET_MODULE_COMMON) < 0) return -1;
-    if (sceUtilityLoadNetModule(PSP_NET_MODULE_INET) < 0)   return -2;
+    if (sceUtilityLoadNetModule(PSP_NET_MODULE_INET) < 0) {
+        sceUtilityUnloadNetModule(PSP_NET_MODULE_COMMON);
+        return -2;
+    }
 
     if (sceNetInit(128 * 1024, 42, 4 * 1024, 42, 4 * 1024) < 0) goto fail;
     g_net.net = 1;
@@ -209,7 +231,47 @@ static int url_resolve(const struct url *base, const char *loc, size_t loclen,
         strcpy(out->path, tmp);
         return 0;
     }
-    return url_parse(tmp, out);
+    if (strncmp(tmp, "https://", 8) == 0) return url_parse(tmp, out);
+    if (strncmp(tmp, "http://", 7) == 0) {
+        /* Refusing rather than following: a redirect down to plain HTTP is
+           where a downgrade would happen, and no host here needs it. */
+        logline("url: refusing redirect to http");
+        return -1;
+    }
+
+    /* A bare relative reference, resolved against the base directory. */
+    *out = *base;
+    const char *slash = strrchr(base->path, '/');
+    size_t dir = slash ? (size_t)(slash - base->path) + 1 : 1;
+    if (dir + strlen(tmp) >= sizeof(out->path)) return -1;
+    memcpy(out->path, base->path, dir);
+    strcpy(out->path + dir, tmp);
+    return 0;
+}
+
+/* The one check that has to be waived: the console's clock. The PSP's RTC is
+   user-settable and resets to 2000 when the battery dies, so a correct chain
+   would be rejected as not-yet-valid on a large share of real consoles. Every
+   other verification failure -- unknown issuer, bad signature, wrong host --
+   still fails the handshake. This trades expiry for the ability to run at all;
+   revocation was never checked on a device with no clock anyway. */
+static int verify_ignoring_dates(int preverify, WOLFSSL_X509_STORE_CTX *store) {
+    if (preverify) return 1;
+    if (store->error == ASN_BEFORE_DATE_E || store->error == ASN_AFTER_DATE_E) {
+        logline("cert date ignored: the console clock is not trustworthy");
+        return 1;
+    }
+    {
+        WOLFSSL_X509 *c = wolfSSL_X509_STORE_CTX_get_current_cert(store);
+        char *sub = c ? wolfSSL_X509_get_subjectCN(c) : NULL;
+        char iss[48] = "?";
+        if (c) wolfSSL_X509_NAME_oneline(wolfSSL_X509_get_issuer_name(c), iss, sizeof(iss));
+        /* ASN_NO_SIGNER_E means a CA we do not carry, not an attack: rebuild
+           the bundle with tools/make-ca-bundle.py and this host works again. */
+        logline("cert %d at depth %d: %.14s from %.24s", store->error,
+                store->error_depth, sub ? sub : "?", iss);
+    }
+    return 0;
 }
 
 /* ---------------------------------------------------------------- request */
@@ -264,9 +326,18 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
     ctx = wolfSSL_CTX_new(wolfTLSv1_3_client_method());
     if (!ctx) { logline("no TLS 1.3 in this build"); goto out; }
 
-    /* No CA bundle on the stick yet. The handshake is real, the chain is not
-       checked; pinning our own issuer is the next step. */
-    wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_NONE, NULL);
+    /* Nothing here is signed, so the chain is the only thing standing between a
+       hostile access point and an EBOOT of its choosing: it would only have to
+       serve its own catalog, its own manifest, and a ZIP whose sha256 matches
+       the hash in that manifest. The roots are compiled in -- Sony's store is
+       from 2007 and expired long ago. */
+    if (wolfSSL_CTX_load_verify_buffer(ctx, (const unsigned char *)PSPDX_CA_PEM,
+                                       (long)sizeof(PSPDX_CA_PEM) - 1,
+                                       WOLFSSL_FILETYPE_PEM) != WOLFSSL_SUCCESS) {
+        logline("CA bundle rejected");
+        goto out;
+    }
+    wolfSSL_CTX_set_verify(ctx, WOLFSSL_VERIFY_PEER, verify_ignoring_dates);
     wolfSSL_CTX_SetIORecv(ctx, io_recv);
     wolfSSL_CTX_SetIOSend(ctx, io_send);
 
@@ -284,6 +355,11 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
     if (wolfSSL_UseSNI(ssl, WOLFSSL_SNI_HOST_NAME, u->host,
                        (unsigned short)strlen(u->host)) != WOLFSSL_SUCCESS)
         logline("SNI rejected");
+    /* Without this a valid certificate for any other host would pass. */
+    if (wolfSSL_check_domain_name(ssl, u->host) != WOLFSSL_SUCCESS) {
+        logline("cannot pin domain name");
+        goto out;
+    }
     if (wolfSSL_UseKeyShare(ssl, WOLFSSL_ECC_X25519) != WOLFSSL_SUCCESS)
         logline("x25519 key share unavailable");
 
@@ -328,6 +404,8 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
 
     /* Read until the head is complete, then hand the rest to the sink. */
     const char *body_start = NULL;
+    const char *leftover = NULL;
+    size_t leftover_len = 0;
     size_t want = 0;
     int have_length = 0, chunked = 0;
     res->body_len = 0;
@@ -343,11 +421,19 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
             size_t len = (size_t)rc;
 
             if (!body_start) {
-                if (headlen + len > sizeof(head)) { logline("http: head too large"); goto out; }
-                memcpy(head + headlen, data, len);
-                headlen += len;
+                /* Only what fits is copied; a read that carries the head plus
+                   megabytes of body is normal and must not be refused. */
+                size_t room = sizeof(head) - headlen;
+                size_t take = len < room ? len : room;
+                memcpy(head + headlen, data, take);
+                headlen += take;
                 const char *sep = mem_find(head, headlen, "\r\n\r\n", 4);
-                if (!sep) continue;
+                if (!sep) {
+                    if (headlen == sizeof(head)) { logline("http: head too large"); goto out; }
+                    continue;
+                }
+                leftover = data + take;
+                leftover_len = len - take;
 
                 size_t hl = (size_t)(sep - head) + 4;
                 if (sscanf(head, "HTTP/%*d.%*d %ld", &res->status) != 1) {
@@ -385,16 +471,37 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
                 data = body_start;
                 len = headlen - hl;
                 ret = 1;                                 /* body has begun */
-                if (len == 0) {
+                if (len == 0 && leftover_len == 0) {
                     if (have_length && want == 0) { ret = 0; goto out; }
                     continue;
                 }
             }
 
-            if (sink && sink(sink_ctx, data, len) != 0) { logline("sink aborted"); goto out; }
-            res->body_len += len;
-            if (progress) progress(progress_ctx, res->body_len, want);
-            if (have_length && res->body_len >= want) { ret = 0; goto out; }
+            /* Two pieces on the read that completed the head: the tail of the
+               buffer it was copied into, then what did not fit. */
+            for (int piece = 0; piece < 2; piece++) {
+                if (piece == 1) {
+                    if (leftover_len == 0) break;
+                    data = leftover;
+                    len = leftover_len;
+                    leftover_len = 0;
+                }
+                if (len == 0) continue;
+
+                /* Anything past Content-Length is not part of this message. */
+                if (have_length && res->body_len + len > want) {
+                    logline("http: %lu bytes past content-length, ignored",
+                            (unsigned long)(res->body_len + len - want));
+                    len = want - res->body_len;
+                }
+                if (len && sink && sink(sink_ctx, data, len) != 0) {
+                    logline("sink aborted");
+                    goto out;
+                }
+                res->body_len += len;
+                if (progress) progress(progress_ctx, res->body_len, want);
+                if (have_length && res->body_len >= want) { ret = 0; goto out; }
+            }
             continue;
         }
 
@@ -434,6 +541,7 @@ int https_get(const char *url, https_sink sink, void *sink_ctx,
     struct url u, next;
     struct https_result res;
     memset(&res, 0, sizeof(res));
+    if (out) *out = res;                      /* callers log it either way */
     if (url_parse(url, &u) < 0) return -1;
 
     for (res.redirects = 0; ; res.redirects++) {
@@ -443,7 +551,12 @@ int https_get(const char *url, https_sink sink, void *sink_ctx,
             if (out) *out = res;
             return rc;
         }
-        if (res.redirects >= MAX_REDIRECTS) { logline("too many redirects"); return -3; }
+        if (res.redirects >= MAX_REDIRECTS) {
+            logline("too many redirects");
+            strncpy(res.host, u.host, sizeof(res.host) - 1);
+            if (out) *out = res;
+            return -3;
+        }
         u = next;
     }
 }

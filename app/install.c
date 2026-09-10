@@ -36,6 +36,10 @@
    reports success and leaves tmp/Foo behind. */
 #define STAGE     GAME_DIR "/.pspdx-stage"
 
+/* A Memory Stick tops out at 32 GB and no homebrew is anywhere near this.
+   The number exists so that a size field cannot ask for something absurd. */
+#define MAX_PACKAGE_BYTES (1024u * 1024u * 1024u)
+
 /* ------------------------------------------------------------- manifest */
 
 static char g_manifest[8 * 1024];
@@ -49,6 +53,19 @@ static int mem_sink(void *ctx, const void *data, size_t len) {
     return 0;
 }
 
+/* An id becomes a file name, so it may not carry a path. Reverse-DNS letters,
+   digits, dot, dash and underscore only. */
+static int id_is_safe(const char *id) {
+    if (!*id || strlen(id) > 80) return 0;
+    for (const char *p = id; *p; p++) {
+        int ok = (*p >= 'a' && *p <= 'z') || (*p >= 'A' && *p <= 'Z') ||
+                 (*p >= '0' && *p <= '9') || *p == '.' || *p == '-' || *p == '_';
+        if (!ok) return 0;
+    }
+    if (strstr(id, "..")) return 0;
+    return 1;
+}
+
 static int hexval(char c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -56,7 +73,7 @@ static int hexval(char c) {
     return -1;
 }
 
-int manifest_fetch(const char *url, struct manifest *m) {
+int manifest_fetch(const char *url, const char *expect_id, struct manifest *m) {
     struct https_result r;
     g_manifest_len = 0;
     memset(m, 0, sizeof(*m));
@@ -90,6 +107,23 @@ int manifest_fetch(const char *url, struct manifest *m) {
         int hi = hexval(sha->valuestring[2 * i]), lo = hexval(sha->valuestring[2 * i + 1]);
         if (hi < 0 || lo < 0) { logline("manifest: sha256 hex"); goto out; }
         m->sha256[i] = (unsigned char)(hi * 16 + lo);
+    }
+    /* Attacker-controlled doubles: out of range, the conversion to an integer
+       is undefined rather than merely wrong. */
+    if (!(rev->valuedouble >= 0 && rev->valuedouble <= 4294967295.0)) {
+        logline("manifest: rev out of range");
+        goto out;
+    }
+    if (!(size->valuedouble > 0 && size->valuedouble <= MAX_PACKAGE_BYTES)) {
+        logline("manifest: size out of range");
+        goto out;
+    }
+    if (!id_is_safe(id->valuestring)) { logline("manifest: unusable id"); goto out; }
+    if (expect_id && strcmp(expect_id, id->valuestring) != 0) {
+        /* The catalog said which package this is. A manifest that renames
+           itself would otherwise overwrite another package's record. */
+        logline("manifest: id is not %s", expect_id);
+        goto out;
     }
     m->rev = (unsigned)rev->valuedouble;
     m->size = (size_t)size->valuedouble;
@@ -248,7 +282,10 @@ static int unpack(struct zipread *z, const char *dir, struct install_report *rep
         if (e.name_truncated || !safe_relative(rel)) { logline("unpack: refusing %s", e.name); return -1; }
 
         char path[256];
-        snprintf(path, sizeof(path), STAGE "/%s", rel);
+        if (snprintf(path, sizeof(path), STAGE "/%s", rel) >= (int)sizeof(path)) {
+            logline("unpack: path too long: %s", rel);
+            return -1;
+        }
         size_t L = strlen(path);
         if (path[L - 1] == '/') { path[L - 1] = '\0'; mkdir_p(path); continue; }
 
@@ -260,7 +297,9 @@ static int unpack(struct zipread *z, const char *dir, struct install_report *rep
         o.fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
         if (o.fd < 0) { logline("unpack: cannot create %s", rel); return -1; }
         int xrc = zip_extract(z, &e, out_sink, &o);
-        sceIoClose(o.fd);
+        /* On FAT32 the write that fails is often the close: the stick fills up
+           while earlier writes were still buffered. */
+        if (sceIoClose(o.fd) < 0) { logline("unpack: close failed on %s", rel); return -1; }
         if (xrc < 0) { logline("unpack: failed on %s", rel); return -1; }
         files++;
         if (progress) progress(pctx, done, total);
@@ -277,18 +316,25 @@ static int unpack(struct zipread *z, const char *dir, struct install_report *rep
 
 /* What the client will need to uninstall or update later: which directory it
    actually wrote, and which manifest to ask. */
+/* Written to a temporary name and renamed over the old record, so a stick that
+   fills up or a battery that dies leaves the previous record intact rather
+   than an empty file where the package's identity used to be. */
 static int db_write(const struct manifest *m, const char *dir) {
-    char path[256];
-    snprintf(path, sizeof(path), DB_DIR "/%s.json", m->id);
+    char path[256], tmpname[128];
     mkdir_p(DB_DIR);
+    snprintf(path, sizeof(path), DB_DIR "/%s.json.new", m->id);
+    snprintf(tmpname, sizeof(tmpname), "%s.json", m->id);
+
     int fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
-    if (fd < 0) return -1;
-    char line[512];
+    if (fd < 0) { logline("db: cannot write %s", m->id); return -1; }
+    char line[1024];
     int n = snprintf(line, sizeof(line),
                      "{\"id\":\"%s\",\"rev\":%u,\"dir\":\"%s\",\"manifest\":\"%s\",\"version\":\"%s\"}\n",
                      m->id, m->rev, dir, m->manifest_url, m->version);
-    sceIoWrite(fd, line, (SceSize)n);
-    sceIoClose(fd);
+    if (n <= 0 || n >= (int)sizeof(line)) { sceIoClose(fd); return -1; }
+    int w = sceIoWrite(fd, line, (SceSize)n);
+    if (sceIoClose(fd) < 0 || w != n) { logline("db: %s not persisted", m->id); return -1; }
+    if (sceIoRename(path, tmpname) < 0) { logline("db: cannot commit %s", m->id); return -1; }
     return 0;
 }
 
@@ -322,13 +368,46 @@ int db_read(const char *id, struct installed *out) {
 
 /* --------------------------------------------------------------- install */
 
-int install(const char *manifest_url, struct install_report *rep,
+/* Finishes an install that the battery interrupted between the two renames.
+   The window is one rename wide: the old copy is called <dir>.old and the new
+   one is not in place yet, so a package can look uninstalled while its files
+   are still there. Called once at startup. */
+void install_recover(void) {
+    SceUID d = sceIoDopen(GAME_DIR);
+    if (d < 0) return;
+    SceIoDirent e;
+    memset(&e, 0, sizeof(e));
+    while (sceIoDread(d, &e) > 0) {
+        size_t n = strlen(e.d_name);
+        if (n > 4 && strcmp(e.d_name + n - 4, ".old") == 0) {
+            char live[128], old[192];
+            snprintf(live, sizeof(live), "%.*s", (int)(n - 4), e.d_name);
+            snprintf(old, sizeof(old), GAME_DIR "/%s", e.d_name);
+            char livepath[192];
+            snprintf(livepath, sizeof(livepath), GAME_DIR "/%s", live);
+            SceUID probe = sceIoDopen(livepath);
+            if (probe >= 0) {
+                sceIoDclose(probe);           /* the new copy made it; drop the old */
+                rm_rf(old);
+                logline("recovered: dropped %s", e.d_name);
+            } else if (sceIoRename(old, live) >= 0) {
+                logline("recovered: restored %s", live);
+            }
+        }
+        memset(&e, 0, sizeof(e));
+    }
+    sceIoDclose(d);
+    rm_rf(STAGE);
+}
+
+int install(const char *manifest_url, const char *expect_id,
+            struct install_report *rep,
             install_phase_cb phase, https_progress progress, void *pctx) {
     struct manifest m;
     memset(rep, 0, sizeof(*rep));
 
     if (phase) phase(pctx, "manifest");
-    if (manifest_fetch(manifest_url, &m) < 0) return -1;
+    if (manifest_fetch(manifest_url, expect_id, &m) < 0) return -1;
     strncpy(m.manifest_url, manifest_url, sizeof(m.manifest_url) - 1);
     strncpy(rep->id, m.id, sizeof(rep->id) - 1);
     strncpy(rep->version, m.version, sizeof(rep->version) - 1);
@@ -336,7 +415,15 @@ int install(const char *manifest_url, struct install_report *rep,
 
     mkdir_p(TMP_DIR);
     mkdir_p(GAME_DIR);
+    /* A staging tree left by an earlier failure must be gone, not merged into:
+       its files would be committed as part of this package. */
     rm_rf(STAGE);
+    SceUID leftover = sceIoDopen(STAGE);
+    if (leftover >= 0) {
+        sceIoDclose(leftover);
+        logline("install: cannot clear the staging directory");
+        return -6;
+    }
 
     if (phase) phase(pctx, "download");
     if (download(&m, progress, pctx) < 0) { sceIoRemove(ARCHIVE); return -2; }
@@ -375,7 +462,12 @@ int install(const char *manifest_url, struct install_report *rep,
         return -5;
     }
     rm_rf(old);
-    db_write(&m, dir);
+    if (db_write(&m, dir) < 0) {
+        /* The files are in place but nothing remembers them, so the next run
+           would offer the package as uninstalled and write over it. */
+        logline("installed, but the record did not persist");
+        return -7;
+    }
     logline("installed %s -> PSP/GAME/%s", m.id, dir);
     return 0;
 }

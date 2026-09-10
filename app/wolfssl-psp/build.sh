@@ -13,6 +13,25 @@
 #                    wolfSSL_Init() overwrites it with wc_GenerateSeed again
 #                    (src/ssl.c:6276) before anything of ours can take effect.
 #
+#   ALT_CERT_        Trust the chain as soon as a certificate in it is one we
+#   CHAINS           already hold, instead of insisting that every certificate
+#                    above it also verifies. Public CAs cross-sign: GitHub
+#                    Pages sends a chain that ends in a Let's Encrypt root
+#                    cross-signed by ISRG, and verifying that last signature
+#                    fails with ASN_SIG_CONFIRM_E (-155) even though ISRG Root
+#                    X1 is right there in our bundle and already anchored the
+#                    intermediate below it.
+#
+#   SP_INT_BITS      The big-integer backend sizes itself from what is compiled
+#   4096             in, and with only RSA and no large FFDHE parameters it
+#                    settles on 3072 bits (sp_int.h, the "must be SP math all"
+#                    branch). Every RSA-4096 signature then fails to verify with
+#                    ASN_SIG_CONFIRM_E (-155) -- including the one ISRG Root X1
+#                    puts on the chain GitHub Pages serves. A size limit that
+#                    presents itself as a forged certificate is the worst kind.
+#                    WOLFSSL_SP_4096 alone does not do it: that branch is only
+#                    consulted when SP RSA is built, which it is not here.
+#
 #   CURVE25519 &c.   X25519 costs a fraction of P-256 on a core with no crypto
 #                    hardware -- measured here, five key exchanges: 154 ms
 #                    against 1032 ms. Ed25519 is for package signatures,
@@ -41,7 +60,7 @@ tar xf "v${VER}-stable.tar.gz"
 cd "wolfssl-${VER}-stable"
 
 mkdir -p build && cd build
-CFLAGS="-DNO_WRITEV -DNO_DEV_RANDOM -DCUSTOM_RAND_GENERATE_SEED=psprandom_seed_raw -include $HERE/psprandom_decl.h" \
+CFLAGS="${EXTRA_CFLAGS:-} -DNO_WRITEV -DNO_DEV_RANDOM -DSP_INT_BITS=4096 -DWOLFSSL_ALT_CERT_CHAINS -DCUSTOM_RAND_GENERATE_SEED=psprandom_seed_raw -include $HERE/psprandom_decl.h" \
   cmake -Wno-dev \
     -DCMAKE_TOOLCHAIN_FILE="$PSPDEV/psp/share/pspdev.cmake" \
     -DCMAKE_INSTALL_PREFIX="$OUT" \

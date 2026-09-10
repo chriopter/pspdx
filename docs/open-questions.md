@@ -2,18 +2,30 @@
 
 ## Signing — decided against, for now
 
-Nothing is signed. TLS 1.3 to GitHub carries the trust, and that is the whole
-arrangement:
+Nothing is signed. TLS 1.3 carries the trust, which only works because the
+client actually verifies the chain: 17 roots compiled into the EBOOT, the
+hostname checked against the certificate, and an unknown CA refused. The
+console's clock is the one check waived, because the PSP's RTC is user-settable
+and resets when the battery dies, so a correct certificate would be rejected as
+not-yet-valid on a large share of real consoles.
+
+That is the whole arrangement:
 
 | | who is trusted | what it takes to lie |
 |---|---|---|
-| catalog | us, over HTTPS | our repository, or a certificate for our host |
-| manifest | the author, over HTTPS | the author's repository, or one for theirs |
+| catalog | us, over verified HTTPS | our repository, or a certificate a public CA mis-issues for our host |
+| manifest | the author, over verified HTTPS | the author's repository, or one for theirs |
 | artifact | the manifest's `sha256` | see above — the hash is pinned by the manifest |
 
 The hash is what actually protects the 42 MB, and it costs nothing. Signatures
-would protect against a compromised transport, and there is no transport left
-to compromise while everything comes from one origin over TLS.
+would protect against a compromised transport, and the transport is verified.
+
+Verification is not free of judgement, though: which roots ship is a decision
+that has to be revisited. jsDelivr is multi-CDN and answered from GlobalSign at
+one point of presence and Sectigo at another, and GitHub has moved between
+DigiCert, Sectigo and Let's Encrypt. An unknown root is a refused connection
+with the CA named in the log, and `tools/make-ca-bundle.py` is where the answer
+goes.
 
 The reason to stop here rather than build it anyway: a signature is only worth
 its complexity once the key can be verified independently of the thing it

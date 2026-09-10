@@ -4,6 +4,18 @@ The on-device client. Right now it collects entropy, opens a TLS 1.3 connection
 and prints the response — the groundwork under a package manager that does not
 exist yet.
 
+## What it trusts
+
+The chain is verified against `ca_certs.h`, 17 roots compiled in. The PSP has no
+CA store worth using, so the client carries its own; regenerate it with
+
+```sh
+python3 tools/make-ca-bundle.py
+```
+
+A host whose CA is not in there fails the handshake and names the CA in
+`PSPDX.LOG`. That is the signal to add it.
+
 ## Building
 
 ```sh

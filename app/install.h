@@ -37,11 +37,19 @@ int db_read(const char *id, struct installed *out);
 
 typedef void (*install_phase_cb)(void *ctx, const char *phase);
 
-int manifest_fetch(const char *url, struct manifest *m);
+/* expect_id, when given, is the id the catalog promised: a manifest that
+   claims a different one is refused rather than allowed to overwrite another
+   package's record. */
+int manifest_fetch(const char *url, const char *expect_id, struct manifest *m);
+
+/* Finishes an install interrupted between its two renames. Call once at
+   startup, before anything reads the database. */
+void install_recover(void);
 
 /* Fetch manifest, download, verify, unpack, rename into place. Returns 0 on
    success; negative on the phase that failed. Nothing is left half-written. */
-int install(const char *manifest_url, struct install_report *rep,
+int install(const char *manifest_url, const char *expect_id,
+            struct install_report *rep,
             install_phase_cb phase, https_progress progress, void *pctx);
 
 #endif
