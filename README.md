@@ -73,14 +73,13 @@ Copy: [`app.pspdx.template`](app.pspdx.template)
 
 ## What is listed
 
-Four entries, which between them cover every shape the catalog has:
-
 | | |
 |---|---|
-| [Extreme Tux Racer](https://github.com/chriopter/psp-tuxracer) | a real port: 44 MB, 639 files, GPL-2.0, manifest kept by its author |
+| [Extreme Tux Racer](https://github.com/chriopter/psp-tuxracer) | a real port: 44 MB, 639 files, GPL-2.0 |
 | [Rust Raytracer](https://github.com/chriopter/psp-rust-raytracer) | a real demo, and the smallest thing that still looks like something |
-| [PSPDX Test App](https://github.com/chriopter/psp-dx-testapp) | 69 KB of hello world, so a `rev` comparison can be watched without downloading 44 MB |
-| [Abandoned Test App](https://github.com/chriopter/psp-dx-testapp-abandoned) | the same, with no manifest and no author: the index carries its release itself |
+
+[The catalog page](https://chriopter.github.io/pspdx-catalog/) is the current
+list.
 
 ## App Tech
 
@@ -316,10 +315,3 @@ that works on a real PSP, and on a host whose desktop is locked.
 - **Real hardware.** It has only ever run in PPSSPP.
 - **Nothing is signed**, so the index is trusted completely. Fine while one
   person writes it; less fine now that a bot does.
-
----
-
-<sup>To watch an update happen: bump `VERSION` in psp-dx-testapp, cut a release,
-raise `rev` in its `app.pspdx`, and the client finds it within minutes. For the
-abandoned one the same test runs the other way round -- the release is cut
-upstream and the catalog entry is what gets edited.</sup>
