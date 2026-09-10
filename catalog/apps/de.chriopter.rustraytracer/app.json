@@ -1,0 +1,10 @@
+{
+  "id": "de.chriopter.rustraytracer",
+  "name": "Rust Raytracer",
+  "author": "chriopter",
+  "summary": "Real-time ray tracing on a 333 MHz MIPS CPU.",
+  "category": "demos",
+  "license": "MIT",
+  "homepage": "https://github.com/chriopter/psp-rust-raytracer",
+  "manifest": "https://cdn.jsdelivr.net/gh/chriopter/psp-rust-raytracer@master/raytracer.pspdx"
+}

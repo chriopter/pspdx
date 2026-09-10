@@ -68,7 +68,7 @@ The registry stores what rarely changes plus a pointer, and never a version:
 Keeping the version out of the catalog is the point: the catalog cannot go stale
 in a way that matters, because it never claimed to know the current version.
 
-One file per app is what gets edited, under `catalog/apps/`; one generated file
+One directory per app is what gets edited, under `catalog/apps/`; one generated file
 is what gets served. About 200 bytes per entry, so a thousand apps is 200 KB and
 one fetch.
 
