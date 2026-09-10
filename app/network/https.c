@@ -325,6 +325,10 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
     sa.sin_port = htons(u->port);
     sa.sin_addr = ip;
 
+    /* A non-blocking connect returns at once with EINPROGRESS. With no
+       SO_ERROR and no usable select, the way to learn that it finished is
+       to ask again: the stack answers EALREADY while it is still at it and
+       EISCONN (or 0) once the connection stands. */
     unsigned start = now_ms();
     if (sceNetInetConnect(sock, (struct sockaddr *)&sa, sizeof(sa)) < 0) {
         int e = sceNetInetGetErrno();
@@ -332,8 +336,17 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
             logline("connect failed errno=%d", e);
             goto out;
         }
-        while (!expired(start, CONNECT_TIMEOUT_MS))
-            sceKernelDelayThread(50 * 1000);
+        for (;;) {
+            sceKernelDelayThread(20 * 1000);
+            if (sceNetInetConnect(sock, (struct sockaddr *)&sa, sizeof(sa)) == 0) break;
+            e = sceNetInetGetErrno();
+            if (e == EISCONN) break;
+            if (e != EINPROGRESS && e != EALREADY && e != EWOULDBLOCK) {
+                logline("connect failed errno=%d", e);
+                goto out;
+            }
+            if (expired(start, CONNECT_TIMEOUT_MS)) { logline("connect timeout"); goto out; }
+        }
     }
 
     int irc = wolfSSL_Init();
