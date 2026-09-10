@@ -4,7 +4,7 @@ Two files, deliberately different in who owns them. Both are JSON, because
 cJSON is in the pspdev tree and a TOML parser is not — one parser on the
 device rather than two.
 
-## `<name>.pspdx` — in the author's repository
+## `app.pspdx` — in the author's repository
 
 The authoritative statement of "what is current". The author owns it, the
 release workflow rewrites it, nothing else touches it.
@@ -50,7 +50,9 @@ every author would have to fill in correctly. And no `key`: nothing is signed
 
 ## Catalog entry — in the registry
 
-The registry stores what rarely changes plus a pointer, and never a version:
+The registry stores what rarely changes plus a pointer, and never a version.
+The pointer is the repository, not the file: `app.pspdx` on its default branch
+is the convention, so an entry names a manifest only when there is a reason to.
 
 ```json
 {
@@ -60,8 +62,7 @@ The registry stores what rarely changes plus a pointer, and never a version:
   "summary": "Downhill racing with a penguin.",
   "category": "games",
   "license": "GPL-2.0",
-  "homepage": "https://github.com/chriopter/psp-tuxracer",
-  "manifest": "https://cdn.jsdelivr.net/gh/chriopter/psp-tuxracer@main/etr.pspdx"
+  "repo": "https://github.com/chriopter/psp-tuxracer"
 }
 ```
 

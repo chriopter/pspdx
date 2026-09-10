@@ -16,8 +16,13 @@ harmless.
 | `author` | who publishes the PSP build, not the upstream project |
 | `category` | `games`, `emulators`, `apps`, `plugins`, `demos` |
 | `license` | SPDX id, or `proprietary` -- mandatory, see docs/open-questions.md |
-| `homepage` | where a human goes |
-| `manifest` | where the client goes for updates |
+| `repo` | the project, and by convention where its `app.pspdx` lives |
+
+The manifest is not named. `repo` is a GitHub URL, and the client is pointed at
+`raw.githubusercontent.com/<user>/<repo>/HEAD/app.pspdx` -- `HEAD` because the
+default branch is `main` in some repositories and `master` in others, and no
+entry should have to know which. An entry may still carry a `manifest` of its
+own; that is for a file somewhere else in the tree, or a project not on GitHub.
 
 The id comes from a domain the author controls, reversed. Without one, GitHub
 supplies it: `io.github.<user>.<app>`, from `github.io`, the same rule Flathub

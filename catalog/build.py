@@ -10,13 +10,20 @@ No dependencies beyond the standard library, on purpose: this runs in a Pages
 workflow and should keep running in ten years.
 """
 import json
+import re
 import shutil
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-REQUIRED = ("id", "name", "author", "summary", "category", "license", "manifest")
+REQUIRED = ("id", "name", "author", "summary", "category", "license", "repo")
+
+# Where the manifest lives unless an entry says otherwise. HEAD spares every
+# entry from naming a branch, which is main in some repositories and master in
+# others; raw serves the tip of the default branch either way.
+MANIFEST = "https://raw.githubusercontent.com/{owner}/{repo}/HEAD/app.pspdx"
+GITHUB = re.compile(r"https://github\.com/([^/]+)/([^/]+?)/?$")
 
 # Optional file in an app directory -> where it is served, and the field that
 # points at it. Both are 480x272 PNG at most, the size of the screen.
@@ -35,9 +42,24 @@ def load(path):
     return app
 
 
+def manifest_url(app):
+    """The manifest is app.pspdx in the repository, and normally nothing says
+    so. An entry names one only when the file is elsewhere, or the repository
+    is not on GitHub."""
+    if "manifest" in app:
+        return app["manifest"]
+    m = GITHUB.match(app["repo"])
+    if not m:
+        sys.exit(f"{app['id']}: {app['repo']} is not a GitHub repository, "
+                 "so the entry has to name its manifest")
+    return MANIFEST.format(owner=m.group(1), repo=m.group(2))
+
+
 def main(out):
     out = Path(out)
     apps = [load(p) for p in sorted((HERE / "apps").glob("*/app.json"))]
+    for app in apps:
+        app["manifest"] = manifest_url(app)
 
     # Assets are never named by hand: an entry gets the field only if the file
     # is there, so the client never spends a request discovering a 404.

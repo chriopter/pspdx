@@ -5,6 +5,5 @@
   "summary": "Downhill racing with a penguin.",
   "category": "games",
   "license": "GPL-2.0",
-  "homepage": "https://github.com/chriopter/psp-tuxracer",
-  "manifest": "https://cdn.jsdelivr.net/gh/chriopter/psp-tuxracer@main/etr.pspdx"
+  "repo": "https://github.com/chriopter/psp-tuxracer"
 }
