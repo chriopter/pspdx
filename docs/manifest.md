@@ -12,7 +12,7 @@ release workflow rewrites it, nothing else touches it.
 ```json
 {
   "schema": 1,
-  "id":     "de.chriopter.extremetuxracer",
+  "id":     "io.github.chriopter.extremetuxracer",
   "rev":    1789034687,
   "url":    "https://github.com/…/extremetuxracer-psp.zip",
   "sha256": "9f2c1e4b8a7d…",
@@ -54,7 +54,7 @@ The registry stores what rarely changes plus a pointer, and never a version:
 
 ```json
 {
-  "id": "de.chriopter.extremetuxracer",
+  "id": "io.github.chriopter.extremetuxracer",
   "name": "Extreme Tux Racer",
   "author": "chriopter",
   "summary": "Downhill racing with a penguin.",

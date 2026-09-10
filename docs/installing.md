@@ -41,7 +41,7 @@ saves, settings, screenshots — is not part of the package and stays.
 ## Naming
 
 The archive says `ExtremeTuxRacer`; the package id is
-`de.chriopter.extremetuxracer`. One of them has to win, or uninstall does not
+`io.github.chriopter.extremetuxracer`. One of them has to win, or uninstall does not
 know what it is allowed to delete. Using the id as the directory name is the safe
 choice, at the cost of a less pretty entry in the XMB — which reads its label
 from `PARAM.SFO` anyway, not from the directory.

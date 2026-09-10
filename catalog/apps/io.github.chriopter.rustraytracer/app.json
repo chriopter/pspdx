@@ -1,5 +1,5 @@
 {
-  "id": "de.chriopter.rustraytracer",
+  "id": "io.github.chriopter.rustraytracer",
   "name": "Rust Raytracer",
   "author": "chriopter",
   "summary": "Real-time ray tracing on a 333 MHz MIPS CPU.",

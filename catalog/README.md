@@ -11,13 +11,18 @@ harmless.
 
 | Field | |
 |---|---|
-| `id` | reverse-DNS, stable forever, also the file name |
+| `id` | reverse-DNS, stable forever, also the directory name |
 | `name`, `summary` | what the client lists; summary fits in one PSP line |
 | `author` | who publishes the PSP build, not the upstream project |
 | `category` | `games`, `emulators`, `apps`, `plugins`, `demos` |
 | `license` | SPDX id, or `proprietary` -- mandatory, see docs/open-questions.md |
 | `homepage` | where a human goes |
 | `manifest` | where the client goes for updates |
+
+The id comes from a domain the author controls, reversed. Without one, GitHub
+supplies it: `io.github.<user>.<app>`, from `github.io`, the same rule Flathub
+uses. Stable forever means exactly that -- it is the directory on the Memory
+Stick and the key in the install journal, so changing it orphans installs.
 
 Icons and screenshots are a convention, not a field: drop `icon.png` (the
 144x80 `ICON0.PNG` out of the EBOOT) or `screenshot.png` (480x272, the size of
