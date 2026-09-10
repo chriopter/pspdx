@@ -25,6 +25,16 @@ struct install_report {
     size_t bytes;
 };
 
+/* What PSP/PSPDX/db/<id>.json remembers about an installed package. */
+struct installed {
+    char id[96];
+    char dir[64];
+    char version[32];
+    unsigned rev;
+};
+
+int db_read(const char *id, struct installed *out);
+
 typedef void (*install_phase_cb)(void *ctx, const char *phase);
 
 int manifest_fetch(const char *url, struct manifest *m);

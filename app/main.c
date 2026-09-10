@@ -465,12 +465,18 @@ static void screenshot_to_stick(const char *path);
 
 #define MAX_APPS 64
 
+enum app_state { APP_UNKNOWN, APP_NOT_INSTALLED, APP_CURRENT, APP_UPDATE };
+
 struct app_entry {
+    char id[96];
     char name[40];
     char summary[COLS];
     char category[12];
     char license[16];
     char manifest[256];
+    enum app_state state;
+    unsigned local_rev, remote_rev;
+    char local_version[32], remote_version[32];
 };
 
 static struct app_entry g_apps[MAX_APPS];
@@ -497,12 +503,25 @@ static int catalog_parse(const char *body, size_t len) {
     cJSON_ArrayForEach(app, apps) {
         if (g_napps >= MAX_APPS) break;
         struct app_entry *e = &g_apps[g_napps];
+        memset(e, 0, sizeof(*e));
+        copy_str(e->id, sizeof(e->id), cJSON_GetObjectItemCaseSensitive(app, "id"));
         copy_str(e->name, sizeof(e->name), cJSON_GetObjectItemCaseSensitive(app, "name"));
         copy_str(e->summary, sizeof(e->summary), cJSON_GetObjectItemCaseSensitive(app, "summary"));
         copy_str(e->category, sizeof(e->category), cJSON_GetObjectItemCaseSensitive(app, "category"));
         copy_str(e->license, sizeof(e->license), cJSON_GetObjectItemCaseSensitive(app, "license"));
         copy_str(e->manifest, sizeof(e->manifest), cJSON_GetObjectItemCaseSensitive(app, "manifest"));
-        if (e->name[0] && e->manifest[0]) g_napps++;
+        if (!e->id[0] || !e->name[0] || !e->manifest[0]) continue;
+
+        /* What is on the stick is known without asking anyone. */
+        struct installed ins;
+        if (db_read(e->id, &ins) == 0) {
+            e->state = APP_UNKNOWN;             /* installed, freshness unknown */
+            e->local_rev = ins.rev;
+            strncpy(e->local_version, ins.version, sizeof(e->local_version) - 1);
+        } else {
+            e->state = APP_NOT_INSTALLED;
+        }
+        g_napps++;
     }
     cJSON_Delete(root);
     logline("catalog: %d apps, %d usable", g_ntotal, g_napps);
@@ -528,6 +547,32 @@ static int catalog_fetch(void) {
     return catalog_parse(g_resp, g_resplen);
 }
 
+/* Asks each installed package's own manifest whether something newer exists.
+   The catalog is never consulted for this: it carries no version, so it may
+   be a day stale without anyone noticing. Only installed packages are asked,
+   which is ten to forty requests, not the whole catalog. */
+static int check_updates(void) {
+    int updates = 0;
+    for (int i = 0; i < g_napps; i++) {
+        struct app_entry *e = &g_apps[i];
+        if (e->state == APP_NOT_INSTALLED) continue;
+
+        struct manifest m;
+        if (manifest_fetch(e->manifest, &m) < 0) continue;
+        e->remote_rev = m.rev;
+        strncpy(e->remote_version, m.version, sizeof(e->remote_version) - 1);
+
+        /* Numbers only. Homebrew version strings -- r12, v0.9b, final2,
+           "1.0 FIXED" -- cannot be ordered, and a version comparator has no
+           business on a 222 MHz CPU. A remote rev that is older is ignored
+           rather than offered: there is no downgrade. */
+        if (m.rev > e->local_rev) { e->state = APP_UPDATE; updates++; }
+        else e->state = APP_CURRENT;
+    }
+    logline("updates: %d of %d installed", updates, g_napps);
+    return updates;
+}
+
 /* ---------------------------------------------------------------- screen */
 
 #define LIST_ROW 3
@@ -542,14 +587,26 @@ static void draw_header(const char *right) {
     pspDebugScreenSetTextColor(COL_TEXT);
 }
 
+/* The right-hand column: what this app is, in four words or fewer. */
+static void app_state_text(const struct app_entry *e, char *out, size_t sz) {
+    switch (e->state) {
+    case APP_NOT_INSTALLED: snprintf(out, sz, "%s", e->license); break;
+    case APP_UNKNOWN:       snprintf(out, sz, "installed %s", e->local_version); break;
+    case APP_CURRENT:       snprintf(out, sz, "up to date"); break;
+    case APP_UPDATE:        snprintf(out, sz, "update %s", e->remote_version); break;
+    }
+}
+
 static void draw_list(int cursor) {
     for (int i = 0; i < g_napps && LIST_ROW + 2 * i + 1 < STATUS_ROW - 1; i++) {
         struct app_entry *e = &g_apps[i];
         int sel = (i == cursor);
+        char state[20];
+        app_state_text(e, state, sizeof(state));
         pspDebugScreenSetXY(0, LIST_ROW + 2 * i);
-        pspDebugScreenSetTextColor(sel ? COL_CURSOR : COL_TEXT);
-        pspDebugScreenPrintf("%c %-38.38s %-10.10s %-8.8s", sel ? '>' : ' ',
-                             e->name, e->category, e->license);
+        pspDebugScreenSetTextColor(sel ? COL_CURSOR : (e->state == APP_UPDATE ? COL_DONE : COL_TEXT));
+        pspDebugScreenPrintf("%c %-34.34s %-10.10s %-13.13s", sel ? '>' : ' ',
+                             e->name, e->category, state);
         pspDebugScreenSetXY(0, LIST_ROW + 2 * i + 1);
         pspDebugScreenSetTextColor(COL_DIM);
         pspDebugScreenPrintf("    %-56.56s", e->summary);
@@ -617,10 +674,14 @@ static int install_app(int idx, int shot) {
 
     unsigned start = now_ms();
     int rc = install(e->manifest, &rep, ui_phase, ui_progress, &u);
+    draw_list(idx);
     unsigned secs = (now_ms() - start) / 1000;
 
     char line[COLS + 1];
     if (rc == 0) {
+        e->state = APP_CURRENT;
+        e->local_rev = rep.rev;
+        strncpy(e->local_version, rep.version, sizeof(e->local_version) - 1);
         snprintf(line, sizeof(line), "Installed %s %s: %d files, %luK, %us",
                  e->name, rep.version, rep.files, (unsigned long)(rep.bytes / 1024), secs);
     } else {
@@ -727,14 +788,19 @@ int main(void) {
         n = catalog_fetch();
     }
 
+    int updates = 0;
+    if (n > 0) updates = check_updates();
+
     pspDebugScreenClear();
     if (n >= 0) {
         char hdr[64];
-        snprintf(hdr, sizeof(hdr), "%d apps  %lu bytes  %u ms handshake",
-                 g_ntotal, (unsigned long)g_resplen, g_fetch.handshake_ms);
+        if (updates) snprintf(hdr, sizeof(hdr), "%d apps, %d update%s available",
+                              g_ntotal, updates, updates == 1 ? "" : "s");
+        else snprintf(hdr, sizeof(hdr), "%d apps  %lu bytes  %u ms handshake",
+                      g_ntotal, (unsigned long)g_resplen, g_fetch.handshake_ms);
         draw_header(hdr);
         draw_list(0);
-        draw_status("X: install   SELECT: discard entropy and sweep again");
+        draw_status("X: install or update   SELECT: discard entropy and sweep again");
     } else {
         draw_header("failed");
         for (int i = 0; i < g_logn && i + 2 < STATUS_ROW; i++) {

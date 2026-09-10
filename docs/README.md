@@ -1,8 +1,8 @@
 # Design notes
 
-Ideas, not decisions. Nothing described here is built, and several documents
-record approaches that were tried on paper and dropped — the reasoning is kept
-because the dead ends are the useful part.
+The reasoning behind the client, including the approaches that were dropped —
+the dead ends are the useful part. What is built lives in [`app/`](../app/);
+the catalog and its generator in [`catalog/`](../catalog/).
 
 | Document | What it covers |
 |---|---|

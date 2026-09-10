@@ -292,6 +292,34 @@ static int db_write(const struct manifest *m, const char *dir) {
     return 0;
 }
 
+/* Reads what is installed for one id. Returns 0 if a record exists. */
+int db_read(const char *id, struct installed *out) {
+    char path[256];
+    snprintf(path, sizeof(path), DB_DIR "/%s.json", id);
+    int fd = sceIoOpen(path, PSP_O_RDONLY, 0777);
+    if (fd < 0) return -1;
+    char buf[640];
+    int n = sceIoRead(fd, buf, sizeof(buf) - 1);
+    sceIoClose(fd);
+    if (n <= 0) return -1;
+
+    cJSON *root = cJSON_ParseWithLength(buf, (size_t)n);
+    if (!root) { logline("db: %s is not json", id); return -1; }
+    memset(out, 0, sizeof(*out));
+    cJSON *rev = cJSON_GetObjectItemCaseSensitive(root, "rev");
+    cJSON *dir = cJSON_GetObjectItemCaseSensitive(root, "dir");
+    cJSON *ver = cJSON_GetObjectItemCaseSensitive(root, "version");
+    int ok = cJSON_IsNumber(rev);
+    if (ok) {
+        out->rev = (unsigned)rev->valuedouble;
+        strncpy(out->id, id, sizeof(out->id) - 1);
+        if (cJSON_IsString(dir)) strncpy(out->dir, dir->valuestring, sizeof(out->dir) - 1);
+        if (cJSON_IsString(ver)) strncpy(out->version, ver->valuestring, sizeof(out->version) - 1);
+    }
+    cJSON_Delete(root);
+    return ok ? 0 : -1;
+}
+
 /* --------------------------------------------------------------- install */
 
 int install(const char *manifest_url, struct install_report *rep,
