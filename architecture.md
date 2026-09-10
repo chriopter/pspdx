@@ -10,17 +10,16 @@ repository answers `304`. So the hundred questions are asked in CI, and the
 console asks one.
 
 ```mermaid
-flowchart LR
-    A["Author's repository<br/>a release, and optionally app.pspdx"]
-    S["scan.py<br/>hourly in Actions"]
-    C[("catalog.json<br/>one file, everything in it")]
-    P["PSP"]
+flowchart TD
+    A["Author cuts a release"] --> B["scan.py sees it, within the hour<br/>downloads it, hashes it, looks inside"]
+    B --> C[("catalog.json<br/>one file: every version, every hash")]
+    C --> D["PSP asks once, at startup<br/>304 when nothing changed"]
+    D --> E["Install, straight from the author's release<br/>sha256 verified"]
 
-    A -- "asks 100 times, costs nothing" --> S
-    S -- "rev, url, sha256, size" --> C
-    C -- "one request, 304 when unchanged" --> P
-    A -. "one request, only for the app you selected" .-> P
-    A == "the download itself, sha256 verified" ==> P
+    A -. "optional, and most authors never do" .-> M["app.pspdx<br/>kept by the author"]
+    D -. "only for the app you picked<br/>minutes instead of an hour" .-> M
+
+    linkStyle 4,5 stroke-dasharray:5
 ```
 
 ## Who owns what

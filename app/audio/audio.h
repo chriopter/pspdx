@@ -12,4 +12,8 @@ void audio_stop(void);
    since the last call. */
 unsigned audio_worst_us(void);
 
+/* A film is on: the tune steps aside for it, and comes back when it is
+   over. Safe to call every frame. */
+void audio_duck(int film_on);
+
 #endif

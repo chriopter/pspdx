@@ -120,7 +120,7 @@ void music_render(short *out, int frames) {
             if (g_next < g_event_count) {
                 const struct event *e = &g_events[g_next++];
                 synth_strike(e->note, e->vel / 100.0f, (enum synth_timbre)e->timbre,
-                             e->pan / 100.0f);
+                             e->pan / 100.0f, 1);
             } else {
                 g_pos = 0;
                 g_next = 0;

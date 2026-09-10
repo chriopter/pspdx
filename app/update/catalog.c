@@ -112,6 +112,8 @@ static int response_sink(void *ctx, const void *data, size_t len) {
     return 0;
 }
 
+const char *catalog_url(void) { return CATALOG_URL; }
+
 int catalog_fetch(struct catalog *catalog) {
     memset(catalog, 0, sizeof(*catalog));
     response_len = 0;

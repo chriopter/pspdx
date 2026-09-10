@@ -94,6 +94,18 @@ Without Docker, the same works with a pspdev release tarball unpacked
 anywhere: set `PSPDEV` to it and put its `bin/` on `PATH`. CMake is needed for
 the wolfSSL step.
 
+## Running it on a desk
+
+```sh
+dev/start           # build, then open it in PPSSPP, one instance, straight to the catalog
+dev/start-reset     # the same without the seed: the sweep runs, as on a new PSP
+```
+
+Both plant what a run needs on the emulator's stick -- the system font,
+the clips from the catalog repo next door, a seed -- and stop whatever
+instance was running before, since two at once write the same files and
+play the same tune slightly apart.
+
 ## Running it without a screen
 
 The app writes what it did to the memory stick, so a run needs no window:

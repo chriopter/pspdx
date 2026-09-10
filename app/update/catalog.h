@@ -40,6 +40,7 @@ struct catalog {
 };
 
 int catalog_fetch(struct catalog *catalog);
+const char *catalog_url(void);
 int catalog_check_updates(struct catalog *catalog);
 void catalog_dump_http(void);
 

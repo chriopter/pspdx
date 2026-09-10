@@ -25,7 +25,9 @@ struct timbre {
 };
 
 static const struct timbre TIMBRES[] = {
-    [SYNTH_PIANO] = { { 1, 2, 3, 4 }, { 1.00f, 0.42f, 0.18f, 0.08f }, { 1, 2, 2, 3 }, 0.0f,  2.4f, 1 },
+    /* Six milliseconds of attack: a hammer, not a step. A step from nothing
+       to full inside one sample is a click, and was audible as one. */
+    [SYNTH_PIANO] = { { 1, 2, 3, 4 }, { 1.00f, 0.42f, 0.18f, 0.08f }, { 1, 2, 2, 3 }, 0.006f, 2.4f, 1 },
     [SYNTH_GLASS] = { { 1, 2, 3, 5 }, { 1.00f, 0.22f, 0.10f, 0.04f }, { 1, 1, 1, 1 }, 0.04f, 2.6f, 0 },
     [SYNTH_PAD]   = { { 1, 2, 3, 4 }, { 1.00f, 0.35f, 0.12f, 0.05f }, { 1, 1, 2, 2 }, 0.9f,  5.5f, 0 },
 };
@@ -44,6 +46,7 @@ struct voice {
     int pair;                   /* the upper two are under hearing this block */
     const struct timbre *t;
     int active;
+    int music;                  /* the tune, as opposed to the interface */
 };
 
 static struct voice g_voices[SYNTH_VOICES];
@@ -66,7 +69,17 @@ static float midi_hz(int note) {
     return 440.0f * powf(2.0f, (note - 69) / 12.0f);
 }
 
-void synth_strike(int note, float velocity, enum synth_timbre timbre, float pan) {
+/* The tune's level and where it is heading; moved once per block. Two
+   seconds up, a second and a half down. */
+static float g_music_level = 1.0f;
+static volatile float g_music_target = 1.0f;
+
+void synth_set_music_level(float level) {
+    g_music_target = level < 0 ? 0 : level > 1 ? 1 : level;
+}
+
+void synth_strike(int note, float velocity, enum synth_timbre timbre, float pan,
+                  int music) {
     struct voice *v = 0;
     for (int i = 0; i < SYNTH_VOICES; i++)
         if (!g_voices[i].active) { v = &g_voices[i]; break; }
@@ -102,6 +115,7 @@ void synth_strike(int note, float velocity, enum synth_timbre timbre, float pan)
     if (pan > 1) pan = 1;
     v->gain_l = 0.5f + 0.5f * (1.0f - pan) * 0.5f + 0.25f * (pan < 0 ? -pan : 0);
     v->gain_r = 0.5f + 0.5f * (1.0f + pan) * 0.5f + 0.25f * (pan > 0 ? pan : 0);
+    v->music = music;
     v->active = 1;
 }
 
@@ -141,15 +155,28 @@ void synth_render(short *out, int frames) {
         memset(mix_l, 0, sizeof(mix_l));
         memset(mix_r, 0, sizeof(mix_r));
 
+        {
+            float step = (float)BLOCK / g_rate;
+            float rate = g_music_target < g_music_level ? 1.0f / 1.5f : 1.0f / 2.0f;
+            if (g_music_level < g_music_target) {
+                g_music_level += step * rate;
+                if (g_music_level > g_music_target) g_music_level = g_music_target;
+            } else if (g_music_level > g_music_target) {
+                g_music_level -= step * rate;
+                if (g_music_level < g_music_target) g_music_level = g_music_target;
+            }
+        }
         for (int i = 0; i < SYNTH_VOICES; i++) {
             struct voice *v = &g_voices[i];
             if (!v->active) continue;
             voice_block(v);
             if (!v->active) continue;
+            float level = v->music ? g_music_level : 1.0f;
+            if (level <= 0.0005f) continue;     /* silent, but its phases still advance below */
             unsigned p0 = v->phase[0], p1 = v->phase[1];
             unsigned i0 = v->inc[0], i1 = v->inc[1];
             float g0 = v->gain[0], g1 = v->gain[1];
-            float gl = v->gain_l, gr = v->gain_r;
+            float gl = v->gain_l * level, gr = v->gain_r * level;
             if (v->pair) {
                 for (int f = 0; f < n; f++) {
                     float s = g_table[p0 >> (32 - TABLE_BITS)] * g0

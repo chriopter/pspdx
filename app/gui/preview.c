@@ -283,6 +283,10 @@ const struct gfx_texture *preview_film(int *alpha) {
     return &g_film;
 }
 
+int preview_playing(void) {
+    return g_film_state == FILM_PLAYING && g_decoded > 0;
+}
+
 enum preview_state preview_state(void) {
     if (g_still_state == STILL_READY || g_film_state == FILM_PLAYING) return PREVIEW_SHOWING;
     if (g_still_state == STILL_FAILED) return PREVIEW_MISSING;

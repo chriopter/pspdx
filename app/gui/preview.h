@@ -45,4 +45,7 @@ enum preview_state preview_state(void);
 /* True when nothing is mid-fade or mid-fetch for the current entry. */
 int preview_settled(void);
 
+/* True while a film is on the card. */
+int preview_playing(void);
+
 #endif

@@ -19,6 +19,10 @@ struct https_result {
     char host[128];
 };
 
+/* The cipher suites to offer first, in wolfSSL's spelling, or NULL for the
+   library's own order. Applies to connections made after the call. */
+void https_prefer(const char *suites);
+
 int https_get(const char *url, https_sink sink, void *sink_ctx,
               https_progress progress, void *progress_ctx,
               struct https_result *out);

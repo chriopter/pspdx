@@ -19,6 +19,10 @@ static void fill(void *buf, unsigned int frames, void *userdata) {
     if (took > g_worst_us) g_worst_us = took;
 }
 
+void audio_duck(int film_on) {
+    synth_set_music_level(film_on ? 0.0f : 1.0f);
+}
+
 unsigned audio_worst_us(void) {
     unsigned w = g_worst_us;
     g_worst_us = 0;

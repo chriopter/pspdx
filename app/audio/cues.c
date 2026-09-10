@@ -25,24 +25,24 @@ static void play(enum cue cue, int index) {
            side, the octave below as body. Nothing sharp in it. */
         int note = 74 - SCALE[index % 5] - 12 * (index / 5);
         if (note < 55) note = 55;
-        synth_strike(note, 0.16f, SYNTH_GLASS, 0.2f);
-        synth_strike(note + 7, 0.06f, SYNTH_GLASS, 0.6f);
-        synth_strike(note - 12, 0.07f, SYNTH_PAD, -0.4f);
+        synth_strike(note, 0.16f, SYNTH_GLASS, 0.2f, 0);
+        synth_strike(note + 7, 0.06f, SYNTH_GLASS, 0.6f, 0);
+        synth_strike(note - 12, 0.07f, SYNTH_PAD, -0.4f, 0);
         break;
     }
     case CUE_OPEN:
-        synth_strike(62, 0.26f, SYNTH_GLASS, -0.4f);
-        synth_strike(69, 0.22f, SYNTH_GLASS, 0.4f);
+        synth_strike(62, 0.26f, SYNTH_GLASS, -0.4f, 0);
+        synth_strike(69, 0.22f, SYNTH_GLASS, 0.4f, 0);
         break;
     case CUE_DONE:
-        synth_strike(62, 0.24f, SYNTH_GLASS, -0.5f);
-        synth_strike(66, 0.24f, SYNTH_GLASS, -0.2f);
-        synth_strike(69, 0.26f, SYNTH_GLASS, 0.2f);
-        synth_strike(74, 0.20f, SYNTH_GLASS, 0.5f);
+        synth_strike(62, 0.24f, SYNTH_GLASS, -0.5f, 0);
+        synth_strike(66, 0.24f, SYNTH_GLASS, -0.2f, 0);
+        synth_strike(69, 0.26f, SYNTH_GLASS, 0.2f, 0);
+        synth_strike(74, 0.20f, SYNTH_GLASS, 0.5f, 0);
         break;
     case CUE_FAIL:
-        synth_strike(50, 0.28f, SYNTH_GLASS, -0.3f);
-        synth_strike(53, 0.20f, SYNTH_GLASS, 0.3f);
+        synth_strike(50, 0.28f, SYNTH_GLASS, -0.3f, 0);
+        synth_strike(53, 0.20f, SYNTH_GLASS, 0.3f, 0);
         break;
     }
 }

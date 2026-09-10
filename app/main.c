@@ -18,6 +18,7 @@
 #include "gui/shell.h"
 #include "install/install.h"
 #include "logic/entropy.h"
+#include "network/bench.h"
 #include "update/catalog.h"
 #include "update/sync.h"
 #include "util/runtime.h"
@@ -284,6 +285,17 @@ int main(void) {
                 }
                 keys_load();
                 g_keys_since = now_ms();
+                int bench = sceIoOpen("ms0:/PSPDX.BENCH", PSP_O_RDONLY, 0777);
+                if (bench >= 0) {
+                    sceIoClose(bench);
+                    shell_status("benchmarking ciphers");
+                    shell_draw(shown(), cursor);
+                    preview_quiesce();
+                    bench_run(catalog_url());
+                    preview_resume();
+                    shell_status("");
+                    dump_diagnostics();
+                }
             }
         }
 
@@ -319,6 +331,7 @@ int main(void) {
 
         unsigned tick0 = now_us();
         shell_shot_sync(shown(), cursor);
+        audio_duck(preview_playing());
         unsigned tick = now_us() - tick0;
         if (tick > g_worst_tick) g_worst_tick = tick;
         shell_draw(shown(), cursor);

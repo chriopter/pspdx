@@ -1,0 +1,4 @@
+#!/bin/sh
+# Starts the client the way a PSP sees it the first time: no seed on the
+# stick, so the entropy sweep runs and asks for the analog stick.
+exec "$(dirname "$0")/start" --reset "$@"

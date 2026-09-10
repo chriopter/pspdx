@@ -41,6 +41,10 @@
    must not be cut off for being slow, only for being stuck. */
 #define STALL_TIMEOUT_MS     30000
 
+static const char *g_suites;
+
+void https_prefer(const char *suites) { g_suites = suites; }
+
 /* ------------------------------------------------------------------- net */
 
 static struct {
@@ -326,6 +330,8 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
 
     ctx = wolfSSL_CTX_new(wolfTLSv1_3_client_method());
     if (!ctx) { logline("no TLS 1.3 in this build"); goto out; }
+    if (g_suites && wolfSSL_CTX_set_cipher_list(ctx, g_suites) != WOLFSSL_SUCCESS)
+        logline("cipher list rejected: %s", g_suites);
 
     /* Nothing here is signed, so the chain is the only thing standing between a
        hostile access point and an EBOOT of its choosing: it would only have to
