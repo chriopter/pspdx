@@ -59,13 +59,35 @@ static int parse(struct catalog *catalog) {
         copy_str(entry->license, sizeof(entry->license), cJSON_GetObjectItemCaseSensitive(app, "license"));
         copy_str(entry->manifest, sizeof(entry->manifest), cJSON_GetObjectItemCaseSensitive(app, "manifest"));
 
+        cJSON *release = cJSON_GetObjectItemCaseSensitive(app, "release");
+        if (cJSON_IsObject(release)) {
+            struct manifest *m = &entry->release;
+            memset(m, 0, sizeof(*m));
+            strncpy(m->id, entry->id, sizeof(m->id) - 1);
+            cJSON *rev = cJSON_GetObjectItemCaseSensitive(release, "rev");
+            cJSON *size = cJSON_GetObjectItemCaseSensitive(release, "size");
+            cJSON *sha = cJSON_GetObjectItemCaseSensitive(release, "sha256");
+            if (cJSON_IsNumber(rev)) m->rev = (unsigned)rev->valuedouble;
+            if (cJSON_IsNumber(size)) m->size = (size_t)size->valuedouble;
+            copy_str(m->url, sizeof(m->url), cJSON_GetObjectItemCaseSensitive(release, "url"));
+            copy_str(m->version, sizeof(m->version), cJSON_GetObjectItemCaseSensitive(release, "version"));
+            int ok = m->rev && m->url[0] && cJSON_IsString(sha) && strlen(sha->valuestring) == 64;
+            for (int k = 0; ok && k < 32; k++) {
+                unsigned byte;
+                if (sscanf(sha->valuestring + 2 * k, "%2x", &byte) != 1) ok = 0;
+                m->sha256[k] = (unsigned char)byte;
+            }
+            entry->has_release = ok;
+        }
+
         char shot[256];
         copy_str(shot, sizeof(shot), cJSON_GetObjectItemCaseSensitive(app, "screenshot"));
         asset_url(shot, entry->screenshot, sizeof(entry->screenshot));
         copy_str(shot, sizeof(shot), cJSON_GetObjectItemCaseSensitive(app, "video"));
         asset_url(shot, entry->video, sizeof(entry->video));
 
-        if (!entry->id[0] || !entry->name[0] || !entry->manifest[0]) continue;
+        if (!entry->id[0] || !entry->name[0]) continue;
+        if (!entry->has_release && !entry->manifest[0]) continue;
 
         struct installed installed;
         if (db_read(entry->id, &installed) == 0) {
@@ -109,7 +131,8 @@ int catalog_check_updates(struct catalog *catalog) {
         struct app_entry *entry = &catalog->apps[i];
         if (entry->state == APP_NOT_INSTALLED) continue;
         struct manifest manifest;
-        if (manifest_fetch(entry->manifest, entry->id, &manifest) < 0) continue;
+        if (entry->has_release) manifest = entry->release;
+        else if (manifest_fetch(entry->manifest, entry->id, &manifest) < 0) continue;
         entry->remote_rev = manifest.rev;
         strncpy(entry->remote_version, manifest.version, sizeof(entry->remote_version) - 1);
         if (manifest.rev > entry->local_rev) {

@@ -2,10 +2,16 @@
 
 #include "gui/lattice.h"
 
-#define NX 19                   /* lines across */
-#define NZ 13                   /* lines into the distance */
+/* The floor runs to the horizon in every direction: rows a constant factor
+   apart in depth until they are a few pixels under it, and beyond the
+   nineteen columns in front of the viewer twelve more far out to either
+   side, which only come into view where the rows have narrowed enough. */
+#define NX_INNER 19
+#define NX_OUTER 12
+#define NX (NX_INNER + NX_OUTER)
+#define NZ 20                   /* lines into the distance */
 #define Z_NEAR 1.0f
-#define Z_FAR 9.0f
+#define Z_FAR 40.0f
 #define HORIZON 116.0f
 #define STARS 22
 #define SPECKS 12
@@ -68,7 +74,7 @@ static struct {
     float y0, yh, xu, xs, near2;
 } g_row[NZ];
 
-static float g_u[NX];       /* -1..1 across */
+static float g_u[NX];       /* across, sorted; -1..1 in front, wider outside */
 
 /* Where every crossing landed this frame. The three passes below -- lines
    across, lines away, and the lights at the crossings -- all want the same
@@ -91,16 +97,22 @@ void lattice_init(void) {
     for (int i = 0; i < NZ; i++) {
         float z = Z_NEAR * powf(Z_FAR / Z_NEAR, (float)i / (NZ - 1));
         float inv = 1.0f / z;
-        float depth = (z - Z_NEAR) / (Z_FAR - Z_NEAR);
+        /* Depth by row rather than by z: the rows are spaced by eye, so
+           the light fades by eye too, evenly down to the horizon. */
+        float depth = (float)i / (NZ - 1);
         g_row[i].z8 = z * 0.8f;
-        g_row[i].gz = depth * 2.0f;
+        g_row[i].gz = (z - Z_NEAR) / 8.0f * 2.0f;      /* the ring's reach, as before */
         g_row[i].y0 = HORIZON + 150.0f * inv;
         g_row[i].yh = 52.0f * inv;
         g_row[i].xu = 720.0f * inv;
         g_row[i].xs = 720.0f * inv * inv;
         g_row[i].near2 = (1.0f - depth) * (1.0f - depth);
     }
-    for (int j = 0; j < NX; j++) g_u[j] = (float)j / (NX - 1) * 2.0f - 1.0f;
+    static const float OUTER[NX_OUTER / 2] = { 1.25f, 1.6f, 2.1f, 2.8f, 4.0f, 6.0f };
+    int j = 0;
+    for (int k = NX_OUTER / 2 - 1; k >= 0; k--) g_u[j++] = -OUTER[k];
+    for (int k = 0; k < NX_INNER; k++) g_u[j++] = (float)k / (NX_INNER - 1) * 2.0f - 1.0f;
+    for (int k = 0; k < NX_OUTER / 2; k++) g_u[j++] = OUTER[k];
 
     for (int i = 0; i < STARS; i++) {
         g_stars[i].x = frand() * SCR_W;
@@ -163,7 +175,13 @@ static void project_all(float t, float sway) {
                     h += fexp(d2 * d2) * fade * 0.6f;
                 }
             }
-            g_x[i][j] = SCR_W / 2 + g_u[j] * g_row[i].xu + xs;
+            float sx = SCR_W / 2 + g_u[j] * g_row[i].xu + xs;
+            /* Far out to the side a near row is thousands of pixels off
+               screen; the line is straight, so its end can sit at the
+               edge without moving anything that is visible. */
+            if (sx < -400.0f) sx = -400.0f;
+            else if (sx > SCR_W + 400.0f) sx = SCR_W + 400.0f;
+            g_x[i][j] = sx;
             g_y[i][j] = g_row[i].y0 - h * g_row[i].yh;
             g_lit[i][j] = g_row[i].near2 * (0.55f + 0.45f * h);
         }

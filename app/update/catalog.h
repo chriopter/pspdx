@@ -2,6 +2,7 @@
 #define PSPDX_CATALOG_H
 
 #include "network/https.h"
+#include "install/install.h"
 
 #define MAX_APPS 64
 #define MAX_SUMMARY 60
@@ -15,6 +16,11 @@ struct app_entry {
     char summary[MAX_SUMMARY];
     char category[12];
     char license[16];
+    /* The catalog folds each app's manifest in as "release", so what is
+       current is known without a fetch per app. An entry without one names
+       a manifest to fetch instead. */
+    struct manifest release;
+    int has_release;
     char manifest[256];
     /* Absolute already: the catalog serves these relative to itself, and
        resolving them once at parse time keeps the base URL in this file. */

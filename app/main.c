@@ -96,8 +96,11 @@ static int install_app(int index, int screenshot) {
        asset buffer; only one of them talks to the network at a time. */
     preview_quiesce();
     unsigned start = now_ms();
-    int rc = install(entry->manifest, entry->id, &report,
-                     shell_install_phase, shell_install_progress, NULL);
+    int rc = entry->has_release
+        ? install_release(&entry->release, &report, shell_install_phase,
+                          shell_install_progress, NULL)
+        : install(entry->manifest, entry->id, &report, shell_install_phase,
+                  shell_install_progress, NULL);
     unsigned seconds = (now_ms() - start) / 1000;
     preview_resume();
 
@@ -132,9 +135,9 @@ static int auto_install_index(void) {
     char *newline = strpbrk(id, "\r\n");
     if (newline) *newline = '\0';
     for (int i = 0; i < catalog.count; i++)
-        if (strcmp(catalog.apps[i].manifest, id) == 0) return i;
+        if (strcmp(catalog.apps[i].id, id) == 0 || strcmp(catalog.apps[i].manifest, id) == 0) return i;
     for (int i = 0; i < catalog.count; i++)
-        if (strstr(catalog.apps[i].manifest, id)) return i;
+        if (strstr(catalog.apps[i].id, id) || strstr(catalog.apps[i].manifest, id)) return i;
     logline("PSPDX.INSTALL: no app matches %s", id);
     return -1;
 }

@@ -56,4 +56,9 @@ int install(const char *manifest_url, const char *expect_id,
             struct install_report *rep,
             install_phase_cb phase, https_progress progress, void *pctx);
 
+/* The same from a manifest already in hand -- the catalog carries each
+   entry's release, so there is nothing to fetch first. */
+int install_release(const struct manifest *release, struct install_report *rep,
+                    install_phase_cb phase, https_progress progress, void *pctx);
+
 #endif

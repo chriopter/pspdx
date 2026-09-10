@@ -9,7 +9,9 @@ WOLFSSL_PREFIX = $(CURDIR)/wolfssl-psp/prefix
 
 # -I. only: every local include names its directory, so the layer a header
 # comes from is visible at the include line.
-CFLAGS = -O2 -G0 -Wall -I. -I$(WOLFSSL_PREFIX)/include
+# -MMD writes a .d next to every .o so that a header change rebuilds what
+# includes it; build.mak on its own only looks at the .c.
+CFLAGS = -O2 -G0 -Wall -I. -I$(WOLFSSL_PREFIX)/include -MMD -MP
 ASFLAGS = $(CFLAGS)
 
 LIBDIR = $(WOLFSSL_PREFIX)/lib
@@ -25,3 +27,6 @@ PSP_EBOOT_TITLE = PSPDX
 
 PSPSDK = $(shell psp-config --pspsdk-path)
 include $(PSPSDK)/lib/build.mak
+
+# After build.mak, so its all: stays the default goal.
+-include $(OBJS:.o=.d)

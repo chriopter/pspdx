@@ -412,6 +412,13 @@ int install(const char *manifest_url, const char *expect_id,
     if (phase) phase(pctx, "manifest");
     if (manifest_fetch(manifest_url, expect_id, &m) < 0) return -1;
     strncpy(m.manifest_url, manifest_url, sizeof(m.manifest_url) - 1);
+    return install_release(&m, rep, phase, progress, pctx);
+}
+
+int install_release(const struct manifest *release, struct install_report *rep,
+                    install_phase_cb phase, https_progress progress, void *pctx) {
+    struct manifest m = *release;
+    memset(rep, 0, sizeof(*rep));
     strncpy(rep->id, m.id, sizeof(rep->id) - 1);
     strncpy(rep->version, m.version, sizeof(rep->version) - 1);
     rep->rev = m.rev;
