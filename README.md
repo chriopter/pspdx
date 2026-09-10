@@ -1,14 +1,18 @@
 # PSPDX
 
-**PSP Download Index** — the homebrew package index for the PlayStation Portable.
+**PSP Download Index** — the missing package manager for PSP homebrew.
 
-The client fetches [the catalog](https://chriopter.github.io/pspdx/catalog.json),
-installs a package and checks for updates. It runs under PPSSPP; nobody has put
-it on real hardware yet.
+The client on the console fetches a catalog of apps from this repository,
+installs the one you pick, and tells you when a new version is out. It runs
+under PPSSPP; nobody has put it on real hardware yet.
 
-That URL is compiled into the EBOOT; everything behind it is static, so nothing
-has to keep running. A PSP pays per handshake, not per byte -- the whole index
-is one request.
+The catalog only says what exists and where to look. Every app -- yours too, if
+you want in -- has an `app.pspdx` in its author's own repository saying what
+the current release is, and the download comes from there.
+
+That catalog URL is compiled into the EBOOT; everything behind it is static, so
+nothing has to keep running. A PSP pays per handshake, not per byte -- the
+whole index is one request.
 
 ## What it does
 
