@@ -2,10 +2,9 @@
 
 **PSP Download Index** — the homebrew package index for the PlayStation Portable.
 
-> The PSP model Sony never shipped.
-
-The client fetches a catalog, installs a package and checks for updates. It
-runs under PPSSPP; nobody has put it on real hardware yet.
+The client fetches [the catalog](https://chriopter.github.io/pspdx/catalog.json),
+installs a package and checks for updates. It runs under PPSSPP; nobody has put
+it on real hardware yet.
 
 ## Where the keys come from
 
