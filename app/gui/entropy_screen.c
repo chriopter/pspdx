@@ -39,7 +39,9 @@ static const char SPIN_GLYPHS[] = "|/-\\";
 static const char BLOOM[] = "oO0@";
 static const char LOGO_GLYPHS[] = "@#%*+";
 
-#define LOGO_X 8
+/* Letters are 7 wide and the extrusion reaches 4 cells, so the pitch is 11:
+   a shadow then lands in the gap and never inside the next letter. */
+#define LOGO_X 5
 #define LOGO_Y 8
 static const unsigned char LOGO_BITS[5][7] = {
     { 124, 102, 102, 124,  96,  96,  96 },
@@ -48,7 +50,7 @@ static const unsigned char LOGO_BITS[5][7] = {
     { 124, 102,  99,  99,  99, 102, 124 },
     {  99,  54,  28,   8,  28,  54,  99 },
 };
-static const unsigned char LOGO_LETTER_X[5] = { 0, 8, 16, 27, 35 };
+static const unsigned char LOGO_LETTER_X[5] = { 0, 11, 22, 33, 44 };
 static int logo_depth_x = 1;
 static int logo_depth_y = 1;
 
