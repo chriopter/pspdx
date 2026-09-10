@@ -8,11 +8,11 @@ it on real hardware yet.
 
 ## What it does
 
-| | |
-|---|---|
-| ![The catalog, one app listed with category and licence](docs/media/catalog.png) | **Fetch the catalog.** One request, about 200 bytes per entry. |
-| ![An install finishing: 639 files, 49998K, 53 seconds](docs/media/install.png) | **Install a package.** sha256 verified, unpacked, one rename into `PSP/GAME/`. |
-| ![The same app now showing an available update to 0.16.0](docs/media/update.png) | **Check for updates.** One request per installed package, comparing `rev`. |
+<img src="docs/media/catalog.png" width="480" alt="The catalog, one app listed with category and licence">
+
+One request fetches the catalog. Installing verifies the sha256, unpacks, and
+commits with a single rename into `PSP/GAME/`. Each installed package is
+checked against its author's manifest, comparing `rev`.
 
 The app dumps its own framebuffer to the stick; a PSP has no screen capture.
 
