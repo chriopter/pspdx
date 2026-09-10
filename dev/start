@@ -6,6 +6,7 @@
 #   dev/start            build if needed, start
 #   dev/start --reset    also forget the seed: the sweep runs, as on a new PSP
 #   dev/start --no-build
+#   dev/start --quiet    no speakers: the emulator gets no audio socket
 #
 # The stick gets what a run needs and PPSSPP does not provide: the system
 # font (PPSSPP has it but does not mount flash0 for the guest), the clips
@@ -18,10 +19,12 @@ APP="$HERE/app"
 MS="$HOME/.var/app/org.ppsspp.PPSSPP/config/ppsspp"
 RESET=0
 BUILD=1
+AUDIO=""
 for arg in "$@"; do
 	case "$arg" in
 		--reset) RESET=1 ;;
 		--no-build) BUILD=0 ;;
+		--quiet) AUDIO="--nosocket=pulseaudio" ;;
 		*) echo "unknown option $arg" >&2; exit 2 ;;
 	esac
 done
@@ -55,7 +58,7 @@ pkill -x PPSSPPSDL 2>/dev/null || true
 sleep 1
 systemd-run --user --collect --quiet --unit=pspdx-ppsspp \
   --setenv=SDL_VIDEODRIVER=wayland --setenv=WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}" \
-  flatpak run --socket=wayland --share=network --filesystem="$MS" \
+  flatpak run --socket=wayland --share=network $AUDIO --filesystem="$MS" \
   org.ppsspp.PPSSPP --fullscreen=0 "$MS/PSP/GAME/pspdx/EBOOT.PBP"
 sleep 3
 WS="$(hyprctl clients -j 2>/dev/null | python3 -c "import sys,json; print(*(c['workspace']['name'] for c in json.load(sys.stdin) if 'ppsspp' in c['class'].lower()))" 2>/dev/null || true)"
