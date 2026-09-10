@@ -48,7 +48,7 @@ taking part badly costs nothing either.
 
 ## Not yet true
 
-The client still looks for a manifest in every entry and cannot read the
-release out of the catalog, so it currently lists four apps and installs none.
-And `find_game_dir()` demands `PSP/GAME/<dir>/`, a layout two of sixteen
-surveyed archives actually use.
+The console asks for the release out of the catalog and installs it, which it
+did not when this was written. What it still will not do is install an archive
+that does not put its EBOOT under `PSP/GAME/` — two of sixteen surveyed
+archives do — even though the scanner has already worked out where it sits.

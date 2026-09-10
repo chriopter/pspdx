@@ -301,20 +301,21 @@ that works on a real PSP, and on a host whose desktop is locked.
 
 ## Open
 
-- **Entries that carry their own release.** The client reads `manifest` and
-  nothing else, so an abandoned app is listed but not installable. It should
-  take `rev`, `url` and `sha256` straight from the entry when they are there --
-  which costs no request at all, the catalog is already in hand.
-- **One connection for the whole update check.** Every manifest is on the same
-  host; the client still opens a handshake per package. Twenty lines, and the
-  largest win left.
-- **A release watcher.** Nothing notices when an abandoned app upstream cuts a
-  new release. A job in the catalog repository should, and open a commit.
-- **Icons and video on the device.** `app/gui/image.c` draws stills. The Media
-  Engine decodes H.264 in hardware and the catalog already carries the clips.
+- **The archive layout the installer demands.** `find_game_dir()` wants
+  `PSP/GAME/<dir>/`, which 2 of 16 surveyed release archives actually use. The
+  scanner already works out where the EBOOT sits and records it; the console
+  should either be told, or use the same rule.
+- **A race that poisons the picture cache.** `preview.c` hands live pointers to
+  the fetch thread and checks staleness after the cache write, so an app can
+  end up holding another app's screenshot for good.
+- **The catalog path skips checks the manifest path makes.** `manifest_fetch`
+  validates the id, the revision range and the size; `catalog.c` takes the same
+  fields straight out of the JSON without any of it.
+- **`icon` is fetched by nobody.** Every entry carries one and the client has
+  no field for it.
 - **Real hardware.** It has only ever run in PPSSPP.
 - **Nothing is signed**, so the index is trusted completely. Fine while one
-  person writes it; not fine once a bot does.
+  person writes it; less fine now that a bot does.
 
 ---
 
