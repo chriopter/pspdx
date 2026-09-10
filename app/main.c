@@ -151,6 +151,7 @@ int main(void) {
     shell_shot_sync(&catalog, cursor);
     shell_draw(&catalog, cursor);
     gfx_screenshot("ms0:/PSPDX.BMP");
+    dump_diagnostics();                 /* now with the shell's own lines */
 
     int automatic = auto_install_index();
     if (automatic >= 0) {

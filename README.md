@@ -2,21 +2,14 @@
 
 **PSP Download Index** — the missing package manager for PSP homebrew.
 
-PSPDX polls a catalog of apps in this repository, each one pointing at the
-author's own repository, where the download lives.
-
-Every app has an `app.pspdx` saying what its current release is. Yours too, if
-you want in.
-
-## What it does
+Gives you a catalog (living in this repo) of sick & current Brews for the PSP including updating them from a central place!
 
 <img src="docs/media/catalog.png" width="480" alt="The catalog, one app listed with category and licence">
 
-One request fetches the catalog. Installing verifies the sha256, unpacks, and
-commits with a single rename into `PSP/GAME/`. Each installed package is
-checked against its author's manifest, comparing `rev`.
-
-The app dumps its own framebuffer to the stick; a PSP has no screen capture.
+## Technical
+- PSPDX polls a catalog / index of apps in this repository, each one pointing at the author's own repository and a manifest file, where the download lives.
+- TLS: PSPDX supports TLS1.3, Seedgeneration (bc. missing PRNG) on start.
+- Fast connection to all vendor repos by reusing initial TLS handshake with github
 
 ## The two files
 
@@ -61,26 +54,3 @@ names a manifest only when the file is elsewhere.
 Template: [`docs/templates/app.pspdx`](docs/templates/app.pspdx)
 
 </details>
-
-## Where the keys come from
-
-<img src="docs/media/entropy-sweep.gif" width="480" alt="A 60x28 grid of cells filling with green as the analog stick sweeps across it">
-
-The console has no usable randomness of its own: `getentropy()` in pspsdk is
-MT19937 reseeded from `time(NULL)`, and the hardware generator is a kernel-only
-export. So the entropy comes from a moving thumb, the one source that is not
-part of the machine's own determinism. Covering a field rather than counting
-movements defeats both a stick parked against a stop and one that drifts on its
-own. 256 bits takes a few seconds and is saved, so the ritual happens once. The
-recording above is a replayed trace, so its entropy is not real.
-
-## Layout
-
-| | |
-|---|---|
-| [`app/`](app/) | the on-device client: TLS 1.3, entropy off the analog stick, install |
-| [`catalog/`](catalog/) | one directory per app, folded into the `catalog.json` the client fetches |
-| [`docs/`](docs/) | the design notes, including the approaches that were dropped and why |
-
-Nothing is signed; [open-questions.md](docs/open-questions.md) argues why that
-is the right amount of trust for now.

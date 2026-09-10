@@ -2,18 +2,31 @@
 # Runs EBOOT.PBP under the PPSSPP flatpak, without needing a visible desktop,
 # and leaves PSPDX.LOG and PSPDX.BMP (as shot.png) next to this script.
 #
-#   sh app/run-ppsspp.sh [seconds]      default 45
+#   sh app/run-ppsspp.sh [seconds] [--sweep]     default 25
 #
-# The sweep is replayed from testdata/sweep.trace so no one has to move a
-# stick; that also means the entropy of such a run is NOT real.
+# By default the emulator's stick gets a fixed test seed, so the client does
+# what it does on a PSP after its first run: load the seed, skip the sweep,
+# and be at the catalog a few seconds in. The seed is the string below and
+# obviously not entropy; nothing from a rig run is fit to sign anything.
+#
+# --sweep replays testdata/sweep.trace through the entropy screen instead,
+# for working on that screen. A replayed sweep never writes a seed -- the
+# client refuses, since replayed input is not entropy either -- so the next
+# default run seeds itself again.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
 MS="$HOME/.var/app/org.ppsspp.PPSSPP/config/ppsspp"
-SECS="${1:-45}"
+SECS=25
+SWEEP=0
+for arg in "$@"; do
+	case "$arg" in
+		--sweep) SWEEP=1 ;;
+		*) SECS="$arg" ;;
+	esac
+done
 
 mkdir -p "$MS/PSP/GAME/pspdx"
 cp "$HERE/EBOOT.PBP" "$MS/PSP/GAME/pspdx/"
-cp "$HERE/testdata/sweep.trace" "$MS/PSPDX.TRACE"
 
 # PPSSPP ships the PSP system fonts but does not mount flash0 for the guest,
 # so put one where the client's fallback looks. Test rig only: on hardware the
@@ -23,7 +36,18 @@ if [ -f "$FONTS/ltn8.pgf" ]; then
 	mkdir -p "$MS/PSP/PSPDX/font"
 	cp "$FONTS/ltn8.pgf" "$MS/PSP/PSPDX/font/ltn8.pgf"
 fi
-touch "$MS/PSPDX.REPLAY"
+
+if [ "$SWEEP" = 1 ]; then
+	cp "$HERE/testdata/sweep.trace" "$MS/PSPDX.TRACE"
+	touch "$MS/PSPDX.REPLAY"
+	rm -f "$MS/PSPDX.SEED"
+else
+	rm -f "$MS/PSPDX.REPLAY"
+	# 20 bytes, the pool size. Only written when missing: the client ratchets
+	# the file forward on every run, and a rig that kept resetting it would
+	# hide a bug in that.
+	[ -f "$MS/PSPDX.SEED" ] || printf 'PSPDX-TEST-SEED-0000' >"$MS/PSPDX.SEED"
+fi
 rm -f "$MS/PSPDX.LOG" "$MS/PSPDX.BMP"
 
 SDL_VIDEODRIVER=wayland flatpak run --socket=wayland --share=network \
