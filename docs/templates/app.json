@@ -1,0 +1,9 @@
+{
+  "id": "io.github.<user>.<app>",
+  "name": "<App Name>",
+  "author": "<who publishes the PSP build>",
+  "summary": "<one line, fits the width of a PSP screen>",
+  "category": "games",
+  "license": "MIT",
+  "repo": "https://github.com/<user>/<repo>"
+}

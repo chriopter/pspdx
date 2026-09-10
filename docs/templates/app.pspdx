@@ -1,0 +1,13 @@
+{
+  "schema": "https://github.com/chriopter/pspdx/blob/master/docs/manifest.md",
+  "id": "io.github.<user>.<app>",
+  "rev": 1789044630,
+  "url": "https://github.com/<user>/<repo>/releases/download/<tag>/<file>.zip",
+  "sha256": "<64 hex characters, of the file at url>",
+  "size": 0,
+  "requires": { "ram_mb": 32 },
+  "display": {
+    "version": "0.1.0",
+    "notes": "<what changed, one or two lines>"
+  }
+}
