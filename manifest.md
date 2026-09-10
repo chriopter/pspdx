@@ -13,7 +13,9 @@ one parser on the device rather than two.
 ## An entry
 
 One directory per app in [pspdx-catalog](https://github.com/chriopter/pspdx-catalog),
-named after the id, holding `app.json` and any assets.
+named after the id. Two files, and the split is the point.
+
+`app.json` — a person's. Nothing automated ever writes it.
 
 ```json
 {
@@ -23,21 +25,23 @@ named after the id, holding `app.json` and any assets.
   "summary": "Downhill racing with a penguin.",
   "category": "games",
   "license": "GPL-2.0",
-  "repo": "https://github.com/chriopter/psp-tuxracer",
-
-  "release": { "rev": 1789034687, "version": "0.21.0",
-               "url": "…/extremetuxracer-psp.zip",
-               "sha256": "9f2c1e4b8a7d…", "size": 44048460 },
-  "archive": { "asset": "*-psp.zip", "root": "PSP/GAME/ExtremeTuxRacer/",
-               "etag": "…" }
+  "repo": "https://github.com/chriopter/psp-tuxracer"
 }
 ```
 
-There is a seam through the middle. Everything above `release` is written by a
-person, once, when the app is added. `release` and `archive` belong to
-`scan.py`; editing them by hand only means the next scan overwrites you.
-`archive` is how the scanner recognises the next release and never reaches the
-console.
+`latest.json` — the scanner's, rewritten whole, never edited by hand.
+
+```json
+{
+  "rev": 1789046256,
+  "seen": 1789071038,
+  "version": "0.24.0",
+  "url": "https://github.com/…/extremetuxracer-psp.zip",
+  "sha256": "9f2c1e4b8a7d…",
+  "size": 44048460,
+  "root": "PSP/GAME/ExtremeTuxRacer/"
+}
+```
 
 | Field | |
 |---|---|
@@ -47,21 +51,35 @@ console.
 | `category` | `games`, `emulators`, `apps`, `plugins`, `demos` |
 | `license` | SPDX id, or `proprietary` |
 | `repo` | the project |
-| `release` | what to download, and how to know it is new |
-| `archive` | which asset, and where the package sits inside it |
+| `asset` | optional: a glob, when a release attaches more than one file |
+| `scan` | optional: `false` pins the entry where it is |
+| `rev`, `version`, `url`, `sha256`, `size` | the release, and what the console needs |
+| `seen`, `root` | how the scanner recognises the next release; never served |
 
 The id comes from a domain the author controls, reversed. Without one, GitHub
 supplies it: `io.github.<user>.<app>`, from `github.io`, the same rule Flathub
 uses. Stable forever means exactly that — it is the directory on the Memory
 Stick and the key in the install journal, so changing it orphans installs.
 
-## Why `rev` is a number
+A bot commits into `latest.json` every hour and people edit `app.json` by pull
+request. Keeping them in one file meant merge conflicts between the two, and a
+diff nobody could skim; the workflows stage `apps/*/latest.json` and nothing
+else, so the separation is enforced rather than promised.
 
-Unix seconds, taken from the release's `published_at`, and the only field
-compared. Homebrew version strings are chaos — `r12`, `v0.9b`, `final2`,
+## Why `rev` is a number, and why there are two of them
+
+Unix seconds, and the only field compared. Homebrew version strings are chaos — `r12`, `v0.9b`, `final2`,
 `1.0 FIXED` — and no ordering can be derived from them. Keeping `rev` separate
 also means no version parser runs on the console, and a downgrade cannot be
 expressed. `version` sits beside it to be printed and is never compared.
+
+`rev` is the revision of the bytes and `seen` is the release the scanner last
+looked at. They differ whenever an author re-tags the same build: `seen` moves,
+`rev` does not, and nobody is offered an update that would download what they
+already have. `seen` also takes the newest of the release's own timestamp and
+its assets', because deleting an asset and uploading a replacement under the
+same tag leaves `published_at` untouched — and used to leave the catalog
+serving a checksum for bytes that were gone.
 
 `sha256` is what actually protects the payload, and `size` is mandatory rather
 than a convenience — 42 MB over 802.11b is minutes, and that belongs in front
@@ -140,9 +158,10 @@ python3 scan.py --all                          # refresh everything
 python3 scan.py --all --check                  # say what would change
 ```
 
-It runs hourly in Actions. An unchanged repository answers `304 Not Modified`,
-which GitHub does not count against the rate limit, so asking costs close to
-nothing. `"scan": false` pins an entry where it is.
+It runs hourly in Actions, one small API call per app. Conditional requests
+were tried and dropped: the release JSON carries each asset's `download_count`,
+so its ETag changes whenever anybody downloads anything and the 304 almost
+never arrives. `"scan": false` pins an entry where it is.
 
 Assuming a fixed archive layout does not survive contact with PSP homebrew: of
 sixteen surveyed release archives that contain an EBOOT, ten put it one
