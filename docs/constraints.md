@@ -15,14 +15,16 @@ value to discovery, trust, and links that still resolve in ten years.
 points are WPA3-only, 5 GHz-only, or require PMF, so some users simply cannot get
 a PSP online at all. Real throughput is roughly 1–3 Mbit/s.
 
-The TLS stack (`sceHttps`, with Sony's 2007 CA store) does not reach modern
-endpoints. Two ways around it:
+Sony's own TLS stack (`sceHttps`, with a 2007 CA store) reaches no modern
+endpoint. Three ways around it were on the table: terminate TLS elsewhere on the
+LAN, sign the payload and stop caring about the transport, or carry a real TLS
+stack.
 
-- terminate TLS elsewhere — a relay on the LAN, or a plain-HTTP mirror
-- sign the payload and stop caring about the transport
-
-The second is better: a signed manifest can travel over plain HTTP, and any
-mirror becomes untrusted infrastructure that can fail or omit, but not lie.
+The third turned out to be the least work, and it is what is built: wolfSSL 5.7
+from the pspdev tree, TLS 1.3, X25519. Nothing is signed, because with one
+origin over TLS a signature proves nothing the transport did not — the argument
+is in [open-questions.md](open-questions.md). Signing is what mirroring would
+need, not what HTTPS needs.
 
 Handshakes cost more than bytes here. On a 222 MHz MIPS core the TLS handshake
 dominates a small request, so the number of distinct *hosts* matters far more

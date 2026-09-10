@@ -15,12 +15,14 @@ occasionally wrong without anyone noticing.
 
 Each project ships a `.pspdx` file in its own repository. The author's release
 workflow rewrites the version line; that is the entire publishing process. On
-install, the client remembers the manifest URL and the author's public key, and
-every later update must carry a signature from the same key.
+install, the client remembers the manifest URL and asks that URL, and only that
+URL, about later versions.
 
 This is the Sparkle appcast model, and the same shape Chrome extensions use with
 `update_url`. Trust becomes per-package instead of central: nobody can push an
 update for someone else's software, and there is no registry to compromise.
+What backs it today is TLS and the author's control of their own repository,
+not a signature — see [open-questions.md](open-questions.md).
 
 Downside: it can only update what is already installed. On its own it is an
 updater, not a package manager.

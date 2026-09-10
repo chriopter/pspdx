@@ -41,8 +41,9 @@ thirty real fetches on real hardware before optimising further.
 
 If author-hosted manifests ever spread across many hosts, an aggregator collapses
 the check to one request: the client sends `{id, rev}` pairs, the worker returns
-only what changed. It relays the author-signed manifests verbatim, so it stays
-untrusted — able to omit, not to lie.
+only what changed. Note that such a worker is trusted the moment it exists:
+nothing is signed, so a relay that can rewrite a manifest can rewrite the hash
+in it. That is the point at which signatures stop being overkill.
 
 Batching beats ETags here. A 304 saves bytes but not the round trip, and the
 round trip is the cost.
@@ -50,7 +51,7 @@ round trip is the cost.
 ## Publishing
 
 For the author there is no registry step at all: the release workflow rewrites
-the `[current]` block in the `.pspdx` and pushes. It is visible as soon as the
+`rev`, `url`, `sha256` and `size` in the `.pspdx` and pushes. It is visible as soon as the
 CDN cache expires.
 
 Two things worth having anyway:

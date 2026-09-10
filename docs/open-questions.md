@@ -1,24 +1,36 @@
 # Open questions
 
-## Signing
+## Signing — decided against, for now
 
-If the catalog is fetched straight from a git repository there is no build step,
-and therefore nothing signs it. Three options, roughly in order of effort:
+Nothing is signed. TLS 1.3 to GitHub carries the trust, and that is the whole
+arrangement:
 
-1. trust HTTPS and GitHub — entirely defensible to start with
-2. a bot commits a `catalog.json.sig` alongside, which is the smallest possible
-   remnant of a pipeline
-3. the full offline-root arrangement, only worth it once someone other than the
-   author can write to the registry
+| | who is trusted | what it takes to lie |
+|---|---|---|
+| catalog | us, over HTTPS | our repository, or a certificate for our host |
+| manifest | the author, over HTTPS | the author's repository, or one for theirs |
+| artifact | the manifest's `sha256` | see above — the hash is pinned by the manifest |
 
-Package manifests are a separate matter and should be signed by their author from
-the beginning, with the key pinned by the client at install time. That is what
-makes per-package trust work without any central authority.
+The hash is what actually protects the 42 MB, and it costs nothing. Signatures
+would protect against a compromised transport, and there is no transport left
+to compromise while everything comes from one origin over TLS.
 
-Anti-rollback should not rely on the clock. The PSP's RTC is user-settable and
-resets when the battery dies, so expiry checks are worthless. Storing the highest
-`rev` ever seen and refusing anything lower achieves the same thing without
-needing to know the date.
+The reason to stop here rather than build it anyway: a signature is only worth
+its complexity once the key can be verified independently of the thing it
+signs. Today the client would have to learn the author's key from the catalog,
+which it fetches over the same TLS from the same GitHub that already serves the
+manifest. That is a signature that proves nothing the transport did not already
+prove, plus a key-rotation problem nobody has.
+
+Two things would change the answer. Mirroring, because a mirror that can rewrite
+bytes is exactly the untrusted middle a signature is for. And a second person
+with write access to the catalog, because then "trust us" stops being one
+person's word.
+
+Anti-rollback does not need signatures and is already in: the client stores the
+`rev` it installed and refuses anything lower. It must not rely on the clock —
+the PSP's RTC is user-settable and resets when the battery dies, so expiry
+checks are worthless.
 
 ## Mirroring, and what GPL does to it
 
