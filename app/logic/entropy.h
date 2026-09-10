@@ -26,6 +26,17 @@ void entropy_init(void);
 /* Returns 1 if this field had not been entered before and was credited. */
 int entropy_absorb_field(unsigned int field);
 
+/* Runtime noise: absorbed, never counted. The bar is a gate on the first
+   handshake, not a running total, and the pool is a 20-byte SHA-1 state that
+   is already full at 128 bits -- so what this buys is not strength but
+   freshness. PSPDX.SEED is a readable file on the stick, and a copy of it
+   otherwise predicts every later boot, because a stored seed skips the sweep.
+   Stirring the session full of things the device does not control, and
+   writing the seed back as it goes, is what makes a stolen copy go stale.
+   A timestamp is folded in on every call, so a caller may pass the bare
+   value it has. */
+void entropy_stir(const void *data, unsigned int len);
+
 int entropy_bits(void);
 int entropy_load(void);
 void entropy_save(int replaying);

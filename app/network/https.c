@@ -18,6 +18,7 @@
 #include <pspnet_apctl.h>
 #include <pspnet_inet.h>
 #include <pspnet_resolver.h>
+#include <psppower.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <errno.h>
@@ -27,6 +28,7 @@
 #include <wolfssl/options.h>
 #include <wolfssl/ssl.h>
 
+#include "logic/entropy.h"
 #include "network/https.h"
 #include "util/runtime.h"
 #include "network/ca_certs.h"
@@ -152,6 +154,25 @@ static void wait_socket(int ms) {
     sceKernelDelayThread((unsigned)ms * 1000);
 }
 
+/* Read once per connection, just before wolfSSL builds this session's RNG, so
+   that what goes in reaches this handshake and not merely the next. The
+   current draw moves with whatever the CPU and the radio are doing and has a
+   noisy converter beneath it; voltage and temperature drift slowly and are
+   worth a good deal less. How long the connect took is the network's answer,
+   not ours. None of it is counted -- see entropy_stir. */
+static void stir_power(unsigned connect_ms) {
+    struct {
+        int volt, elec, temp, life;
+        unsigned connect_ms;
+    } p;
+    p.volt = scePowerGetBatteryVolt();
+    p.elec = scePowerGetBatteryElec();
+    p.temp = scePowerGetBatteryTemp();
+    p.life = scePowerGetBatteryLifeTime();
+    p.connect_ms = connect_ms;
+    entropy_stir(&p, sizeof(p));
+}
+
 /* ------------------------------------------------------------------- tls */
 
 static int io_recv(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
@@ -160,7 +181,15 @@ static int io_recv(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
     int fd = *(int *)ctx;
 
     int n = psp_recv(fd, buf, sz);
-    if (n > 0) return n;
+    if (n > 0) {
+        /* When a packet lands is decided by the radio, the access point's
+           scheduling and the path across the internet, none of which this
+           device has a say in. wait_socket polls on a fixed sleep, which
+           coarsens the arrival time, so this is worth about a bit; the
+           timestamp is folded in by entropy_stir itself. */
+        entropy_stir(&n, sizeof(n));
+        return n;
+    }
     if (n == 0) return WOLFSSL_CBIO_ERR_CONN_CLOSE;
 
     int e = sceNetInetGetErrno();
@@ -358,6 +387,7 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
             if (expired(start, CONNECT_TIMEOUT_MS)) { logline("connect timeout"); goto out; }
         }
     }
+    stir_power(now_ms() - start);
 
     int irc = wolfSSL_Init();
     if (irc != WOLFSSL_SUCCESS) {
