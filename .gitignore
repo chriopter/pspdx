@@ -14,3 +14,6 @@ app/wolfssl-psp/prefix/
 *.swp
 .DS_Store
 app/wolfssl-psp/work/
+ppsspp.out
+PSPDX.LOG
+shot.png
