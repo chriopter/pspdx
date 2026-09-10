@@ -24,11 +24,13 @@
 #define BUF_W 512                       /* draw buffer stride, must be 2^n */
 #define FRAME_SIZE (BUF_W * SCR_H * 4)  /* 0x88000 */
 #define GLOW_SIZE 64
+#define RIPPLE_SIZE 64
 
 static unsigned int __attribute__((aligned(16))) g_list[64 * 1024];
 static unsigned g_frames;
 static int g_up;
 static struct gfx_texture g_glow;
+static struct gfx_texture g_ripple;
 
 /* Vertex layouts. The GE reads the components in a fixed order -- texture,
    colour, position -- so the struct members have to be declared in that
@@ -73,8 +75,37 @@ static void make_glow(void) {
     sceKernelDcacheWritebackRange(g_glow.pixels, GLOW_SIZE * GLOW_SIZE * 4);
 }
 
+/* One tile of fine ripple: bands of light that wobble along their length,
+   two of them out of step, so a surface drawn with it repeated over itself
+   has detail between its vertices instead of a flat gradient. The floor of
+   alpha is the water's own body; the bands are what the light sits on. */
+static float crest(float v, int squarings) {
+    if (v < 0.0f) return 0.0f;
+    for (int i = 0; i < squarings; i++) v *= v;
+    return v;
+}
+
+static void make_ripple(void) {
+    g_ripple.w = g_ripple.h = g_ripple.tw = g_ripple.th = RIPPLE_SIZE;
+    g_ripple.pixels = memalign(16, RIPPLE_SIZE * RIPPLE_SIZE * 4);
+    if (!g_ripple.pixels) return;
+    unsigned *px = g_ripple.pixels;
+    for (int y = 0; y < RIPPLE_SIZE; y++) {
+        float fy = (float)y / RIPPLE_SIZE * 6.2831853f;
+        for (int x = 0; x < RIPPLE_SIZE; x++) {
+            float fx = (float)x / RIPPLE_SIZE * 6.2831853f;
+            float a = 0.65f * crest(sinf(3 * fy + 0.55f * sinf(2 * fx)), 1)
+                    + 0.45f * crest(sinf(5 * fy + 1.7f - 0.40f * sinf(3 * fx)), 2);
+            int alpha = (int)(80.0f + 175.0f * (a > 1.0f ? 1.0f : a));
+            px[y * RIPPLE_SIZE + x] = RGBA(255, 255, 255, (unsigned)alpha);
+        }
+    }
+    sceKernelDcacheWritebackRange(g_ripple.pixels, RIPPLE_SIZE * RIPPLE_SIZE * 4);
+}
+
 void gfx_init(void) {
     if (!g_glow.pixels) make_glow();
+    if (!g_ripple.pixels) make_ripple();
     sceGuInit();
     sceGuStart(GU_DIRECT, g_list);
     sceGuDrawBuffer(GU_PSM_8888, (void *)0, BUF_W);
@@ -251,29 +282,36 @@ void gfx_wave(float y, float amp, float thickness, float phase, unsigned color,
                    n, 0, line);
 }
 
+/* Room for one triangle strip of n vertices. Inside a batch it goes into the
+   pending run and *batched says so, so the caller writes and leaves; outside
+   one it is scratch the caller draws with itself. */
+static struct vcol *strip_room(int n, int *batched) {
+    *batched = g_batching && n <= BATCH_STRIP_VERTS;
+    if (!*batched) {
+        flush_batch();
+        return sceGuGetMemory(n * sizeof(struct vcol));
+    }
+    flush_sprites();
+    if (g_nstrips == BATCH_STRIPS || g_strip_verts + n > BATCH_STRIP_VERTS)
+        flush_strips();
+    if (!g_strip) {
+        g_strip = sceGuGetMemory(BATCH_STRIP_VERTS * sizeof(struct vcol));
+        if (!g_strip) return 0;
+    }
+    struct vcol *v = g_strip + g_strip_verts;
+    g_strip_at[g_nstrips].first = (short)g_strip_verts;
+    g_strip_at[g_nstrips].count = (short)n;
+    g_nstrips++;
+    g_strip_verts += n;
+    return v;
+}
+
 void gfx_ribbon(const float *x, const float *y, const unsigned *color, int n,
                 float half) {
     if (n < 2) return;
-    int batched = g_batching && n * 2 <= BATCH_STRIP_VERTS;
-    struct vcol *v;
-    if (batched) {
-        flush_sprites();
-        if (g_nstrips == BATCH_STRIPS || g_strip_verts + n * 2 > BATCH_STRIP_VERTS)
-            flush_strips();
-        if (!g_strip) {
-            g_strip = sceGuGetMemory(BATCH_STRIP_VERTS * sizeof(struct vcol));
-            if (!g_strip) return;
-        }
-        v = g_strip + g_strip_verts;
-        g_strip_at[g_nstrips].first = (short)g_strip_verts;
-        g_strip_at[g_nstrips].count = (short)(n * 2);
-        g_nstrips++;
-        g_strip_verts += n * 2;
-    } else {
-        flush_batch();
-        v = sceGuGetMemory(n * 2 * sizeof(struct vcol));
-        if (!v) return;
-    }
+    int batched;
+    struct vcol *v = strip_room(n * 2, &batched);
+    if (!v) return;
     for (int i = 0; i < n; i++) {
         v[i * 2 + 0].color = color[i]; v[i * 2 + 0].x = (short)x[i];
         v[i * 2 + 0].y = (short)(y[i] - half); v[i * 2 + 0].z = 0;
@@ -286,6 +324,29 @@ void gfx_ribbon(const float *x, const float *y, const unsigned *color, int n,
     sceGuDrawArray(GU_TRIANGLE_STRIP,
                    GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
                    n * 2, 0, v);
+}
+
+void gfx_ripple_strip(const float *x, const float *y, const short *u,
+                      const short *v, const unsigned *color, int n) {
+    if (!g_ripple.pixels || n < 4) return;
+    flush_batch();
+    struct vtexc *p = sceGuGetMemory(n * sizeof(struct vtexc));
+    if (!p) return;
+    for (int i = 0; i < n; i++) {
+        p[i].u = u[i];
+        p[i].v = v[i];
+        p[i].color = color[i];
+        p[i].x = (short)x[i];
+        p[i].y = (short)y[i];
+        p[i].z = 0;
+    }
+    bind(&g_ripple);
+    sceGuTexWrap(GU_REPEAT, GU_REPEAT);
+    additive();
+    sceGuDrawArray(GU_TRIANGLE_STRIP,
+                   GU_TEXTURE_16BIT | GU_COLOR_8888 | GU_VERTEX_16BIT |
+                   GU_TRANSFORM_2D, n, 0, p);
+    flat_state();
 }
 
 void gfx_glow(float cx, float cy, float w, float h, unsigned color) {

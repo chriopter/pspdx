@@ -190,18 +190,6 @@ static unsigned keys_pressed(void) {
     return pressed;
 }
 
-/* The sweep belongs on the debug screen: a grid of text cells. The shell
-   takes the display right after, before any network. */
-static void run_entropy(void) {
-    gui_init();
-    gui_header("gathering entropy");
-    install_recover();
-    entropy_init();
-    entropy_screen_prepare();
-    if (entropy_screen_is_replay() || !entropy_load()) entropy_screen_run();
-    entropy_save(entropy_screen_is_replay());
-}
-
 int main(void) {
     /* Full speed: the film decodes and the piano plays on the same CPU
        the interface draws with. The default is two thirds of it. */
@@ -211,11 +199,17 @@ int main(void) {
         pspDebugScreenPrintf("exit callback failed; HOME will not work\n");
     }
 
-    run_entropy();
+    install_recover();
+    entropy_init();
+    entropy_screen_prepare();
+    int sweep = entropy_screen_is_replay() || !entropy_load();
 
+    /* The sweep is drawn on the water the browser then stands on, so the GE
+       and the font come up before it rather than after. */
     if (!shell_init()) {
         /* No system font to browse with. The log says so, and the log is
            what gets shown. */
+        gui_init();
         gui_clear();
         gui_failure();
         sceDisplayWaitVblankStart();
@@ -223,6 +217,9 @@ int main(void) {
         dump_diagnostics();
         for (;;) sceDisplayWaitVblankStart();
     }
+
+    if (sweep) entropy_screen_run();
+    entropy_save(entropy_screen_is_replay());
 
     /* The tune starts with the shell and keeps going through installs and
        sweeps; it lives on its own thread and never waits for a frame. */
@@ -323,18 +320,12 @@ int main(void) {
             dump_diagnostics();
         }
         if (pressed & PSP_CTRL_SELECT) {
-            /* Back to the debug screen for the sweep, then hand the display
-               to the shell again. */
-            shell_shutdown();
-            gui_init();
-            gui_clear();
-            gui_header("entropy discarded");
+            /* The field drains and is swept again, in the room the browser
+               was already standing in. */
             entropy_forget();
             entropy_init();
             entropy_screen_run();
             entropy_save(entropy_screen_is_replay());
-            entropy_screen_reset_cache();
-            if (!shell_init()) return 0;
         }
 
         unsigned tick0 = now_us();

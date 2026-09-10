@@ -39,6 +39,15 @@ void gfx_wave(float y, float amp, float thickness, float phase, unsigned color,
 void gfx_ribbon(const float *x, const float *y, const unsigned *color, int n,
                 float half);
 
+/* A surface: n vertices in triangle-strip order, each with its own place, its
+   own colour, and where it sits in gfx's tiling ripple -- fine bands of light
+   that give the surface detail between vertices that are far apart. Alternate
+   the two edges -- near, far, near, far -- and a row of quads comes out lit
+   corner by corner. Added onto what is behind it; u and v are in texels, so
+   64 is one tile. */
+void gfx_ripple_strip(const float *x, const float *y, const short *u,
+                      const short *v, const unsigned *color, int n);
+
 /* A soft radial light, added onto what is behind it. The alpha in color is
    how strong; the rgb is what it tints toward. Cheap enough to draw dozens
    of per frame. */

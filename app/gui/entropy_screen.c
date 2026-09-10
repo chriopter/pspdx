@@ -1,27 +1,43 @@
+/*
+ * The entropy sweep. The field the browser stands on starts dry; the stick
+ * carries a source of water over it, and where the source goes water is
+ * born and spreads. When the field is water and the pool is full the key
+ * can be made, and the surface that was just built stays as the backdrop.
+ */
+
+#include <math.h>
 #include <pspctrl.h>
-#include <pspdebug.h>
-#include <pspdisplay.h>
 #include <pspiofilemgr.h>
 #include <stdio.h>
 #include <string.h>
 
-#include "logic/entropy.h"
 #include "gui/entropy_screen.h"
+#include "gui/font.h"
 #include "gui/gfx.h"
-#include "gui/screen.h"
+#include "gui/lattice.h"
+#include "gui/palette.h"
+#include "logic/entropy.h"
 
-#define GRID_W 60
-#define GRID_H 28
-#define GRID_X 0
-#define GRID_Y 2
-#define SETTLE 14
-#define BAR_W 36
+/* The stick moves the source across the field at the speed it moved the old
+   text cursor across its 60 by 28 cells, so a sweep takes as long as it
+   ever did. The pool is still fed the position it landed on. */
+#define FIELD_W 60.0f
+#define FIELD_H 28.0f
+#define STEP_X (0.0065f / FIELD_W)
+#define STEP_Z (0.0040f / FIELD_H)
+
 
 #define TRACE_MAX 5000
 #define TRACE_FILE  "ms0:/PSPDX.TRACE"
 #define REPLAY_FILE "ms0:/PSPDX.REPLAY"
 #define REC_DIR "ms0:/PSPDX_REC"
 #define REC_EVERY 4
+
+/* The room before there is a catalog to colour it: the shell's own default. */
+static const struct rgb NIGHT_TOP = { 2, 3, 9 };
+static const struct rgb NIGHT_BOTTOM = { 6, 8, 22 };
+static const struct rgb TINT = { 80, 140, 255 };
+static const struct rgb ALARM = { 255, 90, 80 };
 
 struct trace_sample { unsigned char lx, ly; unsigned short buttons; };
 
@@ -31,30 +47,7 @@ static int trace_pos;
 static int replaying;
 static int recording;
 
-static unsigned char cell_phase[GRID_H][GRID_W];
-static unsigned char cell_done[GRID_H][GRID_W];
-static char shadow_ch[GRID_H][GRID_W];
-static unsigned shadow_col[GRID_H][GRID_W];
-
-static const char IDLE_GLYPHS[] = ".,'`:;\"~";
-static const char SPIN_GLYPHS[] = "|/-\\";
-static const char BLOOM[] = "oO0@";
-static const char LOGO_GLYPHS[] = "@#%*+";
-
-/* Letters are 7 wide and the extrusion reaches 4 cells, so the pitch is 11:
-   a shadow then lands in the gap and never inside the next letter. */
-#define LOGO_X 5
-#define LOGO_Y 8
-static const unsigned char LOGO_BITS[5][7] = {
-    { 124, 102, 102, 124,  96,  96,  96 },
-    {  62,  96,  96,  60,   6,   6, 124 },
-    { 124, 102, 102, 124,  96,  96,  96 },
-    { 124, 102,  99,  99,  99, 102, 124 },
-    {  99,  54,  28,   8,  28,  54,  99 },
-};
-static const unsigned char LOGO_LETTER_X[5] = { 0, 11, 22, 33, 44 };
-static int logo_depth_x = 1;
-static int logo_depth_y = 1;
+static float g_fx = 0.5f, g_fz = 0.5f;
 
 static void trace_load(void) {
     int fd = sceIoOpen(REPLAY_FILE, PSP_O_RDONLY, 0777);
@@ -99,88 +92,9 @@ static int next_sample(SceCtrlData *pad) {
     return 1;
 }
 
-static int logo_letter(int x, int y) {
-    int lx = x - LOGO_X;
-    int ly = y - LOGO_Y;
-    if (lx < 0 || ly < 0 || ly >= 7) return 0;
-    for (int letter = 0; letter < 5; letter++) {
-        int within = lx - LOGO_LETTER_X[letter];
-        if (within < 0 || within >= 7) continue;
-        if (LOGO_BITS[letter][ly] & (1u << (6 - within))) return letter + 1;
-    }
-    return 0;
-}
-
-static unsigned logo_color(int x, int y, int frame) {
-    static const unsigned colors[] = {
-        0xFF3030FF, 0xFF20A0FF, 0xFF20E8FF, 0xFF40E040,
-        0xFFFFD040, 0xFFFF7040, 0xFFE050E0
-    };
-    int band = (x + y + frame / 3) % 30;
-    return band < 7 ? colors[band] : 0xFF40E040;
-}
-
-static char logo_face_glyph(int x, int y, int frame) {
-    int band = (x + y + frame / 3) % 30;
-    return band < 7 ? LOGO_GLYPHS[band % 3] : '#';
-}
-
-static int logo_extrusion(int x, int y, int *depth) {
-    for (int d = 1; d <= 4; d++) {
-        int letter = logo_letter(x - d * logo_depth_x, y - d * logo_depth_y);
-        if (letter) {
-            *depth = d;
-            return letter;
-        }
-    }
-    return 0;
-}
-
-static unsigned extrusion_color(int depth, int frame) {
-    static const unsigned colors[] = {
-        0xFF50D050, 0xFF309030, 0xFF206020, 0xFF103018
-    };
-    int lit = (frame / 10) % 4;
-    int shade = depth - 1;
-    if (shade == lit && shade > 0) shade--;
-    return colors[shade];
-}
-
-static char idle_glyph(int x, int y) {
-    unsigned h = (unsigned)(x * 73856093) ^ (unsigned)(y * 19349663);
-    return IDLE_GLYPHS[(h >> 5) % (sizeof(IDLE_GLYPHS) - 1)];
-}
-
-static char tunnel_glyph(int x, int y, int frame, unsigned *color) {
-    int dx = x - GRID_W / 2;
-    int dy = (y - GRID_H / 2) * 2;
-    int ax = dx < 0 ? -dx : dx;
-    int ay = dy < 0 ? -dy : dy;
-    int wave = (ax + ay + frame / 2) % 16;
-    if (wave == 0) {
-        *color = 0xFF30A030;
-        if (ax > ay * 2) return '-';
-        if (ay > ax * 2) return '|';
-        return (dx < 0) == (dy < 0) ? '\\' : '/';
-    }
-    *color = COL_IDLE;
-    return idle_glyph(x, y);
-}
-
-static void draw_cell(int x, int y, char ch, unsigned color) {
-    if (shadow_ch[y][x] == ch && shadow_col[y][x] == color) return;
-    shadow_ch[y][x] = ch;
-    shadow_col[y][x] = color;
-    pspDebugScreenSetTextColor(color);
-    pspDebugScreenSetXY(GRID_X + x, GRID_Y + y);
-    pspDebugScreenPrintf("%c", ch);
-}
-
 void entropy_screen_reset_cache(void) {
-    memset(cell_phase, 0, sizeof(cell_phase));
-    memset(cell_done, 0, sizeof(cell_done));
-    memset(shadow_ch, 0, sizeof(shadow_ch));
-    memset(shadow_col, 0, sizeof(shadow_col));
+    lattice_dry();
+    g_fx = g_fz = 0.5f;
 }
 
 void entropy_screen_prepare(void) {
@@ -201,23 +115,54 @@ static void record_frame(int frame) {
     gfx_screenshot(path);
 }
 
+/* The name, glossy rather than stamped: a soft light behind it, the face
+   printed a few times at a low alpha so its edge bleeds, then the face
+   itself on top. */
+static void title(const char *text, float cx, float y, float t) {
+    static const float ox[4] = { -1.0f, 1.0f, 0.0f, 0.0f };
+    static const float oy[4] = { 0.0f, 0.0f, -1.0f, 1.0f };
+    float w = font_width(FONT_H1, text);
+    float x = cx - w / 2;
+    float pulse = 0.85f + 0.15f * sinf(t * 1.1f);
+    gfx_glow(cx, y - 7, w + 90, 54, rgb_pack(TINT, (int)(90 * pulse)));
+    unsigned halo = rgb_pack(rgb_mix(TINT, RGB_WHITE, 0.5f), 60);
+    for (int i = 0; i < 4; i++) font_print(FONT_H1, x + ox[i], y + oy[i], halo, text);
+    font_print(FONT_H1, x, y, rgb_pack(rgb_mix(RGB_WHITE, TINT, 0.12f), 255), text);
+}
+
+/* What the user has to know, over the water: what this is for, how far it
+   has got, and when it can stop. */
+static void draw_chrome(float t, int percent, int ready) {
+    unsigned text = rgb_pack(rgb_mix(RGB_WHITE, TINT, 0.05f), 255);
+    unsigned accent = rgb_pack(rgb_mix(TINT, RGB_WHITE, 0.45f), 255);
+    unsigned dim = rgb_pack(rgb_mix(TINT, RGB_WHITE, 0.35f), 200);
+
+    title("PSPDX", SCR_W / 2.0f, 58.0f, t);
+
+    const char *head = replaying
+        ? "REPLAY -- recorded input, the entropy here is NOT real"
+        : "COLLECT ENTROPY -- sweep the field with the analog stick";
+    font_print(FONT_META, 16, 96, replaying ? rgb_pack(ALARM, 255) : text, head);
+
+    /* The bar is the shore drawn straight: how much of the field is water. */
+    int bar_x = 16, bar_y = 238, bar_w = SCR_W - 32;
+    gfx_rect(bar_x, bar_y, bar_w, 5, RGBA(255, 255, 255, 36));
+    int filled = bar_w * percent / 100;
+    if (filled > 0) gfx_hgrad(bar_x, bar_y, filled, 5, rgb_pack(TINT, 255), accent);
+
+    char right[48];
+    if (ready) snprintf(right, sizeof(right), "%d bits   X to continue", entropy_bits());
+    else snprintf(right, sizeof(right), "%d%%   %d bits", percent, entropy_bits());
+    float w = font_width(FONT_META, right);
+    font_print(FONT_META, SCR_W - 16 - w, 232, ready ? accent : dim, right);
+}
+
 int entropy_screen_run(void) {
     entropy_screen_reset_cache();
-    gui_clear();
     sceCtrlSetSamplingCycle(0);
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
 
-    float cx = GRID_W / 2.0f;
-    float cy = GRID_H / 2.0f;
     int frame = 0;
-
-    pspDebugScreenSetTextColor(replaying ? 0xFF4040FF : COL_TEXT);
-    pspDebugScreenSetXY(0, 0);
-    if (replaying)
-        pspDebugScreenPrintf(" REPLAY -- recorded input, the entropy here is NOT real");
-    else
-        pspDebugScreenPrintf(" COLLECT ENTROPY -- sweep the field with the analog stick");
-
     for (;;) {
         SceCtrlData pad;
         if (!next_sample(&pad)) break;
@@ -226,88 +171,43 @@ int entropy_screen_run(void) {
         int moving = dx * dx + dy * dy > 14 * 14;
 
         if (moving) {
-            cx += dx * 0.0065f;
-            cy += dy * 0.0040f;
-            if (cx < 0) cx = 0;
-            if (cy < 0) cy = 0;
-            if (cx > GRID_W - 1) cx = GRID_W - 1;
-            if (cy > GRID_H - 1) cy = GRID_H - 1;
-            int fx = (int)(cx * (ENTROPY_FIELD_SIDE - 1) / (GRID_W - 1) + 0.5f);
-            int fy = (int)(cy * (ENTROPY_FIELD_SIDE - 1) / (GRID_H - 1) + 0.5f);
-            entropy_absorb_field((unsigned)fy * ENTROPY_FIELD_SIDE + (unsigned)fx);
+            g_fx += dx * STEP_X;
+            /* Stick down runs the source at the viewer, not at the horizon. */
+            g_fz -= dy * STEP_Z;
+            if (g_fx < 0) g_fx = 0;
+            if (g_fx > 1) g_fx = 1;
+            if (g_fz < 0) g_fz = 0;
+            if (g_fz > 1) g_fz = 1;
+            /* The source pays for new ground: one field of the invisible
+               250x250 grid, credited once, so holding the stick against its
+               stop earns nothing. */
+            int fx = (int)(g_fx * (ENTROPY_FIELD_SIDE - 1) + 0.5f);
+            int fz = (int)(g_fz * (ENTROPY_FIELD_SIDE - 1) + 0.5f);
+            entropy_absorb_field((unsigned)fz * ENTROPY_FIELD_SIDE + (unsigned)fx);
         }
 
-        int ccx = (int)(cx + 0.5f);
-        int ccy = (int)(cy + 0.5f);
-        logo_depth_x = ccx < 20 ? 1 : ccx > 39 ? -1 : 1;
-        logo_depth_y = ccy < 9 ? 1 : ccy > 18 ? -1 : 1;
-
-        for (int y = 0; y < GRID_H; y++) {
-            for (int x = 0; x < GRID_W; x++) {
-                int px = x - ccx;
-                int py = y - ccy;
-                if (moving && px * px + py * py * 3 <= 9) {
-                    cell_phase[y][x] = SETTLE;
-                    cell_done[y][x] = 1;
-                }
-            }
-        }
-
-        for (int y = 0; y < GRID_H; y++) {
-            for (int x = 0; x < GRID_W; x++) {
-                char ch;
-                unsigned color;
-                int letter = logo_letter(x, y);
-                int depth = 0;
-                int extrusion = logo_extrusion(x, y, &depth);
-                int phase = cell_phase[y][x];
-                if (phase > 0) cell_phase[y][x]--;
-                if (letter) {
-                    ch = logo_face_glyph(x, y, frame);
-                    color = logo_color(x, y, frame);
-                } else if (phase > 0) {
-                    if (phase > SETTLE - 5) {
-                        ch = BLOOM[(SETTLE - phase) % 4];
-                        color = COL_SPIN;
-                    } else {
-                        ch = SPIN_GLYPHS[(phase + x + y) % 4];
-                        color = phase > 4 ? COL_SPIN : COL_WARM;
-                    }
-                } else if (extrusion) {
-                    ch = depth == 1 ? '/' : depth == 2 ? ':' : '.';
-                    color = extrusion_color(depth, frame);
-                } else if (cell_done[y][x]) {
-                    ch = '#';
-                    color = COL_DONE;
-                } else {
-                    ch = tunnel_glyph(x, y, frame, &color);
-                }
-                draw_cell(x, y, ch, color);
-            }
-        }
-
-        draw_cell(ccx, ccy, SPIN_GLYPHS[(frame / 2) % 4], COL_CURSOR);
-        shadow_ch[ccy][ccx] = 0;
-
+        /* The water is the picture of the sweep, not its measure: the bar
+           tracks the bits alone, and past the mark it stays full. */
+        lattice_pour(g_fx, g_fz, moving);
         int bits = entropy_bits();
         int ready = bits >= ENTROPY_BITS;
         int percent = ready ? 100 : bits * 100 / ENTROPY_BITS;
-        pspDebugScreenSetTextColor(ready ? COL_DONE : COL_TEXT);
-        pspDebugScreenSetXY(0, 33);
-        pspDebugScreenPrintf(" [");
-        int filled = percent * BAR_W / 100;
-        for (int i = 0; i < BAR_W; i++) pspDebugScreenPrintf("%c", i < filled ? '=' : ' ');
-        /* Past the mark the bar stays full and the count keeps climbing, so
-           sweeping on costs nothing and still shows something. */
-        if (ready) pspDebugScreenPrintf("] %4d bits  X to continue", bits);
-        else pspDebugScreenPrintf("] %3d%%  %4d bits   ", percent, bits);
-        if (ready && (pad.Buttons & PSP_CTRL_CROSS)) break;
+
+        float t = gfx_frames() * (1.0f / 60.0f);
+        gfx_frame_begin(0xFF000000);
+        gfx_vgrad(0, 0, SCR_W, SCR_H,
+                  rgb_pack(rgb_mix(NIGHT_TOP, TINT, 0.05f), 255),
+                  rgb_pack(rgb_mix(NIGHT_BOTTOM, TINT, 0.18f), 255));
+        lattice_draw(t, TINT);
+        draw_chrome(t, percent, ready);
+        gfx_frame_end();
+
         frame++;
-        sceDisplayWaitVblankStart();
         record_frame(frame);
+        if (ready && (pad.Buttons & PSP_CTRL_CROSS)) break;
     }
 
+    lattice_settle();
     trace_save();
-    pspDebugScreenSetTextColor(COL_TEXT);
     return entropy_bits();
 }
