@@ -49,6 +49,12 @@
 
 static const char *g_suites = DEFAULT_SUITES;
 
+/* What the stack is doing right now, for a status line: a literal, set by
+   the thread doing the work and read by whoever draws. */
+static const char *volatile g_phase = "";
+static void phase(const char *p) { g_phase = p; }
+const char *https_phase(void) { return g_phase; }
+
 void https_prefer(const char *suites) { g_suites = suites ? suites : DEFAULT_SUITES; }
 
 /* ------------------------------------------------------------------- net */
@@ -85,6 +91,7 @@ int net_up(void) {
     wolfSSL_SetLoggingCb(wolf_log);
     wolfSSL_Debugging_ON();
 #endif
+    phase("wifi");
     if (sceUtilityLoadNetModule(PSP_NET_MODULE_COMMON) < 0) return -1;
     if (sceUtilityLoadNetModule(PSP_NET_MODULE_INET) < 0) {
         sceUtilityUnloadNetModule(PSP_NET_MODULE_COMMON);
@@ -101,6 +108,7 @@ int net_up(void) {
     g_net.apctl = 1;
 
     /* Connection profile 1, the first one configured on the console. */
+    phase("access point");
     if (sceNetApctlConnect(1) < 0) goto fail;
     g_net.connected = 1;
 
@@ -108,7 +116,7 @@ int net_up(void) {
     for (;;) {
         int state = 0;
         if (sceNetApctlGetState(&state) < 0) goto fail;
-        if (state == 4) return 0;                    /* got an IP */
+        if (state == 4) { phase("ip"); return 0; }   /* got an IP */
         if (expired(start, CONNECT_TIMEOUT_MS)) goto fail;
         sceKernelDelayThread(50 * 1000);
     }
@@ -310,7 +318,9 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
     size_t headlen = 0;
 
     struct in_addr ip;
+    phase("dns");
     if (resolve(u->host, &ip) < 0) { logline("dns failed: %s", u->host); return -1; }
+    phase("connect");
 
     sock = sceNetInetSocket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) { logline("socket failed"); return -2; }
@@ -398,6 +408,7 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
     if (wolfSSL_UseKeyShare(ssl, WOLFSSL_ECC_X25519) != WOLFSSL_SUCCESS)
         logline("x25519 key share unavailable");
 
+    phase("tls handshake");
     start = now_ms();
     while ((rc = wolfSSL_connect(ssl)) != WOLFSSL_SUCCESS) {
         int e = wolfSSL_get_error(ssl, rc);
@@ -417,6 +428,7 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
                 group ? group : "?", res->handshake_ms);
     }
 
+    phase("request");
     int reqlen = snprintf(buf, sizeof(buf),
                           "GET %s HTTP/1.1\r\n"
                           "Host: %s\r\n"
@@ -499,6 +511,7 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
                     goto out;
                 }
                 logline("http %ld, %lu bytes announced", res->status, (unsigned long)want);
+                phase("download");
                 if (progress) progress(progress_ctx, 0, want);
 
                 /* Whatever followed the head in this read is body. */

@@ -234,6 +234,8 @@ int main(void) {
     int cursor = 0;
     int synced = 0;
     int automatic = -1;
+    unsigned shell_since = now_ms();
+    int shot_connecting = 0;
     unsigned dumped_ms = now_ms();
     unsigned last_buttons = 0;
     /* Frame times, so a slow frame is a number and not a feeling: every
@@ -271,6 +273,12 @@ int main(void) {
 
         if (!synced) {
             shell_status(sync_message());
+            /* The connecting screen, for the rig: a second and a half in,
+               while there is still something to connect to. */
+            if (!shot_connecting && expired(shell_since, 1500)) {
+                shot_connecting = 1;
+                gfx_screenshot("ms0:/PSPDX0.BMP");
+            }
             if (sync_done()) {
                 synced = 1;
                 if (sync_state() == SYNC_DONE) shell_status("");

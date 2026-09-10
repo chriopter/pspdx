@@ -17,6 +17,7 @@
 #include "gui/font.h"
 #include "gui/gfx.h"
 #include "gui/lattice.h"
+#include "gui/letters.h"
 #include "gui/palette.h"
 #include "gui/preview.h"
 #include "util/runtime.h"
@@ -137,8 +138,9 @@ static void draw_chrome(const struct catalog *catalog) {
         else
             snprintf(right, sizeof(right), "%d apps", catalog->total);
     }
-    font_print(FONT_META, SCR_W - LIST_X - font_width(FONT_META, right), 21,
-               g_dim, right);
+    if (catalog->count > 0)
+        font_print(FONT_META, SCR_W - LIST_X - font_width(FONT_META, right), 21,
+                   g_dim, right);
 }
 
 /* ------------------------------------------------------------------- list */
@@ -343,6 +345,7 @@ static void draw_install(void) {
 static void draw_footer(void) {
     gfx_vgrad(0, FOOTER_Y + 1, SCR_W, SCR_H - FOOTER_Y - 1, RGBA(0, 0, 0, 110),
               RGBA(0, 0, 0, 190));
+    if (g_catalog && g_catalog->count <= 0 && g_status[0]) return;   /* said in the middle */
     if (g_status[0]) {
         font_print_clipped(FONT_META, LIST_X, FOOTER_Y + 15, SCR_W - 2 * LIST_X,
                            g_accent, g_status);
@@ -390,11 +393,19 @@ void shell_draw(const struct catalog *catalog, int cursor) {
         draw_list(catalog, cursor, t);
         draw_panel(&catalog->apps[cursor], t);
     } else if (g_status[0]) {
-        /* Nothing to show yet: a slow pulse where the card will be, and
-           the status line says what is being waited for. */
-        float pulse = 0.6f + 0.4f * sinf(t * 1.8f);
-        gfx_glow(PANEL_X + SHOT_W / 2, SHOT_Y + SHOT_H / 2, 260 * pulse, 160 * pulse,
-                 rgb_pack(g_tint, (int)(90 * pulse)));
+        /* Nothing to browse yet: the word stands in the room, leaning
+           slowly, lit from behind, and under it what is being waited for.
+           The dots count the seconds. */
+        char word[16];
+        int dots = (int)(t * 1.5f) % 4;
+        snprintf(word, sizeof(word), "CONNECTING%.*s", dots, "...");
+        float cx = SCR_W / 2.0f + sinf(t * 0.5f) * 6.0f;
+        float cy = 118.0f + sinf(t * 0.8f) * 4.0f;
+        gfx_glow(cx, cy, 420, 160, rgb_pack(g_tint, 110));
+        letters_draw(word, cx, cy, 5.0f, sinf(t * 0.7f) * 0.30f,
+                     sinf(t * 0.45f) * 0.12f, rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.55f), 255), 4);
+        float w = font_width(FONT_META, g_status);
+        font_print(FONT_META, cx - w / 2, cy + 44, g_dim, g_status);
     } else {
         font_print(FONT_BODY, LIST_X, 120, g_dim, "The catalog came back empty.");
     }

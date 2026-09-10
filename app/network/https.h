@@ -23,6 +23,10 @@ struct https_result {
    library's own order. Applies to connections made after the call. */
 void https_prefer(const char *suites);
 
+/* What the stack is doing at this moment -- "dns", "tls handshake",
+   "download" -- for a status line. */
+const char *https_phase(void);
+
 int https_get(const char *url, https_sink sink, void *sink_ctx,
               https_progress progress, void *progress_ctx,
               struct https_result *out);

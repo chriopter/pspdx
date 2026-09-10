@@ -433,6 +433,21 @@ static void card_quad(float x0, float y0, float x1, float y1, float z,
     sceGumDrawArray(GU_TRIANGLE_STRIP, FMT3C, 4, 0, v);
 }
 
+void gfx_plane_begin(float cx, float cy, float yaw, float pitch) {
+    struct gfx_card c = { cx, cy, 0, 0, yaw, pitch, 255, -1.0f, 0 };
+    card_matrices(&c);
+    flat_state();
+}
+
+void gfx_plane_quad(float x, float y, float w, float h, float z, unsigned color) {
+    card_quad(x * PX, -y * PX, (x + w) * PX, -(y + h) * PX, z * PX,
+              color, color, color, color);
+}
+
+void gfx_plane_end(void) {
+    flat_state();
+}
+
 void gfx_card_draw(const struct gfx_texture *t, const struct gfx_card *c) {
     float hw = c->w * PX / 2, hh = c->h * PX / 2;
 

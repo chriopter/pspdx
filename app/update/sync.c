@@ -60,10 +60,11 @@ enum sync_state sync_state(void) { return g_state; }
 int sync_done(void) { return g_state == SYNC_DONE || g_state == SYNC_FAILED; }
 
 const char *sync_message(void) {
+    const char *phase = https_phase();
     switch (g_state) {
-    case SYNC_IDLE:
-    case SYNC_CONNECTING: return "connecting";
-    case SYNC_FETCHING:   return "fetching the catalog";
+    case SYNC_IDLE:       return "connecting";
+    case SYNC_CONNECTING: return phase[0] ? phase : "connecting";
+    case SYNC_FETCHING:   return phase[0] ? phase : "catalog";
     case SYNC_CHECKING:   return "checking for updates";
     case SYNC_FAILED:     return g_message;
     default:              return "";

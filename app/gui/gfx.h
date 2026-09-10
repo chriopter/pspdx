@@ -89,6 +89,14 @@ struct gfx_card {
    which is what the card looks like while its picture is on its way. */
 void gfx_card_draw(const struct gfx_texture *t, const struct gfx_card *c);
 
+/* A plane in space to draw flat things on, like the card but for anyone:
+   begin sets it up at a screen position with a lean, quads are placed in
+   screen pixels relative to its centre (y down, z toward the viewer), end
+   returns to flat drawing. */
+void gfx_plane_begin(float cx, float cy, float yaw, float pitch);
+void gfx_plane_quad(float x, float y, float w, float h, float z, unsigned color);
+void gfx_plane_end(void);
+
 /* A soft dark spot, composited rather than added: a shadow. */
 void gfx_shade(float cx, float cy, float w, float h, int alpha);
 
