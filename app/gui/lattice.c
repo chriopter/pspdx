@@ -19,15 +19,27 @@
 #define ROW0 3
 #define Z_NEAR 0.6f
 #define Z_FAR 40.0f
-#define HORIZON 116.0f
 #define STARS 22
 #define SPECKS 12
 
+/* The water in the world the GE draws it in: how high the eye sits over the
+   surface, what one unit of the height field is worth there, and how many
+   ripple tiles go to a unit of width. The height a near crest may reach is
+   capped in pixels, so a tall swell does not climb over the footer. */
+#define EYE_Y (150.0f / GFX_FOCAL)
+#define H_SCALE (52.0f / GFX_FOCAL)
+#define TILES 3.2f
+#define DY_CAP 42.0f
+/* Past this much width per unit of depth a row is far off screen, and its
+   corner can sit there rather than thousands of pixels out. */
+#define XLIM 0.9167f
+
 /* The wave equation on the cells. C is c^2 dt^2 / dx^2 and has to stay well
-   under a half or the surface explodes; the damping is what stops a ring
-   from ringing forever. */
-#define WAVE_C 0.20f
-#define WAVE_DAMP 0.994f
+   under a half or the surface explodes; it also sets the speed, and a long
+   ocean swell is slow. The damping is what stops a ring from ringing for
+   ever. */
+#define WAVE_C 0.06f
+#define WAVE_DAMP 0.995f
 #define WAVE_MAX 2.5f
 
 /* What the source covers in cells, and how many frames of standing over a
@@ -36,6 +48,7 @@
 #define POUR_RX 1.8f
 #define POUR_RZ 1.7f
 #define POUR_RATE 0.34f
+#define POUR_DENT 0.16f
 
 /* What water is where no light reaches it. */
 static const struct rgb DEEP = { 3, 8, 24 };
@@ -81,13 +94,10 @@ static float fexp(float x) {
 }
 
 /* Rows sit a constant factor apart in depth, which reads as an even surface
-   once projected, and they never move. Everything the projection can work
-   out from the row alone is worked out once, at startup:
-
-       sx = SCR_W/2 + u * xu + sway * xs
-       sy = y0 - h * yh  */
+   once projected, and they never move: the depth, what a unit of height is
+   worth there in pixels, and how much of the light a row still carries. */
 static struct {
-    float y0, yh, xu, xs, near, near2;
+    float z, y0, yh, near, near2;
 } g_row[NZ];
 
 static float g_u[NX];       /* across, sorted; -1..1 in front, wider outside */
@@ -100,21 +110,18 @@ static float g_h[NZ][NX], g_v[NZ][NX], g_wet[NZ][NX];
    four passes below -- the surface itself, the lines across, the lines away,
    and the crossings -- all want the same 682 points, so the surface is
    projected once and read four times. */
-static float g_hh[NZ][NX];      /* the swell plus the simulation */
-static float g_x[NZ][NX], g_y[NZ][NX], g_lit[NZ][NX], g_spec[NZ][NX];
-static unsigned g_fill[NZ][NX]; /* the water's own colour at each corner */
-
-/* Deep water to a lit crest in steps, mixed once a frame from the tint
-   rather than per corner: a thousand of those is a thousand packs. */
-#define RAMP_N 16
-static unsigned g_ramp[RAMP_N + 1];
+static float g_hh[NZ][NX];              /* the swell plus the simulation */
+static float g_wx[NZ][NX], g_wy[NZ][NX];        /* where it is in the world */
+static float g_x[NZ][NX], g_y[NZ][NX];          /* and where that lands */
+static float g_lit[NZ][NX], g_spec[NZ][NX];
+static unsigned g_fill[NZ][NX];         /* what the swell does to its colour */
 
 /* The sweep's source: where it is over the field, and whether to draw it. */
 static struct { float fx, fz; int on; } g_source;
 
 static void speck_reset(int i, int anywhere) {
     g_specks[i].x = 20 + frand() * (SCR_W - 40);
-    g_specks[i].y = anywhere ? HORIZON + frand() * (SCR_H - HORIZON) : SCR_H + 6;
+    g_specks[i].y = anywhere ? GFX_HORIZON + frand() * (SCR_H - GFX_HORIZON) : SCR_H + 6;
     g_specks[i].vy = 0.10f + frand() * 0.25f;
     g_specks[i].size = 4 + frand() * 8;
     g_specks[i].phase = frand() * 6.283f;
@@ -132,10 +139,9 @@ void lattice_init(void) {
            the light fades by eye too, evenly down to the horizon. */
         float depth = (float)(i - ROW0) / (NZ - 1 - ROW0);
         if (depth < 0.0f) depth = 0.0f;
-        g_row[i].y0 = HORIZON + 150.0f * inv;
-        g_row[i].yh = 52.0f * inv;
-        g_row[i].xu = 720.0f * inv;
-        g_row[i].xs = 720.0f * inv * inv;
+        g_row[i].z = z;
+        g_row[i].y0 = GFX_HORIZON + EYE_Y * GFX_FOCAL * inv;
+        g_row[i].yh = H_SCALE * GFX_FOCAL * inv;
         g_row[i].near = 1.0f - depth;
         g_row[i].near2 = (1.0f - depth) * (1.0f - depth);
     }
@@ -147,7 +153,7 @@ void lattice_init(void) {
 
     for (int i = 0; i < STARS; i++) {
         g_stars[i].x = frand() * SCR_W;
-        g_stars[i].y = 6 + frand() * (HORIZON - 30);
+        g_stars[i].y = 6 + frand() * (GFX_HORIZON - 30);
         g_stars[i].size = 3 + frand() * 6;
         g_stars[i].phase = frand() * 6.283f;
     }
@@ -196,7 +202,7 @@ static void dent(float jf, float rf, float depth, float radius) {
 void lattice_touch(float x) {
     float jf = J0 + x * (NX_INNER - 1) + (frand() - 0.5f) * 3.0f;
     float rf = ROW0 + (0.12f + frand() * 0.5f) * (NZ - 1 - ROW0);
-    dent(jf, rf, 0.9f + frand() * 0.7f, 1.4f + frand() * 1.2f);
+    dent(jf, rf, 1.5f + frand() * 1.1f, 1.6f + frand() * 1.3f);
 }
 
 /* Velocity from the curvature, height from the velocity: the plain damped
@@ -241,7 +247,7 @@ float lattice_pour(float fx, float fz, int pouring) {
                 g_wet[i][j] = w > 1.0f ? 1.0f : w;
             }
         }
-        dent(jf, rf, 0.09f, 1.9f);
+        dent(jf, rf, POUR_DENT, 2.0f);
     }
     /* Past the sides of the field, and under the bottom edge of the screen,
        the sea simply carries on. */
@@ -271,12 +277,12 @@ static void swell(float t) {
     float sa1[NZ], ca1[NZ], sa2[NZ], ca2[NZ];
     float sb1[NX], cb1[NX], sb2[NX], cb2[NX];
     for (int i = 0; i < NZ; i++) {
-        float a1 = i * 0.80f - t * 1.6f, a2 = i * 1.35f + t * 1.1f;
+        float a1 = i * 0.55f - t * 0.80f, a2 = i * 0.95f + t * 0.55f;
         sa1[i] = fsin(a1); ca1[i] = fcos(a1);
         sa2[i] = fsin(a2); ca2[i] = fcos(a2);
     }
     for (int j = 0; j < NX; j++) {
-        float b1 = g_u[j] * 1.7f, b2 = g_u[j] * -3.4f;
+        float b1 = g_u[j] * 1.2f, b2 = g_u[j] * -2.4f;
         sb1[j] = fsin(b1); cb1[j] = fcos(b1);
         sb2[j] = fsin(b2); cb2[j] = fcos(b2);
     }
@@ -284,25 +290,29 @@ static void swell(float t) {
         for (int j = 0; j < NX; j++) {
             float s1 = sa1[i] * cb1[j] + ca1[i] * sb1[j];
             float s2 = sa2[i] * cb2[j] + ca2[i] * sb2[j];
-            float s = 0.34f * s1 + 0.18f * s2 + g_h[i][j];
+            float s = 0.58f * s1 + 0.30f * s2 + g_h[i][j];
             /* Water is not a sine: crests stand up and troughs lie flat. */
             g_hh[i][j] = (s + 0.20f * s * (s < 0 ? -s : s)) * g_wet[i][j];
         }
 }
 
-/* Project the whole surface and light it. The light the water glints back
-   sits on the horizon, so the glints lie in a path that runs from under it
-   down to the viewer, narrow at the far end and broad at the near one --
-   the one thing that says water before anything moves. Which facet inside
-   the path catches it drifts, so the path never holds still. */
-static void project_all(float t, float sway, float lightx, const unsigned *ramp) {
-    float lx = 0.50f * fsin(t * 0.37f);
-    float lz = -0.28f + 0.26f * fsin(t * 0.23f + 1.0f);
+/* Place the whole surface in the world and light it. Every corner gets its
+   world position, the pixel that position projects to -- so the flat things
+   drawn over the water agree with the mesh -- and the colour the big swell
+   gives it, which the ripple's own palette is then multiplied by.
+
+   The light the water glints back sits on the horizon, so the glints lie in
+   a path that runs from under it down to the viewer, narrow at the far end
+   and broad at the near one. Which facet inside the path catches it drifts,
+   so the path never holds still. */
+static void project_all(float t, float swayx, float lightx) {
+    float lx = 0.50f * fsin(t * 0.19f);
+    float lz = -0.28f + 0.26f * fsin(t * 0.12f + 1.0f);
 
     for (int i = 0; i < NZ; i++) {
+        float z = g_row[i].z, xlim = XLIM * z;
         float path = 1.0f / (22.0f + 120.0f * g_row[i].near2);
         int im = i ? i - 1 : 0, ip = i + 1 < NZ ? i + 1 : NZ - 1;
-        float xs = sway * g_row[i].xs;
         for (int j = 0; j < NX; j++) {
             int jm = j ? j - 1 : 0, jp = j + 1 < NX ? j + 1 : NX - 1;
             float h = g_hh[i][j];
@@ -310,14 +320,17 @@ static void project_all(float t, float sway, float lightx, const unsigned *ramp)
             float dhz = g_hh[ip][j] - g_hh[im][j];
             float w = g_wet[i][j];
 
-            float sx = SCR_W / 2 + g_u[j] * g_row[i].xu + xs;
-            /* Far out to the side a near row is thousands of pixels off
-               screen; the line is straight, so its end can sit at the
-               edge without moving anything that is visible. */
-            if (sx < -400.0f) sx = -400.0f;
-            else if (sx > SCR_W + 400.0f) sx = SCR_W + 400.0f;
-            g_x[i][j] = sx;
-            g_y[i][j] = g_row[i].y0 - h * g_row[i].yh;
+            float wx = g_u[j] + swayx;
+            if (wx < -xlim) wx = -xlim;
+            else if (wx > xlim) wx = xlim;
+            /* Perspective would give the front row a crest half the screen
+               tall; it is allowed this much and no more. */
+            float dy = h * g_row[i].yh;
+            if (dy > DY_CAP) dy = DY_CAP;
+            else if (dy < -DY_CAP) dy = -DY_CAP;
+            g_wx[i][j] = wx;
+            g_wy[i][j] = dy * z / GFX_FOCAL - EYE_Y;
+            gfx_water_project(wx, g_wy[i][j], z, &g_x[i][j], &g_y[i][j]);
 
             /* A crest stands in the light and a trough hides from it, and a
                face leaning back toward the horizon catches more than a flat
@@ -326,64 +339,56 @@ static void project_all(float t, float sway, float lightx, const unsigned *ramp)
             if (raw < 0.0f) raw = 0.0f;
             g_lit[i][j] = g_row[i].near2 * raw;
             float a = dhx - lx, b = dhz - lz;
-            float d = (sx - lightx) * path;
+            float d = (g_x[i][j] - lightx) * path;
             float glint = fexp((a * a + b * b) * 7.0f) * fexp(d * d);
-            g_spec[i][j] = w * g_row[i].near * glint;
+            /* Squared with distance: a far row is a few pixels tall, and a
+               glint on it is a dash, not a glint. */
+            g_spec[i][j] = w * g_row[i].near2 * glint;
 
-            /* The colour of the water itself at this corner: the deep tint
-               where it lies flat, close to white where a crest turns into
-               the light, and the horizon's own light lying broad across it
-               on the way to the viewer. Unlike the grid, the surface keeps
-               most of its brightness into the distance -- water does not
-               stop being water halfway to the horizon. */
+            /* The swell's own shading, which the palette's colour is read
+               through: dark in a trough, white on a crest that has turned
+               into the light, and broad where the light's path crosses. The
+               water keeps most of it into the distance -- water does not
+               stop being water halfway to the horizon -- and it is the alpha
+               that carries the shore and the fade. */
             float s = (raw - 0.16f) * 2.2f;
             if (s < 0.0f) s = 0.0f;
             else if (s > 1.0f) s = 1.0f;
             float dr = d * 0.8f;
-            float refl = fexp(dr * dr);
-            /* The glint belongs in the surface as well as on it: in here it
-               is what draws the long bright edge along a crest. */
-            int alpha = (int)(w * (58.0f + 180.0f * s + 55.0f * refl)
-                                * (0.40f + 0.60f * g_row[i].near)
-                              + 210.0f * g_spec[i][j]);
-            if (alpha > 255) alpha = 255;
-            g_fill[i][j] = ramp[(int)(s * RAMP_N)] | (unsigned)alpha << 24;
+            float level = 0.14f + 1.25f * s + 0.45f * fexp(dr * dr)
+                        + 0.90f * g_spec[i][j];
+            if (level > 1.0f) level = 1.0f;
+            int lit = (int)(level * 255.0f);
+            int alpha = (int)(w * 200.0f * (0.35f + 0.65f * g_row[i].near));
+            g_fill[i][j] = RGBA(lit, lit, lit, alpha);
         }
     }
 }
 
-/* The surface between the crossings, a band of quads per pair of rows, each
-   corner carrying the colour the light gave it and its place in the ripple
-   tile. Added rather than laid over, so the horizon burning behind it comes
-   through the water. The crossings are far apart on screen; the tile is what
-   puts water between them.
-
-   Four texels to five pixels, measured from where the corner actually landed:
-   the tile then keeps the same size wherever it is drawn -- no smear in the
-   front row, no shimmer at the horizon -- and still rides the swell, since a
-   crest carries its corners and its texture up together. Under one texel per
-   pixel, so a stretched quad never has to skip texels. */
-#define TEXEL 0.8f
-
+/* The surface itself: one strip of quads per pair of rows, in real space, so
+   the GE lays the tile down in perspective and the front row comes out even
+   instead of hatched. The tile is anchored to the world and creeps toward
+   the viewer, which is the movement between the crossings that the swell is
+   too coarse to carry. */
 static void draw_surface(float t) {
-    float x[NX * 2], y[NX * 2];
-    short u[NX * 2], v[NX * 2];
-    unsigned c[NX * 2];
-    float drift = t * 22.0f;
+    struct gfx_water_vertex *mesh = gfx_water_mesh((NZ - 1) * NX * 2);
+    if (!mesh) return;
+    float du = t * 0.05f, dv = -t * 0.55f;
+    struct gfx_water_vertex *p = mesh;
     for (int i = 0; i < NZ - 1; i++) {
-        int n = 0;
         for (int j = 0; j < NX; j++) {
             for (int k = 0; k < 2; k++) {
                 int r = i + k;
-                x[n] = g_x[r][j];
-                y[n] = g_y[r][j];
-                c[n] = g_fill[r][j];
-                u[n] = (short)((g_x[r][j] - SCR_W / 2) * TEXEL + drift * 0.22f);
-                v[n] = (short)((g_y[r][j] - HORIZON) * TEXEL - drift);
-                n++;
+                p->u = g_wx[r][j] * TILES + du;
+                p->v = g_row[r].z * TILES + dv;
+                p->color = g_fill[r][j];
+                p->x = g_wx[r][j];
+                p->y = g_wy[r][j];
+                p->z = -g_row[r].z;
+                p++;
             }
         }
-        gfx_ripple_strip(x, y, u, v, c, n);
+        gfx_water_strip(mesh + i * NX * 2, NX * 2);
     }
 }
 
@@ -419,16 +424,23 @@ void lattice_draw(float t, struct rgb tint) {
         gfx_glow(g_stars[i].x, g_stars[i].y, g_stars[i].size, g_stars[i].size,
                  tinted(white, (int)(30 + 70 * tw)));
     }
-    float lightx = SCR_W / 2 + sway * 200;
-    gfx_glow(lightx, HORIZON + 6, 760, 110, rgb_pack(tint, 110));
-    gfx_glow(lightx, HORIZON + 2, 420, 30,
+    /* The light is out past the far row, so the room sliding under it barely
+       moves it. */
+    float lightx = SCR_W / 2 + sway * (GFX_FOCAL / Z_FAR);
+    gfx_glow(lightx, GFX_HORIZON + 6, 760, 110, rgb_pack(tint, 110));
+    gfx_glow(lightx, GFX_HORIZON + 2, 420, 30,
              rgb_pack(rgb_mix(tint, RGB_WHITE, 0.6f), 120));
 
-    for (int i = 0; i <= RAMP_N; i++)
-        g_ramp[i] = rgb_pack(rgb_mix(rgb_mix(tint, DEEP, 0.55f), RGB_WHITE,
-                                     (float)i / RAMP_N * 0.85f), 0);
-    project_all(t, sway, lightx, g_ramp);
+    /* What the water is made of, for the palette: its own dark, the sky it
+       mirrors, and what a facet turned square into the light sends back. */
+    gfx_water_light(0.42f * fsin(t * 0.13f), 0.86f, 0.30f,
+                    rgb_pack(rgb_mix(tint, DEEP, 0.86f), 0),
+                    rgb_pack(rgb_mix(tint, DEEP, 0.38f), 0),
+                    rgb_pack(rgb_mix(rgb_mix(tint, RGB_WHITE, 0.9f), DEEP, 0.62f), 0));
+    project_all(t, sway, lightx);
+    gfx_water_begin((int)(t * 7.0f));
     draw_surface(t);
+    gfx_water_end();
 
     float x[NX > NZ ? NX : NZ], y[NX > NZ ? NX : NZ];
     unsigned c[NX > NZ ? NX : NZ];
@@ -457,8 +469,9 @@ void lattice_draw(float t, struct rgb tint) {
         gfx_ribbon(x + ROW0 - 1, y + ROW0 - 1, c + ROW0 - 1, NZ - ROW0 + 1, 0.9f);
     }
     /* Dry ground keeps a light at every crossing. Water keeps only the
-       glints, where a facet happens to point at the horizon, and the foam
-       along the shore where a cell is filling but not yet full. */
+       foam along the shore where a cell is filling but not yet full; its
+       glints are in the palette, texel by texel, and a glow laid on a
+       crossing over a row a few pixels tall came out as a dash. */
     unsigned cell = rgb_pack(rgb_mix(tint, RGB_WHITE, 0.45f), 0);
     unsigned foam = rgb_pack(rgb_mix(tint, RGB_WHITE, 0.85f), 0);
     for (int i = ROW0 - 1; i < NZ; i++) {
@@ -474,12 +487,6 @@ void lattice_draw(float t, struct rgb tint) {
                     gfx_glow(sx, sy, 14, 7,
                              tinted(foam, (int)(200 * g_row[i].near2)));
             }
-            /* A glint is wider than it is tall: the facet that caught the
-               light is a wave, and a wave is long. */
-            float spec = g_spec[i][j];
-            if (spec > 0.12f)
-                gfx_glow(sx, sy, 8.0f + 34.0f * spec, 3.0f + 7.0f * spec,
-                         tinted(white, (int)(290 * (spec - 0.12f))));
         }
     }
 
@@ -502,8 +509,8 @@ void lattice_draw(float t, struct rgb tint) {
     for (int i = 0; i < SPECKS; i++) {
         g_specks[i].y -= g_specks[i].vy;
         g_specks[i].x += fsin(t * 1.7f + g_specks[i].phase) * 0.2f;
-        if (g_specks[i].y < HORIZON - 10) speck_reset(i, 0);
-        float life = (g_specks[i].y - HORIZON) / (SCR_H - HORIZON);
+        if (g_specks[i].y < GFX_HORIZON - 10) speck_reset(i, 0);
+        float life = (g_specks[i].y - GFX_HORIZON) / (SCR_H - GFX_HORIZON);
         gfx_glow(g_specks[i].x, g_specks[i].y, g_specks[i].size, g_specks[i].size,
                  tinted(spark, (int)(140 * life)));
     }

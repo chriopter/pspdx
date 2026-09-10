@@ -39,14 +39,51 @@ void gfx_wave(float y, float amp, float thickness, float phase, unsigned color,
 void gfx_ribbon(const float *x, const float *y, const unsigned *color, int n,
                 float half);
 
-/* A surface: n vertices in triangle-strip order, each with its own place, its
-   own colour, and where it sits in gfx's tiling ripple -- fine bands of light
-   that give the surface detail between vertices that are far apart. Alternate
-   the two edges -- near, far, near, far -- and a row of quads comes out lit
-   corner by corner. Added onto what is behind it; u and v are in texels, so
-   64 is one tile. */
-void gfx_ripple_strip(const float *x, const float *y, const short *u,
-                      const short *v, const unsigned *color, int n);
+/* ------------------------------------------------------------------ water */
+
+/* The water is the one surface drawn in real space rather than projected by
+   hand: a plane in perspective texture-maps evenly, and a plane faked in 2D
+   does not -- the GE interpolates a flat quad's texture affinely, and on the
+   big foreshortened quads at the front that shows as a diagonal hatch.
+
+   Its camera is a level pinhole: GFX_FOCAL pixels across per unit of width at
+   unit depth, with the eye's own height above the surface carried in the
+   vertices, and the vanishing point at GFX_HORIZON rather than the middle of
+   the screen. Anything drawn flat over the water -- the dry grid, the lights
+   at its crossings -- projects itself with gfx_water_project and lands on the
+   pixel the GE puts the mesh on. */
+#define GFX_FOCAL 720.0f
+#define GFX_HORIZON 116.0f
+
+static inline void gfx_water_project(float x, float y, float z,
+                                     float *sx, float *sy) {
+    float f = GFX_FOCAL / z;
+    *sx = SCR_W / 2.0f + x * f;
+    *sy = GFX_HORIZON - y * f;
+}
+
+/* One corner: where it is in the world (x across, y up, z away from the
+   viewer), where it sits in the ripple tile in tiles, and the colour the
+   swell gave it -- which multiplies the texture, so it carries the wet fade
+   in its alpha and the shading of the big waves in its channels. */
+struct gfx_water_vertex { float u, v; unsigned color; float x, y, z; };
+
+/* The palette is the lighting. gfx's ripple tiles hold a quantised normal per
+   texel rather than a colour, and this turns all 256 of them into colours for
+   one light: deep where the water faces the eye, sky where it turns away, and
+   glint where it faces the light square on. A kilobyte a frame buys per-texel
+   reflection that no amount of geometry would. Directions are in the tile's
+   own space: x across, y away, z up. */
+void gfx_water_light(float lx, float ly, float lz,
+                     unsigned deep, unsigned sky, unsigned glint);
+
+/* Room for the whole surface, filled by the caller and handed back a strip at
+   a time so it is written once. Between begin and end nothing else may draw;
+   frame picks one of the ripple's animation steps. */
+struct gfx_water_vertex *gfx_water_mesh(int verts);
+void gfx_water_begin(int frame);
+void gfx_water_strip(const struct gfx_water_vertex *v, int n);
+void gfx_water_end(void);
 
 /* A soft radial light, added onto what is behind it. The alpha in color is
    how strong; the rgb is what it tints toward. Cheap enough to draw dozens

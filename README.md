@@ -290,7 +290,9 @@ that works on a real PSP, and on a host whose desktop is locked.
 | `PSPDX.LOG` | what the run did |
 | `PSPDX.HTTP` | the raw response of the last fetch |
 | `PSPDX.BMP` | the catalog screen, 480x272, 24-bit |
+| `PSPDX1.BMP` | the screen a scripted `shot` key asked for |
 | `PSPDX2.BMP` | the screen after an install |
+| `PSPDX.KEYS` | scripted input, one `<ms> <key>` per line from the moment the catalog is up: `up`, `down`, `cross`, `select`, or `shot` |
 | `PSPDX.INSTALL` | a manifest URL here installs that app unattended, for testing |
 | `PSP/PSPDX/cache/<id>.png`, `.mp4` | a picture once fetched, so it costs one handshake per install, not per run; what is here is shown even if the catalog does not link it -- the rig plants the repo's clips this way before a deploy |
 | `PSP/PSPDX/font/ltn8.pgf` | never written by the client: where it looks for the system font when `flash0:` has none |

@@ -24,14 +24,26 @@
 #define BUF_W 512                       /* draw buffer stride, must be 2^n */
 #define FRAME_SIZE (BUF_W * SCR_H * 4)  /* 0x88000 */
 #define GLOW_SIZE 64
-#define RIPPLE_SIZE 64
+
+/* The ripple: one tile of water surface, held as normals rather than as a
+   picture, in as many steps as it takes to loop, each with a pyramid of
+   smaller copies under it. Averaging two normals gives the normal of the two
+   of them together, so the coarse levels come out genuinely flatter -- which
+   is what water does as it goes away, and why the far rows neither shimmer
+   nor show the tile. */
+#define RIPPLE_SIZE 128
+#define RIPPLE_FRAMES 8
+#define RIPPLE_LEVELS 5
+#define RIPPLE_BYTES (21824)    /* 128^2 + 64^2 + 32^2 + 16^2 + 8^2 */
 
 static unsigned int __attribute__((aligned(16))) g_list[64 * 1024];
 static unsigned g_frames;
 static void *g_draw;                    /* the draw buffer, relative to VRAM */
 static int g_up;
 static struct gfx_texture g_glow;
-static struct gfx_texture g_ripple;
+static unsigned char *g_ripple;                 /* RIPPLE_FRAMES tiles of T8 */
+static float g_normal[256][3];                  /* what each index stands for */
+static unsigned __attribute__((aligned(16))) g_clut[256];
 
 /* Vertex layouts. The GE reads the components in a fixed order -- texture,
    colour, position -- so the struct members have to be declared in that
@@ -76,37 +88,118 @@ static void make_glow(void) {
     sceKernelDcacheWritebackRange(g_glow.pixels, GLOW_SIZE * GLOW_SIZE * 4);
 }
 
-/* One tile of fine ripple: bands of light that wobble along their length,
-   two of them out of step, so a surface drawn with it repeated over itself
-   has detail between its vertices instead of a flat gradient. The floor of
-   alpha is the water's own body; the bands are what the light sits on. */
-static float crest(float v, int squarings) {
-    if (v < 0.0f) return 0.0f;
-    for (int i = 0; i < squarings; i++) v *= v;
-    return v;
+/* The tile holds a normal per texel, not a colour: the high nibble is the
+   slope across, the low nibble the slope away, and the palette turns the pair
+   into whatever the light is doing this frame. Sixteen steps each is coarse
+   for a picture and plenty for a slope, since the eye reads the movement and
+   not the value. */
+static void ripple_normals(void) {
+    for (int i = 0; i < 256; i++) {
+        float nx = ((i >> 4) - 7.5f) / 7.5f;
+        float ny = ((i & 15) - 7.5f) / 7.5f;
+        float flat = nx * nx + ny * ny;
+        if (flat > 1.0f) {                      /* off the hemisphere: lay it over */
+            float k = 1.0f / sqrtf(flat);
+            nx *= k; ny *= k; flat = 1.0f;
+        }
+        g_normal[i][0] = nx;
+        g_normal[i][1] = ny;
+        g_normal[i][2] = sqrtf(1.0f - flat);
+    }
+}
+
+static unsigned char normal_index(float nx, float ny) {
+    int ix = (int)((nx + 1.0f) * 7.5f + 0.5f);
+    int iy = (int)((ny + 1.0f) * 7.5f + 0.5f);
+    if (ix < 0) ix = 0; else if (ix > 15) ix = 15;
+    if (iy < 0) iy = 0; else if (iy > 15) iy = 15;
+    return (unsigned char)(ix << 4 | iy);
+}
+
+/* Eight travelling waves, no two along the same line and none of the
+   directions a simple ratio of another, with the amplitude falling as the
+   wave gets shorter -- a sea, not a corrugated roof. All of them run mostly
+   toward the viewer: seen from this low, a sea is streaks lying across the
+   view, not cells, and a streak has no corner to recognise when the tile
+   comes round again. The tile still wraps in
+   both directions and in time, so the frames play round and round; what it
+   no longer does is look like a stamp when it is laid down ten times. A sine
+   of a sum is two products of the ends, which is what keeps this to a few
+   thousand sines instead of a million. */
+static void ripple_height(float *h, int frame) {
+    static const struct { int px, py, turns; } WAVE[] = {
+        {  0,  1,  1 }, {  1,  3, -1 }, { -1,  4,  1 }, {  2,  5,  2 },
+        { -2,  7, -2 }, {  1,  9,  1 }, {  3, 11,  3 }, { -3, 13, -1 },
+    };
+    for (int i = 0; i < RIPPLE_SIZE * RIPPLE_SIZE; i++) h[i] = 0.0f;
+    for (unsigned w = 0; w < sizeof(WAVE) / sizeof(*WAVE); w++) {
+        int px = WAVE[w].px, py = WAVE[w].py;
+        float amp = 1.0f / powf((float)(px * px + py * py), 0.7f);
+        float phase = 6.2831853f * WAVE[w].turns * frame / RIPPLE_FRAMES;
+        float sx[RIPPLE_SIZE], cx[RIPPLE_SIZE], sy[RIPPLE_SIZE], cy[RIPPLE_SIZE];
+        for (int x = 0; x < RIPPLE_SIZE; x++) {
+            float a = 6.2831853f * px * x / RIPPLE_SIZE + phase;
+            sx[x] = sinf(a); cx[x] = cosf(a);
+        }
+        for (int y = 0; y < RIPPLE_SIZE; y++) {
+            float b = 6.2831853f * py * y / RIPPLE_SIZE;
+            sy[y] = sinf(b); cy[y] = cosf(b);
+        }
+        for (int y = 0; y < RIPPLE_SIZE; y++)
+            for (int x = 0; x < RIPPLE_SIZE; x++)
+                h[y * RIPPLE_SIZE + x] += amp * (sx[x] * cy[y] + cx[x] * sy[y]);
+    }
+}
+
+/* How far the steepest of those slopes is allowed to lean. */
+#define RIPPLE_BUMP 1.7f
+
+static void ripple_mip(const unsigned char *src, int n, unsigned char *dst) {
+    for (int y = 0; y < n / 2; y++) {
+        for (int x = 0; x < n / 2; x++) {
+            float ax = 0, ay = 0, az = 0;
+            for (int k = 0; k < 4; k++) {
+                const float *nn = g_normal[src[(y * 2 + (k >> 1)) * n + x * 2 + (k & 1)]];
+                ax += nn[0]; ay += nn[1]; az += nn[2];
+            }
+            float k = 1.0f / sqrtf(ax * ax + ay * ay + az * az + 1e-9f);
+            dst[y * (n / 2) + x] = normal_index(ax * k, ay * k);
+        }
+    }
 }
 
 static void make_ripple(void) {
-    g_ripple.w = g_ripple.h = g_ripple.tw = g_ripple.th = RIPPLE_SIZE;
-    g_ripple.pixels = memalign(16, RIPPLE_SIZE * RIPPLE_SIZE * 4);
-    if (!g_ripple.pixels) return;
-    unsigned *px = g_ripple.pixels;
-    for (int y = 0; y < RIPPLE_SIZE; y++) {
-        float fy = (float)y / RIPPLE_SIZE * 6.2831853f;
-        for (int x = 0; x < RIPPLE_SIZE; x++) {
-            float fx = (float)x / RIPPLE_SIZE * 6.2831853f;
-            float a = 0.65f * crest(sinf(3 * fy + 0.55f * sinf(2 * fx)), 1)
-                    + 0.45f * crest(sinf(5 * fy + 1.7f - 0.40f * sinf(3 * fx)), 2);
-            int alpha = (int)(80.0f + 175.0f * (a > 1.0f ? 1.0f : a));
-            px[y * RIPPLE_SIZE + x] = RGBA(255, 255, 255, (unsigned)alpha);
+    g_ripple = memalign(16, RIPPLE_FRAMES * RIPPLE_BYTES);
+    if (!g_ripple) return;
+    ripple_normals();
+    static float h[RIPPLE_SIZE * RIPPLE_SIZE];
+    for (int f = 0; f < RIPPLE_FRAMES; f++) {
+        ripple_height(h, f);
+        unsigned char *tile = g_ripple + f * RIPPLE_BYTES;
+        for (int y = 0; y < RIPPLE_SIZE; y++) {
+            int ym = (y + RIPPLE_SIZE - 1) % RIPPLE_SIZE;
+            int yp = (y + 1) % RIPPLE_SIZE;
+            for (int x = 0; x < RIPPLE_SIZE; x++) {
+                int xm = (x + RIPPLE_SIZE - 1) % RIPPLE_SIZE;
+                int xp = (x + 1) % RIPPLE_SIZE;
+                float dx = h[y * RIPPLE_SIZE + xp] - h[y * RIPPLE_SIZE + xm];
+                float dy = h[yp * RIPPLE_SIZE + x] - h[ym * RIPPLE_SIZE + x];
+                tile[y * RIPPLE_SIZE + x] =
+                    normal_index(-dx * RIPPLE_BUMP, -dy * RIPPLE_BUMP);
+            }
+        }
+        unsigned char *level = tile;
+        for (int n = RIPPLE_SIZE; n > RIPPLE_SIZE >> (RIPPLE_LEVELS - 1); n /= 2) {
+            ripple_mip(level, n, level + n * n);
+            level += n * n;
         }
     }
-    sceKernelDcacheWritebackRange(g_ripple.pixels, RIPPLE_SIZE * RIPPLE_SIZE * 4);
+    sceKernelDcacheWritebackRange(g_ripple, RIPPLE_FRAMES * RIPPLE_BYTES);
 }
 
 void gfx_init(void) {
     if (!g_glow.pixels) make_glow();
-    if (!g_ripple.pixels) make_ripple();
+    if (!g_ripple) make_ripple();
     sceGuInit();
     sceGuStart(GU_DIRECT, g_list);
     sceGuDrawBuffer(GU_PSM_8888, (void *)0, BUF_W);
@@ -327,26 +420,100 @@ void gfx_ribbon(const float *x, const float *y, const unsigned *color, int n,
                    n * 2, 0, v);
 }
 
-void gfx_ripple_strip(const float *x, const float *y, const short *u,
-                      const short *v, const unsigned *color, int n) {
-    if (!g_ripple.pixels || n < 4) return;
-    flush_batch();
-    struct vtexc *p = sceGuGetMemory(n * sizeof(struct vtexc));
-    if (!p) return;
-    for (int i = 0; i < n; i++) {
-        p[i].u = u[i];
-        p[i].v = v[i];
-        p[i].color = color[i];
-        p[i].x = (short)x[i];
-        p[i].y = (short)y[i];
-        p[i].z = 0;
+/* ------------------------------------------------------------------ water */
+
+/* The eye lies low over the water and looks away from itself, which is why
+   the surface reflects so much of the sky: at this angle almost nothing gets
+   into the water and back out. Fixed, because the camera is. */
+static const float EYE[3] = { 0.0f, -0.966f, 0.259f };
+
+static float channel(float v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
+
+void gfx_water_light(float lx, float ly, float lz,
+                     unsigned deep, unsigned sky, unsigned glint) {
+    float k = 1.0f / sqrtf(lx * lx + ly * ly + lz * lz + 1e-6f);
+    /* Halfway between the light and the eye: a texel whose normal points
+       there is the one that sends the light straight down the lens. */
+    float hx = lx * k + EYE[0], hy = ly * k + EYE[1], hz = lz * k + EYE[2];
+    float hk = 1.0f / sqrtf(hx * hx + hy * hy + hz * hz + 1e-6f);
+    hx *= hk; hy *= hk; hz *= hk;
+
+    float dr = deep & 0xFF, dg = deep >> 8 & 0xFF, db = deep >> 16 & 0xFF;
+    float sr = sky & 0xFF, sg = sky >> 8 & 0xFF, sb = sky >> 16 & 0xFF;
+    float gr = glint & 0xFF, gg = glint >> 8 & 0xFF, gb = glint >> 16 & 0xFF;
+
+    for (int i = 0; i < 256; i++) {
+        const float *n = g_normal[i];
+        float face = n[0] * EYE[0] + n[1] * EYE[1] + n[2] * EYE[2];
+        if (face < 0.0f) face = 0.0f;
+        float turn = 1.0f - face;
+        float mirror = 0.08f + 0.70f * turn * turn * turn;
+        float s = n[0] * hx + n[1] * hy + n[2] * hz;
+        if (s < 0.0f) s = 0.0f;
+        /* Broad rather than sharp: a sharp glint on a texel the perspective
+           has stretched into a dash is a dash. */
+        s *= s; s *= s;                                 /* the fourth power */
+        float r = dr + (sr - dr) * mirror + gr * s;
+        float g = dg + (sg - dg) * mirror + gg * s;
+        float b = db + (sb - db) * mirror + gb * s;
+        g_clut[i] = RGBA((unsigned)channel(r), (unsigned)channel(g),
+                         (unsigned)channel(b), 255);
     }
-    bind(&g_ripple);
+    sceKernelDcacheWritebackRange(g_clut, sizeof(g_clut));
+}
+
+struct gfx_water_vertex *gfx_water_mesh(int verts) {
+    if (!g_ripple) return 0;
+    return sceGuGetMemory(verts * sizeof(struct gfx_water_vertex));
+}
+
+void gfx_water_begin(int frame) {
+    if (!g_ripple) return;
+    flush_batch();
+    /* The vanishing point belongs at the horizon and not at the middle of the
+       screen, and the cheapest way to put it there is to tell the GE the
+       screen is 20 rows higher than it is. Undone in end(). */
+    sceGuOffset(2048 - SCR_W / 2, 2048 - (unsigned)GFX_HORIZON);
+    sceGumMatrixMode(GU_PROJECTION);
+    sceGumLoadIdentity();
+    /* The field of view that makes one unit at one unit of depth come out
+       GFX_FOCAL pixels wide. */
+    sceGumPerspective(2.0f * 57.29578f * atanf(SCR_H / (2.0f * GFX_FOCAL)),
+                      (float)SCR_W / SCR_H, 0.25f, 300.0f);
+    sceGumMatrixMode(GU_VIEW);
+    sceGumLoadIdentity();
+    sceGumMatrixMode(GU_MODEL);
+    sceGumLoadIdentity();
+
+    sceGuDisable(GU_DEPTH_TEST);
+    sceGuEnable(GU_TEXTURE_2D);
+    sceGuClutMode(GU_PSM_8888, 0, 0xFF, 0);
+    sceGuClutLoad(32, g_clut);
+    sceGuTexMode(GU_PSM_T8, RIPPLE_LEVELS - 1, 0, GU_FALSE);
+    unsigned char *tile = g_ripple + (frame % RIPPLE_FRAMES) * RIPPLE_BYTES;
+    for (int level = 0, n = RIPPLE_SIZE; level < RIPPLE_LEVELS; level++, n /= 2) {
+        sceGuTexImage(level, n, n, n, tile);
+        tile += n * n;
+    }
+    sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
+    sceGuTexFilter(GU_LINEAR_MIPMAP_LINEAR, GU_LINEAR);
+    sceGuTexLevelMode(GU_TEXTURE_AUTO, 0.0f);
     sceGuTexWrap(GU_REPEAT, GU_REPEAT);
+    sceGuTexScale(1.0f, 1.0f);
+    sceGuTexOffset(0.0f, 0.0f);
     additive();
-    sceGuDrawArray(GU_TRIANGLE_STRIP,
-                   GU_TEXTURE_16BIT | GU_COLOR_8888 | GU_VERTEX_16BIT |
-                   GU_TRANSFORM_2D, n, 0, p);
+}
+
+void gfx_water_strip(const struct gfx_water_vertex *v, int n) {
+    if (!g_ripple || n < 4) return;
+    sceGumDrawArray(GU_TRIANGLE_STRIP,
+                    GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF |
+                    GU_TRANSFORM_3D, n, 0, v);
+}
+
+void gfx_water_end(void) {
+    if (!g_ripple) return;
+    sceGuOffset(2048 - SCR_W / 2, 2048 - SCR_H / 2);
     flat_state();
 }
 

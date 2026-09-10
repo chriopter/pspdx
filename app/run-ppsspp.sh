@@ -10,7 +10,10 @@
 # obviously not entropy; nothing from a rig run is fit to sign anything.
 #
 # --sweep replays testdata/sweep.trace through the entropy screen instead,
-# for working on that screen. A replayed sweep never writes a seed -- the
+# for working on that screen. That trace is the first six seconds of
+# sweep-full.trace, cut just past the 128-bit mark with a press of X after
+# it, so the screen is over in six seconds; the full one is what the rate in
+# logic/entropy.h was measured on. A replayed sweep never writes a seed -- the
 # client refuses, since replayed input is not entropy either -- so the next
 # default run seeds itself again.
 set -e
@@ -64,7 +67,10 @@ rm -f "$MS/PSPDX.LOG" "$MS/PSPDX.BMP" "$MS/PSPDX.BENCH" "$MS/PSPDX.KEYS"
 # the flatpak sandbox and not only the launcher: an instance that survives
 # keeps writing the same files as the next run, and two runs then share one
 # log.
+# --nosocket=pulseaudio: a rig run has no ear on it. The client's own stream
+# is checked through the emulator's DumpAudio, not through the speakers.
 SDL_VIDEODRIVER=wayland setsid flatpak run --socket=wayland --share=network \
+  --nosocket=pulseaudio \
   --filesystem="$MS" org.ppsspp.PPSSPP --fullscreen=0 \
   "$MS/PSP/GAME/pspdx/EBOOT.PBP" >"$HERE/ppsspp.out" 2>&1 &
 PID=$!

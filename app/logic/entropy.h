@@ -16,7 +16,7 @@
 #define ENTROPY_FIELD_COUNT (ENTROPY_FIELD_SIDE * ENTROPY_FIELD_SIDE)
 
 /* One bit per new field, which is the conservative end of what was measured.
-   The stick trace in testdata carries about 1100 bits of first-order entropy
+   The full stick trace in testdata (sweep-full.trace) carries about 1100 bits of first-order entropy
    across 1202 newly entered fields; recoding a position as a field number
    cannot create entropy, so the true rate is at most ~0.9 bit per field. */
 #define ENTROPY_BITS_PER_FIELD 1

@@ -155,7 +155,12 @@ static struct { unsigned at; unsigned button; } g_keys[256];
 static int g_key_count, g_key_next;
 static unsigned g_keys_since;
 
+/* Not a PSP button: a scripted "shot" takes a settled screenshot of what
+   the earlier keys led to, into PSPDX1.BMP. */
+#define KEY_SHOT 0x80000000u
+
 static unsigned button_named(const char *name) {
+    if (strcmp(name, "shot") == 0) return KEY_SHOT;
     if (strcmp(name, "up") == 0) return PSP_CTRL_UP;
     if (strcmp(name, "down") == 0) return PSP_CTRL_DOWN;
     if (strcmp(name, "cross") == 0) return PSP_CTRL_CROSS;
@@ -223,7 +228,12 @@ int main(void) {
         for (;;) sceDisplayWaitVblankStart();
     }
 
-    if (sweep) entropy_screen_run();
+    if (sweep) {
+        unsigned since = now_ms();
+        int bits = entropy_screen_run();
+        logline("entropy: %d bits swept in %u ms%s", bits, now_ms() - since,
+                entropy_screen_is_replay() ? " (replay)" : "");
+    }
     entropy_save(entropy_screen_is_replay());
 
     /* The tune starts with the shell and keeps going through installs and
@@ -316,10 +326,15 @@ int main(void) {
         if (synced) pressed |= keys_pressed();
         int count = shown()->count;
 
-        if ((pressed & PSP_CTRL_DOWN) && cursor + 1 < count)
-            cues_post(CUE_MOVE, ++cursor);
-        if ((pressed & PSP_CTRL_UP) && cursor > 0)
-            cues_post(CUE_MOVE, --cursor);
+        /* The list is a ring: past the last entry comes the first. */
+        if ((pressed & PSP_CTRL_DOWN) && count > 0)
+            cues_post(CUE_MOVE, cursor = (cursor + 1) % count);
+        if ((pressed & PSP_CTRL_UP) && count > 0)
+            cues_post(CUE_MOVE, cursor = (cursor + count - 1) % count);
+        if (pressed & KEY_SHOT) {
+            screenshot_settled(cursor, "ms0:/PSPDX1.BMP");
+            logline("shot: PSPDX1.BMP at cursor %d", cursor);
+        }
         if ((pressed & PSP_CTRL_CROSS) && count > 0) {
             install_app(cursor, 0);
             dump_diagnostics();
