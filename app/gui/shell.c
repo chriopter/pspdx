@@ -17,7 +17,7 @@
 #include "gui/font.h"
 #include "gui/gfx.h"
 #include "gui/lattice.h"
-#include "gui/letters.h"
+#include "gui/title.h"
 #include "gui/palette.h"
 #include "gui/preview.h"
 #include "util/runtime.h"
@@ -383,6 +383,9 @@ void shell_draw(const struct catalog *catalog, int cursor) {
     g_tint = rgb_mix(g_tint, target, 0.12f);
     derive_palette();
 
+    /* The word for the wait is baked between frames, once per word. */
+    if (catalog->count <= 0 && g_status[0]) title_prepare("Connecting", g_tint);
+
     gfx_frame_begin(0xFF000000);
     gfx_vgrad(0, 0, SCR_W, SCR_H, rgb_pack(rgb_mix(NIGHT_TOP, g_tint, 0.05f), 255),
               rgb_pack(rgb_mix(NIGHT_BOTTOM, g_tint, 0.18f), 255));
@@ -396,16 +399,10 @@ void shell_draw(const struct catalog *catalog, int cursor) {
         /* Nothing to browse yet: the word stands in the room, leaning
            slowly, lit from behind, and under it what is being waited for.
            The dots count the seconds. */
-        char word[16];
-        int dots = (int)(t * 1.5f) % 4;
-        snprintf(word, sizeof(word), "CONNECTING%.*s", dots, "...");
-        float cx = SCR_W / 2.0f + sinf(t * 0.5f) * 6.0f;
-        float cy = 118.0f + sinf(t * 0.8f) * 4.0f;
-        gfx_glow(cx, cy, 420, 160, rgb_pack(g_tint, 110));
-        letters_draw(word, cx, cy, 5.0f, sinf(t * 0.7f) * 0.30f,
-                     sinf(t * 0.45f) * 0.12f, rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.55f), 255), 4);
+        float cx = SCR_W / 2.0f, cy = 116.0f;
+        title_draw(cx, cy, t, g_tint);
         float w = font_width(FONT_META, g_status);
-        font_print(FONT_META, cx - w / 2, cy + 44, g_dim, g_status);
+        font_print(FONT_META, cx - w / 2, cy + 74, g_dim, g_status);
     } else {
         font_print(FONT_BODY, LIST_X, 120, g_dim, "The catalog came back empty.");
     }

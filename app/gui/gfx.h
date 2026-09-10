@@ -92,6 +92,9 @@ struct gfx_card {
     int alpha;              /* 0..255 for the picture */
     float gloss;            /* 0..1 where the light sweep is, outside = none */
     int reflect_h;          /* pixels of reflection below, 0 = none */
+    /* Lettering rather than a picture: no frame, no shadow, and the sweep
+       lights the texture's own shape instead of a band across the card. */
+    int bare;
 };
 
 /* t may be NULL: then only the frame, its shadow and its gloss are drawn,
@@ -105,6 +108,16 @@ void gfx_card_draw(const struct gfx_texture *t, const struct gfx_card *c);
 void gfx_plane_begin(float cx, float cy, float yaw, float pitch);
 void gfx_plane_quad(float x, float y, float w, float h, float z, unsigned color);
 void gfx_plane_end(void);
+
+/* Baking a texture: between frames, a corner of the draw buffer is cleared
+   to transparent and handed to the caller to draw into with the ordinary 2D
+   calls; end copies that corner through the GE into `into`, a texture in
+   system RAM the caller allocated (16-byte aligned, tw >= w, th >= h), and
+   the frame that follows paints over the corner. The draw buffer is the one
+   surface the emulator keeps honest for a copy -- an off-screen target
+   comes back empty. Call outside a frame only. */
+int gfx_bake_begin(int w, int h);
+void gfx_bake_end(struct gfx_texture *into);
 
 /* A soft dark spot, composited rather than added: a shadow. */
 void gfx_shade(float cx, float cy, float w, float h, int alpha);

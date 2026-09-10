@@ -28,6 +28,7 @@
 
 static unsigned int __attribute__((aligned(16))) g_list[64 * 1024];
 static unsigned g_frames;
+static void *g_draw;                    /* the draw buffer, relative to VRAM */
 static int g_up;
 static struct gfx_texture g_glow;
 static struct gfx_texture g_ripple;
@@ -149,7 +150,7 @@ void gfx_frame_end(void) {
     sceGuFinish();
     sceGuSync(0, 0);
     sceDisplayWaitVblankStart();
-    sceGuSwapBuffers();
+    g_draw = sceGuSwapBuffers();
     g_frames++;
 }
 
@@ -509,20 +510,54 @@ void gfx_plane_end(void) {
     flat_state();
 }
 
+/* ------------------------------------------------------------------- bake */
+
+static int g_bake_w, g_bake_h, g_baking;
+
+int gfx_bake_begin(int w, int h) {
+    if (g_baking || w > SCR_W || h > SCR_H) return -1;
+    g_bake_w = w;
+    g_bake_h = h;
+    g_baking = 1;
+    sceGuStart(GU_DIRECT, g_list);
+    sceGuScissor(0, 0, w, h);
+    sceGuClearColor(0);
+    sceGuClear(GU_COLOR_BUFFER_BIT);
+    return 0;
+}
+
+void gfx_bake_end(struct gfx_texture *into) {
+    if (!g_baking) return;
+    sceGuScissor(0, 0, SCR_W, SCR_H);
+    if (into && into->pixels && into->tw >= g_bake_w && into->th >= g_bake_h) {
+        void *src = (void *)((unsigned)sceGeEdramGetAddr() + ((unsigned)g_draw & 0x001FFFFF));
+        sceGuCopyImage(GU_PSM_8888, 0, 0, g_bake_w, g_bake_h, BUF_W, src,
+                       0, 0, into->tw, into->pixels);
+        sceGuTexSync();
+        into->w = g_bake_w;
+        into->h = g_bake_h;
+    }
+    sceGuFinish();
+    sceGuSync(0, 0);
+    g_baking = 0;
+}
+
 void gfx_card_draw(const struct gfx_texture *t, const struct gfx_card *c) {
     float hw = c->w * PX / 2, hh = c->h * PX / 2;
 
     /* The shadow is flat, under the card, offset the way the card leans. */
-    gfx_shade(c->cx + c->yaw * 40.0f, c->cy + 10.0f - c->pitch * 40.0f,
-              c->w + 60.0f, c->h + 60.0f, 150);
+    if (!c->bare)
+        gfx_shade(c->cx + c->yaw * 40.0f, c->cy + 10.0f - c->pitch * 40.0f,
+                  c->w + 60.0f, c->h + 60.0f, 150);
 
     card_matrices(c);
     flat_state();
 
     /* Frame: a hair wider than the picture, black. */
-    float f = 1.5f * PX;
-    card_quad(-hw - f, hh + f, hw + f, -hh - f, -0.002f,
-              RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200));
+    float f = c->bare ? 0.0f : 1.5f * PX;
+    if (!c->bare)
+        card_quad(-hw - f, hh + f, hw + f, -hh - f, -0.002f,
+                  RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200));
 
     if (t && t->pixels) {
         float u1 = (float)t->w / t->tw, v1 = (float)t->h / t->th;
@@ -563,10 +598,33 @@ void gfx_card_draw(const struct gfx_texture *t, const struct gfx_card *c) {
 
     /* Glass: a hairline of light along the top edge, and the sweep -- a
        soft diagonal band of light crossing the picture, added on. */
-    card_quad(-hw, hh + f, hw, hh - 1.0f * PX, 0.001f,
-              RGBA(255, 255, 255, 40), RGBA(255, 255, 255, 40),
-              RGBA(255, 255, 255, 130), RGBA(255, 255, 255, 130));
-    if (c->gloss >= 0.0f && c->gloss <= 1.0f) {
+    if (!c->bare)
+        card_quad(-hw, hh + f, hw, hh - 1.0f * PX, 0.001f,
+                  RGBA(255, 255, 255, 40), RGBA(255, 255, 255, 40),
+                  RGBA(255, 255, 255, 130), RGBA(255, 255, 255, 130));
+    if (c->gloss >= 0.0f && c->gloss <= 1.0f && c->bare && t && t->pixels) {
+        /* On lettering the band is drawn through the texture, so the light
+           crosses the letters and nothing else. */
+        float u1 = (float)t->w / t->tw, v1 = (float)t->h / t->th;
+        float band = hw * 0.45f;
+        float x = -hw - band + c->gloss * (2 * hw + 2 * band);
+        float lean = hh * 0.8f;
+        unsigned clear = RGBA(255, 255, 255, 0), lit = RGBA(255, 255, 255, 150);
+        struct v3t *g = sceGuGetMemory(6 * sizeof(struct v3t));
+        if (g) {
+            float xs[6] = { x - band + lean, x - band - lean, x + lean, x - lean, x + band + lean, x + band - lean };
+            for (int i = 0; i < 6; i++) {
+                int top = !(i & 1);
+                g[i].x = xs[i]; g[i].y = top ? hh : -hh; g[i].z = 0.002f;
+                g[i].u = (xs[i] + hw) / (2 * hw) * u1; g[i].v = top ? 0 : v1;
+                g[i].color = (i == 2 || i == 3) ? lit : clear;
+            }
+            bind(t);
+            additive();
+            sceGumDrawArray(GU_TRIANGLE_STRIP, FMT3T, 6, 0, g);
+        }
+        flat_state();
+    } else if (c->gloss >= 0.0f && c->gloss <= 1.0f) {
         additive();
         float band = hw * 0.55f;
         float x = -hw - band + c->gloss * (2 * hw + 2 * band);

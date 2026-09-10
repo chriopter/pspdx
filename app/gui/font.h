@@ -6,6 +6,7 @@
    nothing to ship: the file is already on every PSP. */
 
 enum font_style {
+    FONT_DISPLAY,   /* a word standing in the room, rendered once to a texture */
     FONT_H1,        /* app names, the header */
     FONT_BODY,      /* summaries */
     FONT_META       /* category, licence, state */
