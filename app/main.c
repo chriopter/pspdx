@@ -15,6 +15,7 @@
 #include "gui/gfx.h"
 #include "gui/preview.h"
 #include "gui/screen.h"
+#include "gui/lattice.h"
 #include "gui/shell.h"
 #include "install/install.h"
 #include "logic/entropy.h"
@@ -232,6 +233,8 @@ int main(void) {
         pspDebugScreenPrintf("exit callback failed; HOME will not work\n");
     }
 
+    sceCtrlSetSamplingCycle(0);
+    sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
     install_recover();
     entropy_init();
     entropy_screen_prepare();
@@ -360,6 +363,8 @@ int main(void) {
 
         SceCtrlData pad;
         sceCtrlReadBufferPositive(&pad, 1);
+        /* The stick is a hand in the water, whenever it is off centre. */
+        lattice_stir((pad.Lx - 128) / 127.0f, (pad.Ly - 128) / 127.0f);
         unsigned pressed = pad.Buttons & ~last_buttons;
         last_buttons = pad.Buttons;
         pressed |= repeat(pad.Buttons & (PSP_CTRL_UP | PSP_CTRL_DOWN));

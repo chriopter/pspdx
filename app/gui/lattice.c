@@ -236,6 +236,23 @@ void lattice_touch(float x) {
     dent(jf, rf, 1.5f + frand() * 1.1f, 1.6f + frand() * 1.3f);
 }
 
+void lattice_stir(float x, float y) {
+    float push = x * x + y * y;
+    if (push < 0.04f) return;                   /* the dead zone */
+    if (push > 1.0f) push = 1.0f;
+    /* Across the field with the stick, and stick forward is out toward
+       the horizon. Kept off the very front rows, which are under the
+       screen's bottom edge. */
+    float fx = 0.5f + x * 0.42f;
+    float fz = 0.42f - y * 0.34f;
+    float jf = J0 + fx * (NX_INNER - 1) + (frand() - 0.5f) * 0.8f;
+    float rf = ROW0 + fz * (NZ - 1 - ROW0) + (frand() - 0.5f) * 0.6f;
+    /* A light press each frame rather than a drop: the wave equation adds
+       them up into a wake, and the cap on the height keeps a stick held
+       against its stop from digging a hole. */
+    dent(jf, rf, 0.18f + 0.45f * push, 1.4f + 0.9f * push);
+}
+
 /* Velocity from the curvature, height from the velocity: the plain damped
    wave equation, with the edges reflecting because their neighbour is
    themselves. Dry ground is a shore -- what runs into it stops there. */

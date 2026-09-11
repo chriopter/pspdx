@@ -18,6 +18,12 @@ void lattice_init(void);
    it leaves runs outward on its own. */
 void lattice_touch(float x);
 
+/* A hand in the water: the stick's position, both -1..1, pressed into
+   the surface every frame it is held off centre. The point wanders with
+   the stick and every frame leaves a dent, so a stick swung about makes a
+   wake of rings crossing rings. Harder the further the stick is pushed. */
+void lattice_stir(float x, float y);
+
 void lattice_draw(float t, struct rgb tint);
 
 /* The sweep. dry() empties the field. pour() puts the source at (fx, fz) --
