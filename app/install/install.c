@@ -220,7 +220,7 @@ static int rm_rf(const char *path) {
     while (sceIoDread(d, &e) > 0) {
         if (strcmp(e.d_name, ".") == 0 || strcmp(e.d_name, "..") == 0) continue;
         char sub[256];
-        snprintf(sub, sizeof(sub), "%s/%s", path, e.d_name);
+        if (snprintf(sub, sizeof(sub), "%s/%s", path, e.d_name) >= (int)sizeof(sub)) continue;
         if (FIO_S_ISDIR(e.d_stat.st_mode)) rm_rf(sub);
         else sceIoRemove(sub);
         memset(&e, 0, sizeof(e));
@@ -229,27 +229,78 @@ static int rm_rf(const char *path) {
     return sceIoRmdir(path) < 0 ? -1 : 0;
 }
 
-/* Finds the one PSP/GAME/<dir>/ in the archive. More than one is refused:
-   a package is a directory, and a bundle that ships two is two packages. */
-static int find_game_dir(struct zipread *z, char *dir, size_t dirsz) {
+static int safe_relative(const char *rel);
+
+/* Where the package sits inside the archive: the directory of the
+   shallowest EBOOT.PBP, which is the rule the catalog's scanner applies
+   too. Of sixteen surveyed release archives, ten put the EBOOT one
+   directory down, three at the root and two under PSP/GAME/; the root case
+   has no directory name of its own and takes the last part of the id.
+   root comes back with its trailing slash, or empty; dir is what the
+   directory under PSP/GAME will be called. */
+static void slashes(char *name) {
+    for (char *p = name; *p; p++) if (*p == '\\') *p = '/';
+}
+
+static int ends_with_eboot(const char *name) {
+    size_t n = strlen(name);
+    if (n < 9) return 0;
+    const char *tail = name + n - 9;
+    static const char want[] = "EBOOT.PBP";
+    for (int i = 0; i < 9; i++) {
+        char c = tail[i];
+        if (c >= 'a' && c <= 'z') c = (char)(c - 'a' + 'A');
+        if (c != want[i]) return 0;
+    }
+    return n == 9 || name[n - 10] == '/';
+}
+
+static int find_package(struct zipread *z, const char *id, char *root, size_t rootsz,
+                        char *dir, size_t dirsz) {
     struct zipentry e;
-    int rc;
-    dir[0] = '\0';
+    int rc, depth = -1, tied = 0;
+    root[0] = dir[0] = '\0';
     for (rc = zip_first(z, &e); rc > 0; rc = zip_next(z, &e)) {
-        if (strncmp(e.name, "PSP/GAME/", 9) != 0) continue;
-        const char *rest = e.name + 9;
-        const char *slash = strchr(rest, '/');
-        if (!slash) continue;                     /* a file directly in GAME/ */
-        size_t len = (size_t)(slash - rest);
-        if (len == 0 || len >= dirsz) continue;
-        if (dir[0] == '\0') { memcpy(dir, rest, len); dir[len] = '\0'; }
-        else if (strlen(dir) != len || strncmp(dir, rest, len) != 0) {
-            logline("unpack: two game dirs, %s and %.*s", dir, (int)len, rest);
-            return -1;
+        if (e.name_truncated) continue;
+        slashes(e.name);
+        if (!ends_with_eboot(e.name)) continue;
+        int d = 0;
+        for (const char *p = e.name; *p; p++) d += *p == '/';
+        if (depth < 0 || d < depth) {
+            depth = d;
+            tied = 0;
+            const char *slash = strrchr(e.name, '/');
+            size_t len = slash ? (size_t)(slash - e.name) + 1 : 0;
+            if (len >= rootsz) { logline("unpack: package path too long"); return -1; }
+            memcpy(root, e.name, len);
+            root[len] = '\0';
+        } else if (d == depth) {
+            tied = 1;
         }
     }
     if (rc < 0) return -1;
-    if (dir[0] == '\0') { logline("unpack: no PSP/GAME/<dir>/ in archive"); return -1; }
+    if (depth < 0) { logline("unpack: no EBOOT.PBP in archive"); return -1; }
+    if (tied) { logline("unpack: two EBOOT.PBP at the same depth"); return -1; }
+    if (!safe_relative(root)) { logline("unpack: refusing package at %s", root); return -1; }
+
+    /* The directory's own name: the root's last part, or the id's. */
+    const char *name;
+    size_t len;
+    if (root[0]) {
+        const char *end = root + strlen(root) - 1;       /* the trailing slash */
+        const char *start = end;
+        while (start > root && start[-1] != '/') start--;
+        name = start;
+        len = (size_t)(end - start);
+    } else {
+        const char *dot = strrchr(id, '.');
+        name = dot ? dot + 1 : id;
+        len = strlen(name);
+    }
+    if (len == 0 || len >= dirsz) { logline("unpack: unusable directory name"); return -1; }
+    memcpy(dir, name, len);
+    dir[len] = '\0';
+    logline("unpack: package at %s%s -> PSP/GAME/%s", root[0] ? root : "", root[0] ? "" : "(root)", dir);
     return 0;
 }
 
@@ -270,22 +321,26 @@ static int out_sink(void *ctx, const void *data, size_t len) {
     return 0;
 }
 
-static int unpack(struct zipread *z, const char *dir, struct install_report *rep,
+/* Everything under the package root goes into the staging directory;
+   what the archive holds beside the package -- a readme at the top, a
+   source tree -- stays in the archive. */
+static int unpack(struct zipread *z, const char *root, struct install_report *rep,
                   https_progress progress, void *pctx) {
-    char prefix[128];
-    snprintf(prefix, sizeof(prefix), "PSP/GAME/%s/", dir);
-    size_t plen = strlen(prefix);
+    size_t plen = strlen(root);
     struct zipentry e;
     int rc, files = 0;
     size_t total = 0, done = 0;
 
-    for (rc = zip_first(z, &e); rc > 0; rc = zip_next(z, &e))
-        if (strncmp(e.name, prefix, plen) == 0) total += e.usize;
+    for (rc = zip_first(z, &e); rc > 0; rc = zip_next(z, &e)) {
+        slashes(e.name);
+        if (strncmp(e.name, root, plen) == 0) total += e.usize;
+    }
     if (rc < 0) return -1;
     if (progress) progress(pctx, 0, total);
 
     for (rc = zip_first(z, &e); rc > 0; rc = zip_next(z, &e)) {
-        if (strncmp(e.name, prefix, plen) != 0) continue;   /* not ours */
+        slashes(e.name);
+        if (strncmp(e.name, root, plen) != 0) continue;   /* not ours */
         const char *rel = e.name + plen;
         if (*rel == '\0') continue;
         if (e.name_truncated || !safe_relative(rel)) { logline("unpack: refusing %s", e.name); return -1; }
@@ -445,18 +500,18 @@ int install_release(const struct manifest *release, struct install_report *rep,
     if (download(&m, progress, pctx) < 0) { sceIoRemove(ARCHIVE); return -2; }
 
     if (phase) phase(pctx, "unpack");
-    char dir[64];
+    char dir[64], root[200];
     struct zipread z;
     if (zip_open(&z, ARCHIVE) < 0) {
         logline("unpack: cannot open archive");
         sceIoRemove(ARCHIVE);
         return -3;
     }
-    int rc = find_game_dir(&z, dir, sizeof(dir));
+    int rc = find_package(&z, m.id, root, sizeof(root), dir, sizeof(dir));
     if (rc == 0) {
         strncpy(rep->dir, dir, sizeof(rep->dir) - 1);
         mkdir_p(STAGE);
-        rc = unpack(&z, dir, rep, progress, pctx);
+        rc = unpack(&z, root, rep, progress, pctx);
     }
     zip_close(&z);
     sceIoRemove(ARCHIVE);

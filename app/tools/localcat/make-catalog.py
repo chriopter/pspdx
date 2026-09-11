@@ -26,6 +26,36 @@ for i in range(40):
     a["id"] = "%s.n%02d" % (a["id"], i)
     a["name"] = "%s %d" % (a["name"], i + 1)
     out.append(a)
+
+# Two more, for the installer: the same EBOOT in the two archive layouts the
+# published apps do not use -- at the root of the archive, and one directory
+# down beside a readme. Served from here with their own checksums.
+import hashlib, io, zipfile
+src = [a for a in apps if a.get("release")][0]
+raw = urllib.request.urlopen(src["release"]["url"]).read()
+z = zipfile.ZipFile(io.BytesIO(raw))
+eboot = [n for n in z.namelist() if n.lower().endswith("eboot.pbp")][0]
+payload = z.read(eboot)
+
+def entry(id, name, members):
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as w:
+        for path, data in members: w.writestr(path, data)
+    blob = buf.getvalue()
+    rel = "pkgs/%s.zip" % id
+    os.makedirs(os.path.join(site, "pkgs"), exist_ok=True)
+    open(os.path.join(site, rel), "wb").write(blob)
+    a = dict(src)
+    a["id"] = id; a["name"] = name
+    a["release"] = dict(src["release"], url="https://127.0.0.1:8443/" + rel,
+                        sha256=hashlib.sha256(blob).hexdigest(), size=len(blob))
+    return a
+
+out.append(entry("io.github.chriopter.layoutroot", "Layout: EBOOT at the root",
+                 [("EBOOT.PBP", payload), ("readme.txt", b"at the root\n")]))
+out.append(entry("io.github.chriopter.layoutdir", "Layout: one directory down",
+                 [("README.md", b"beside the package\n"), ("Demo Dir/EBOOT.PBP", payload),
+                  ("Demo Dir/data/level.txt", b"data\n"), ("Demo Dir/data/more/deep.txt", b"deep\n")]))
 cat["apps"] = out
 json.dump(cat, open(os.path.join(site, "catalog.json"), "w"))
 print("catalog: %d apps" % len(out))

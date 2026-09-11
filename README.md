@@ -316,10 +316,6 @@ that works on a real PSP, and on a host whose desktop is locked.
 
 ## Open
 
-- **The archive layout the installer demands.** `find_game_dir()` wants
-  `PSP/GAME/<dir>/`, which 2 of 16 surveyed release archives actually use. The
-  scanner already works out where the EBOOT sits and records it; the console
-  should either be told, or use the same rule.
 - **Real hardware.** It has only ever run in PPSSPP.
 - **Nothing is signed**, so the index is trusted completely. Fine while one
   person writes it; less fine now that a bot does.
