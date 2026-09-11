@@ -50,6 +50,7 @@ while [ $# -gt 0 ]; do
 		--mock) MOCK=1 ;;
 		*) echo "unknown option $arg" >&2; exit 2 ;;
 	esac
+	shift
 done
 
 . "$APP/tools/localcat/common.sh"
