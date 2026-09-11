@@ -1198,7 +1198,14 @@ void shell_draw(const struct catalog *catalog, int cursor) {
     static struct rgb target = { 80, 140, 255 };
     static int lit_for = -1;
     if (catalog->count <= 0) target = DEFAULT_TINT;
-    else if (cursor != lit_for) { lit_for = cursor; target = draw_lot(); }
+    else if (cursor != lit_for) {
+        lit_for = cursor;
+        target = draw_lot();
+        /* The water is told the colour outright, so the front that runs
+           out from the ring carries it whole from its first frame; the
+           rest of the room eases toward it below. */
+        lattice_tint(target);
+    }
     g_tint = rgb_mix(g_tint, target, 0.12f);
     derive_palette();
 
