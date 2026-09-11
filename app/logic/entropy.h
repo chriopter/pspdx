@@ -15,16 +15,24 @@
 #define ENTROPY_FIELD_SIDE 250
 #define ENTROPY_FIELD_COUNT (ENTROPY_FIELD_SIDE * ENTROPY_FIELD_SIDE)
 
-/* One bit per new field, which is the conservative end of what was measured.
-   The full stick trace in testdata (sweep-full.trace) carries about 1100 bits of first-order entropy
-   across 1202 newly entered fields; recoding a position as a field number
-   cannot create entropy, so the true rate is at most ~0.9 bit per field. */
+/* A stroke is not entropy. Driving the source across the grid in one line
+   enters a few hundred fields in a second, and all of them follow from where
+   the stroke began and which way it went. What the hand chooses is where it
+   turns, so a field is credited only when it is new ground reached under a
+   heading different from the one at the last credit: eight headings, one per
+   45 degrees, and a stroke pays once however long it runs. The full stick
+   trace in testdata (sweep-full.trace) turns about 120 times in 27 seconds;
+   a choice among eight is worth up to three bits and the moment of it more,
+   so one bit per credit stays the conservative end. */
+#define ENTROPY_HEADINGS 8
 #define ENTROPY_BITS_PER_FIELD 1
 
 void entropy_init(void);
 
-/* Returns 1 if this field had not been entered before and was credited. */
-int entropy_absorb_field(unsigned int field);
+/* Every new field reaches the pool. Returns 1 when it was also credited: it
+   was reached under a heading (0 to ENTROPY_HEADINGS - 1) other than the one
+   at the previous credit. */
+int entropy_absorb_field(unsigned int field, unsigned int heading);
 
 /* Runtime noise: absorbed, never counted. The bar is a gate on the first
    handshake, not a running total, and the pool is a 20-byte SHA-1 state that

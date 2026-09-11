@@ -11,6 +11,7 @@ static unsigned char pool[POOL_BYTES];
 static unsigned int pool_counter;
 static int pool_bits;
 static unsigned char field_seen[(ENTROPY_FIELD_COUNT + 7) / 8];
+static unsigned int last_heading = ~0u;
 
 /* sync runs the network on its own thread while the shell keeps the main one,
    and SELECT starts a fresh sweep from there: two threads reach the pool, and
@@ -53,11 +54,12 @@ void entropy_init(void) {
     pool_absorb(&sp, sizeof(sp));
     pool_absorb_jitter(8);
     pool_bits = 0;
+    last_heading = ~0u;
     memset(field_seen, 0, sizeof(field_seen));
     pool_unlock();
 }
 
-int entropy_absorb_field(unsigned int field) {
+int entropy_absorb_field(unsigned int field, unsigned int heading) {
     if (field >= ENTROPY_FIELD_COUNT) return 0;
     unsigned int byte = field >> 3;
     unsigned char bit = (unsigned char)(1u << (field & 7));
@@ -68,19 +70,25 @@ int entropy_absorb_field(unsigned int field) {
     }
     field_seen[byte] |= bit;
 
-    /* The field number is what the bar is counting. The timestamp rides along
-       because the moment the point is reached is unpredictable too, and the
-       pool is happy to take it; it is not counted, so the tally stays honest. */
+    /* Every new field goes in: the position, the heading, and the moment,
+       since when the point is reached is unpredictable too and the pool is
+       happy to take it. Only a turn is counted, so the tally stays honest. */
     struct {
         unsigned int field;
+        unsigned int heading;
         unsigned int sys;
     } sample;
     sample.field = field;
+    sample.heading = heading;
     sample.sys = sceKernelGetSystemTimeLow();
     pool_absorb(&sample, sizeof(sample));
-    pool_bits += ENTROPY_BITS_PER_FIELD;
+    int credited = heading != last_heading;
+    if (credited) {
+        last_heading = heading;
+        pool_bits += ENTROPY_BITS_PER_FIELD;
+    }
     pool_unlock();
-    return 1;
+    return credited;
 }
 
 void entropy_stir(const void *data, unsigned int len) {
@@ -138,6 +146,7 @@ void entropy_forget(void) {
        between the removal and the clearing and puts the file straight back. */
     sceIoRemove(SEED_FILE);
     pool_bits = 0;
+    last_heading = ~0u;
     memset(pool, 0, sizeof(pool));
     memset(field_seen, 0, sizeof(field_seen));
     pool_unlock();

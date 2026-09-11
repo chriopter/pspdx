@@ -177,9 +177,10 @@ instruction; `network/bench.c` measures the gap on the device itself. The key
 share rides along with the ClientHello, so no HelloRetryRequest and one
 handshake covers the whole catalog.
 
-Its randomness is the sweep: one bit for every newly touched point of an
-invisible 250x250 field, until the pool holds the 128 that X25519 and
-ChaCha20-Poly1305 stand on. The pool goes on taking packet arrival times and
+Its randomness is the sweep: one bit for every turn of the stick onto a
+newly touched point of an invisible 250x250 field, until the pool holds the
+128 that X25519 and ChaCha20-Poly1305 stand on. A straight stroke pays once,
+however far it runs. The pool goes on taking packet arrival times and
 battery readings for the rest of the run, uncounted, and reaches `PSPDX.SEED`
 once, on the way out through HOME.
 

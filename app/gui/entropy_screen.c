@@ -50,6 +50,16 @@ static int recording;
 
 static float g_fx = 0.5f, g_fz = 0.5f;
 
+/* The stick's direction as one of eight, 45 degrees each, centred on the
+   axes and the diagonals; 5/12 stands in for tan 22.5. */
+static unsigned heading_of(int dx, int dy) {
+    int ax = dx < 0 ? -dx : dx, ay = dy < 0 ? -dy : dy;
+    if (ay * 12 < ax * 5) return dx > 0 ? 0 : 4;
+    if (ax * 12 < ay * 5) return dy > 0 ? 2 : 6;
+    if (dx > 0) return dy > 0 ? 1 : 7;
+    return dy > 0 ? 3 : 5;
+}
+
 static void trace_load(void) {
     int fd = sceIoOpen(REPLAY_FILE, PSP_O_RDONLY, 0777);
     if (fd < 0) return;
@@ -174,12 +184,14 @@ int entropy_screen_run(void) {
             if (g_fx > 1) g_fx = 1;
             if (g_fz < 0) g_fz = 0;
             if (g_fz > 1) g_fz = 1;
-            /* The source pays for new ground: one field of the invisible
-               250x250 grid, credited once, so holding the stick against its
-               stop earns nothing. */
+            /* The source pays for a turn onto new ground: a field of the
+               invisible 250x250 grid, entered for the first time, under a
+               heading other than the last one paid for. A stick against its
+               stop earns nothing, and neither does a long straight stroke. */
             int fx = (int)(g_fx * (ENTROPY_FIELD_SIDE - 1) + 0.5f);
             int fz = (int)(g_fz * (ENTROPY_FIELD_SIDE - 1) + 0.5f);
-            entropy_absorb_field((unsigned)fz * ENTROPY_FIELD_SIDE + (unsigned)fx);
+            entropy_absorb_field((unsigned)fz * ENTROPY_FIELD_SIDE + (unsigned)fx,
+                                 heading_of(dx, dy));
         }
 
         /* The water is the picture of the sweep, not its measure: the bar
