@@ -39,7 +39,6 @@
 static const struct rgb NIGHT_TOP = { 2, 3, 9 };
 static const struct rgb NIGHT_BOTTOM = { 6, 8, 22 };
 static const struct rgb TINT = { 80, 140, 255 };
-static const struct rgb ALARM = { 255, 90, 80 };
 
 struct trace_sample { unsigned char lx, ly; unsigned short buttons; };
 
@@ -129,11 +128,11 @@ static void draw_chrome(float t, int percent, int ready) {
     title_draw(SCR_W / 2.0f, 58.0f, t, TINT);
 
     /* Under the name, centred, what the hand is for. */
-    const char *head = replaying
-        ? "Replaying recorded input: the entropy here is not real"
-        : "Move the analog stick to collect entropy for TLS 1.3";
+    /* The same line on a replay: that is a development aid, and the seed
+       it would leave is refused anyway. */
+    const char *head = "Move the analog stick to collect entropy for TLS 1.3";
     float hw = font_width(FONT_BODY, head);
-    font_print(FONT_BODY, (SCR_W - hw) / 2, 104, replaying ? rgb_pack(ALARM, 255) : text, head);
+    font_print(FONT_BODY, (SCR_W - hw) / 2, 104, text, head);
 
     /* The bar is the shore drawn straight: how much of the field is water. */
     int bar_x = 16, bar_y = 238, bar_w = SCR_W - 32;
