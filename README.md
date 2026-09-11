@@ -312,6 +312,7 @@ sh app/run-ppsspp.sh 30 --keys keys.txt       # scripted input, see PSPDX.KEYS b
 sh app/tools/localcat/run 60 --keys keys.txt  # the same against forty apps served from the host
 python3 app/tools/soak/run.py --runs 100      # a hundred customers, the stick checked against a model
 python3 app/tools/soak/run.py --perf 20       # twenty runs of held keys, stick and film, every late frame named
+python3 app/tools/soak/run.py --edge 30       # thirty edge cases: storms, bulk, network faults, bad archives, bad catalogs, a broken stick
 ```
 
 A rig run gets no speakers: the emulator is started without its audio
