@@ -45,7 +45,10 @@ static int g_up;
 static struct gfx_texture g_glow;
 static unsigned char *g_ripple;                 /* RIPPLE_FRAMES tiles of T8 */
 static float g_normal[256][3];                  /* what each index stands for */
-static unsigned __attribute__((aligned(16))) g_clut[256];
+/* The palette as lit, and two copies scaled for the two steps of the
+   ripple that are on screen at once -- see gfx_water_step. */
+static unsigned char g_clut_lit[256][3];
+static unsigned __attribute__((aligned(16))) g_clut[2][256];
 
 /* Vertex layouts. The GE reads the components in a fixed order -- texture,
    colour, position -- so the struct members have to be declared in that
@@ -471,10 +474,10 @@ void gfx_water_light(float lx, float ly, float lz,
         float r = dr + (sr - dr) * mirror + gr * s;
         float g = dg + (sg - dg) * mirror + gg * s;
         float b = db + (sb - db) * mirror + gb * s;
-        g_clut[i] = RGBA((unsigned)channel(r), (unsigned)channel(g),
-                         (unsigned)channel(b), 255);
+        g_clut_lit[i][0] = (unsigned char)channel(r);
+        g_clut_lit[i][1] = (unsigned char)channel(g);
+        g_clut_lit[i][2] = (unsigned char)channel(b);
     }
-    sceKernelDcacheWritebackRange(g_clut, sizeof(g_clut));
 }
 
 struct gfx_water_vertex *gfx_water_mesh(int verts) {
@@ -503,19 +506,36 @@ void gfx_water_begin(int frame) {
     sceGuDisable(GU_DEPTH_TEST);
     sceGuEnable(GU_TEXTURE_2D);
     sceGuClutMode(GU_PSM_8888, 0, 0xFF, 0);
-    sceGuClutLoad(32, g_clut);
     sceGuTexMode(GU_PSM_T8, RIPPLE_LEVELS - 1, 0, GU_FALSE);
-    unsigned char *tile = g_ripple + (frame % RIPPLE_FRAMES) * RIPPLE_BYTES;
-    for (int level = 0, n = RIPPLE_SIZE; level < RIPPLE_LEVELS; level++, n /= 2) {
-        sceGuTexImage(level, n, n, n, tile);
-        tile += n * n;
-    }
     sceGuTexFunc(GU_TFX_MODULATE, GU_TCC_RGBA);
     sceGuTexFilter(GU_LINEAR_MIPMAP_LINEAR, GU_LINEAR);
     sceGuTexWrap(GU_REPEAT, GU_REPEAT);
     sceGuTexScale(1.0f, 1.0f);
     sceGuTexOffset(0.0f, 0.0f);
     additive();
+    (void)frame;
+}
+
+void gfx_water_step(int which, int frame, float weight) {
+    if (!g_ripple) return;
+    /* The step's share of the light goes into its own copy of the palette:
+       the surface is drawn once per step and the two add up, so a step
+       fading in and the one fading out cross without a seam. The GE reads
+       the palette when the list runs, after both copies are written. */
+    unsigned *clut = g_clut[which & 1];
+    int w = (int)(weight * 256.0f + 0.5f);
+    if (w < 0) w = 0; else if (w > 256) w = 256;
+    for (int i = 0; i < 256; i++)
+        clut[i] = RGBA((unsigned)(g_clut_lit[i][0] * w >> 8),
+                       (unsigned)(g_clut_lit[i][1] * w >> 8),
+                       (unsigned)(g_clut_lit[i][2] * w >> 8), 255);
+    sceKernelDcacheWritebackRange(clut, 256 * sizeof(*clut));
+    sceGuClutLoad(32, clut);
+    unsigned char *tile = g_ripple + (frame % RIPPLE_FRAMES) * RIPPLE_BYTES;
+    for (int level = 0, n = RIPPLE_SIZE; level < RIPPLE_LEVELS; level++, n /= 2) {
+        sceGuTexImage(level, n, n, n, tile);
+        tile += n * n;
+    }
 }
 
 void gfx_water_strip(const struct gfx_water_vertex *v, int n, float level) {

@@ -101,6 +101,13 @@ static int install_app(int index, int screenshot) {
     /* The installer and the media thread share one HTTPS stack and one
        asset buffer; only one of them talks to the network at a time. */
     preview_quiesce();
+    /* The handshake and the checksum run flat out on this thread, and the
+       audio thread sits one step under it by design -- see audio.c -- so
+       for the length of the install this thread steps under the audio
+       thread instead. The tune keeps playing; the progress bar, drawn from
+       the installer's callbacks, gets what is left, which is nearly all. */
+    SceUID self = sceKernelGetThreadId();
+    sceKernelChangeThreadPriority(self, 0x22);
     unsigned start = now_ms();
     int rc = entry->has_release
         ? install_release(&entry->release, &report, shell_install_phase,
@@ -108,6 +115,7 @@ static int install_app(int index, int screenshot) {
         : install(entry->manifest, entry->id, &report, shell_install_phase,
                   shell_install_progress, NULL);
     unsigned seconds = (now_ms() - start) / 1000;
+    sceKernelChangeThreadPriority(self, 0x20);
     preview_resume();
 
     char message[96];

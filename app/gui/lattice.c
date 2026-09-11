@@ -424,9 +424,9 @@ static void project_all(float t, float swayx, float lightx) {
    instead of hatched. The tile is anchored to the world and creeps toward
    the viewer, which is the movement between the crossings that the swell is
    too coarse to carry. */
-static void draw_surface(float t) {
+static struct gfx_water_vertex *build_surface(float t) {
     struct gfx_water_vertex *mesh = gfx_water_mesh((NZ - 1) * NX * 2);
-    if (!mesh) return;
+    if (!mesh) return 0;
     float du = t * 0.05f, dv = -t * 0.33f;
     struct gfx_water_vertex *p = mesh;
     for (int i = 0; i < NZ - 1; i++) {
@@ -442,9 +442,17 @@ static void draw_surface(float t) {
                 p++;
             }
         }
+    }
+    return mesh;
+}
+
+/* The same vertices are drawn once per ripple step; building them is the
+   CPU's part and happens once. */
+static void draw_surface(const struct gfx_water_vertex *mesh) {
+    if (!mesh) return;
+    for (int i = 0; i < NZ - 1; i++)
         gfx_water_strip(mesh + i * NX * 2, NX * 2,
                         0.5f * (g_row[i].lod + g_row[i + 1].lod));
-    }
 }
 
 /* The source hangs over the cell it is filling, so it has to be placed
@@ -493,8 +501,17 @@ void lattice_draw(float t, struct rgb tint) {
                     rgb_pack(rgb_mix(tint, DEEP, 0.38f), 0),
                     rgb_pack(rgb_mix(rgb_mix(tint, RGB_WHITE, 0.9f), DEEP, 0.62f), 0));
     project_all(t, sway, lightx);
-    gfx_water_begin((int)(t * 7.0f));
-    draw_surface(t);
+    /* Seven steps a second through the ripple's baked frames, each one
+       crossfaded into the next so nothing jumps. */
+    float phase = t * 7.0f;
+    int step = (int)phase;
+    float f = phase - step;
+    gfx_water_begin(step);
+    const struct gfx_water_vertex *mesh = build_surface(t);
+    gfx_water_step(0, step, 1.0f - f);
+    draw_surface(mesh);
+    gfx_water_step(1, step + 1, f);
+    draw_surface(mesh);
     gfx_water_end();
 
     float x[NX > NZ ? NX : NZ], y[NX > NZ ? NX : NZ];
