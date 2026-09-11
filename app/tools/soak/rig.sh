@@ -58,26 +58,11 @@ case "$1" in
 	idle)
 		# One emulator at a time. Two write the same PSPDX.LOG, the same
 		# PSPDX1.BMP and the same db records, and a rig that let a second
-		# one run would be reading somebody else's session. dev/start
-		# stops stale instances for the same reason; this is that, before
-		# every run, because the desk instance can come back between two
-		# of them. Anything still on the port after it is somebody else's
-		# rig and has to be waited out, so it is reported rather than
-		# killed.
-		systemctl --user stop pspdx-ppsspp 2>/dev/null || true
-		# flatpak detaches the emulator from its launcher, so stopping the
-		# unit does not always reach it and an orphan can sit on the stick
-		# for an hour playing the same film. Only an emulator running the
-		# EBOOT in PSP/GAME/pspdx -- the desk's and this rig's own -- is
-		# ended here; anybody who gave their rig a directory of its own is
-		# waited for instead.
-		for pid in $(pgrep -x PPSSPPSDL 2>/dev/null); do
-			if tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null |
-				grep -q 'GAME/pspdx/EBOOT.PBP'; then
-				kill "$pid" 2>/dev/null || true
-			fi
-		done
-		sleep 2
+		# one run would be reading somebody else's session. Nothing here
+		# ends that session: an emulator the user opened is theirs to
+		# close, and a campaign that finds one waits and says so. Only
+		# what a run of this rig started itself is its own to stop, and
+		# run-ppsspp.sh does that when its seconds are up.
 		if pgrep -x PPSSPPSDL >/dev/null 2>&1; then echo busy; else echo idle; fi
 		;;
 	clean)   mock clean ;;
