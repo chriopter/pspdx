@@ -123,10 +123,13 @@ static unsigned g_fill[NZ][NX];         /* what the swell does to its colour */
 /* The sweep's source: where it is over the field, and whether to draw it. */
 static struct { float fx, fz; int on; } g_source;
 
+/* Motes in the air over the horizon, rising slowly through the sky and
+   never in front of the water: something drifting across the surface
+   reads as dirt on it. */
 static void speck_reset(int i, int anywhere) {
     g_specks[i].x = 20 + frand() * (SCR_W - 40);
-    g_specks[i].y = anywhere ? GFX_HORIZON + frand() * (SCR_H - GFX_HORIZON) : SCR_H + 6;
-    g_specks[i].vy = 0.10f + frand() * 0.25f;
+    g_specks[i].y = anywhere ? 8 + frand() * (GFX_HORIZON - 16) : GFX_HORIZON - 4;
+    g_specks[i].vy = 0.05f + frand() * 0.12f;
     g_specks[i].size = 4 + frand() * 8;
     g_specks[i].phase = frand() * 6.283f;
 }
@@ -430,7 +433,14 @@ static void project_all(float t, float swayx, float lightx) {
        the flat things over it still agree. */
     for (int j = 0; j < NX; j++) {
         for (int i = NZ - 2; i >= 0; i--) {
-            float floor = g_y[i + 1][j] + 1.5f;
+            /* Not a sliver: a row pressed against the one behind it keeps
+               a third of its natural height, so a crest is compressed
+               into the rows ahead of it rather than drawn as a thin bright
+               strip a pixel and a half tall. */
+            float natural = g_row[i].y0 - g_row[i + 1].y0;
+            float least = natural * 0.35f;
+            if (least < 1.5f) least = 1.5f;
+            float floor = g_y[i + 1][j] + least;
             if (g_y[i][j] < floor) {
                 g_y[i][j] = floor;
                 g_wy[i][j] = (GFX_HORIZON - floor) * g_row[i].z / GFX_FOCAL;
@@ -607,8 +617,9 @@ void lattice_draw(float t, struct rgb tint) {
     for (int i = 0; i < SPECKS; i++) {
         g_specks[i].y -= g_specks[i].vy;
         g_specks[i].x += fsin(t * 1.7f + g_specks[i].phase) * 0.2f;
-        if (g_specks[i].y < GFX_HORIZON - 10) speck_reset(i, 0);
-        float life = (g_specks[i].y - GFX_HORIZON) / (SCR_H - GFX_HORIZON);
+        if (g_specks[i].y < 6) speck_reset(i, 0);
+        /* Brightest just over the horizon, gone by the top. */
+        float life = (g_specks[i].y - 6) / (GFX_HORIZON - 10);
         gfx_glow(g_specks[i].x, g_specks[i].y, g_specks[i].size, g_specks[i].size,
                  tinted(spark, (int)(140 * life)));
     }
