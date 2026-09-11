@@ -133,6 +133,7 @@ static int g_info, g_info_action;
 /* The share of a frame that goes into drawing it, eased over about a second
    so the number on screen does not flicker. */
 static float g_load;
+static float g_frame_us;                /* frame to frame, eased, for the fps */
 static char g_word[24] = "Connecting";
 static const struct catalog *g_catalog;
 static int g_cursor;
@@ -828,8 +829,10 @@ static void draw_info(void) {
     /* Not a scheduler's number -- the PSP has none to ask. The share of each
        frame that goes into drawing it; the rest is the wait for vblank, which
        is the only idle this client has. */
-    snprintf(value, sizeof(value), "%d%% of each frame", (int)(g_load * 100.0f + 0.5f));
-    fact(INFO_Y + 126, FACT_LABEL, FACT_VALUE, 140, "Drawing", value);
+    snprintf(value, sizeof(value), "%d fps, %d%% drawing",
+             g_frame_us > 0.0f ? (int)(1000000.0f / g_frame_us + 0.5f) : 0,
+             (int)(g_load * 100.0f + 0.5f));
+    fact(INFO_Y + 126, FACT_LABEL, FACT_VALUE, 160, "Frames", value);
 
     int installed = 0;
     if (g_catalog)
@@ -992,8 +995,10 @@ void shell_draw(const struct catalog *catalog, int cursor) {
     /* Drawing against the whole frame, which is this one's start to the
        next one's: what is not drawing is the vblank wait inside frame_end. */
     static unsigned began;
-    if (began && t0 - began > 1000 && t0 - began < 200000)
+    if (began && t0 - began > 1000 && t0 - began < 200000) {
         g_load += ((float)(t2 - t0) / (t0 - began) - g_load) * 0.05f;
+        g_frame_us += ((float)(t0 - began) - g_frame_us) * 0.05f;
+    }
     began = t0;
     if (t3 - t0 > g_worst_total) {
         g_worst_total = t3 - t0;

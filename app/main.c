@@ -581,6 +581,7 @@ int main(void) {
         unsigned pressed = pad.Buttons & ~last_buttons;
         last_buttons = pad.Buttons;
         pressed |= repeat(pad.Buttons & (PSP_CTRL_UP | PSP_CTRL_DOWN |
+                                         PSP_CTRL_LEFT | PSP_CTRL_RIGHT |
                                          PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER));
         if (synced) pressed |= keys_pressed();
         /* Everything below counts in rows of the shell's view -- the
@@ -588,10 +589,11 @@ int main(void) {
            while the catalog is being fetched. */
         int count = shown()->count > 0 ? shell_view_count() : 0;
 
-        /* The triggers walk the tabs, and the list under them starts again
-           at the top. */
-        if ((pressed & (PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER)) && count > 0) {
-            shell_tab_move(pressed & PSP_CTRL_RTRIGGER ? 1 : -1);
+        /* The triggers and left/right walk the tabs, and the list under
+           them starts again at the top. */
+        unsigned tabs = PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER | PSP_CTRL_LEFT | PSP_CTRL_RIGHT;
+        if ((pressed & tabs) && count > 0) {
+            shell_tab_move(pressed & (PSP_CTRL_RTRIGGER | PSP_CTRL_RIGHT) ? 1 : -1);
             cues_post(CUE_MOVE, cursor = 0);
             count = shell_view_count();
         }
