@@ -19,6 +19,17 @@ struct https_result {
     char host[128];
 };
 
+/* What the last handshake agreed on. The client shows it, so the strings are
+   wolfSSL's own spelling and empty until something has connected. */
+struct https_info {
+    char host[128];
+    char cipher[48];
+    char group[24];
+    unsigned handshake_ms;
+};
+
+const struct https_info *https_last(void);
+
 /* The cipher suites to offer first, in wolfSSL's spelling, or NULL for the
    library's own order. Applies to connections made after the call. */
 void https_prefer(const char *suites);

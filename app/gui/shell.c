@@ -9,10 +9,13 @@
  * screenshot texture.
  */
 
+#include <pspkernel.h>
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
 
+#include "logic/entropy.h"
+#include "network/https.h"
 #include "gui/shell.h"
 #include "gui/font.h"
 #include "gui/gfx.h"
@@ -115,6 +118,16 @@ static char g_install_phase[16];
 static size_t g_install_done, g_install_total;
 static unsigned g_install_drawn_ms;
 static char g_status[96];
+/* What stands over the browser, if anything: a question, a short menu with a
+   cursor on one of its choices, or the info band. All of it is set from
+   outside and only drawn here -- what is pressed in answer, and which row the
+   cursor is on, is the main loop's business. */
+static char g_ask_title[64], g_ask_line[96];
+#define MENU_MAX 4
+static char g_menu_title[48], g_menu_item[MENU_MAX][32];
+static unsigned char g_menu_on[MENU_MAX];
+static int g_menu_count, g_menu_cursor;
+static int g_info;
 static char g_word[24] = "Connecting";
 static const struct catalog *g_catalog;
 static int g_cursor;
@@ -502,39 +515,276 @@ static void draw_panel(const struct app_entry *entry, float t) {
 
 /* --------------------------------------------------------------- overlays */
 
+/* Everything modal is the same shape, the one the system's own message dialog
+   has: a band the full width of the screen, the room still moving above and
+   below it, held by a line of light along each edge that fades away toward
+   both walls. Nothing here has a left side, a right side or a corner. */
+#define BAND_H 118
+#define BAND_Y ((SCR_H - BAND_H) / 2)
+#define MENU_H 156
+#define MENU_Y ((SCR_H - MENU_H) / 2)
+#define INFO_H 190
+#define INFO_Y ((SCR_H - INFO_H) / 2)
+
+static void band_edge(int y) {
+    unsigned bright = rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.55f), 210);
+    unsigned clear = rgb_pack(g_tint, 0);
+    gfx_hgrad(0, y, SCR_W / 2, 1, clear, bright);
+    gfx_hgrad(SCR_W / 2, y, SCR_W / 2, 1, bright, clear);
+    /* The line is one pixel; what makes it read as light is under it. */
+    gfx_glow(SCR_W / 2, y, 460, 9, rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.4f), 70));
+}
+
+/* A line of the same kind but shorter, for dividing a band's inside. */
+static void band_rule(int y, int half_w, int alpha) {
+    unsigned faint = rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.4f), alpha);
+    unsigned clear = rgb_pack(g_tint, 0);
+    gfx_hgrad(SCR_W / 2 - half_w, y, half_w, 1, clear, faint);
+    gfx_hgrad(SCR_W / 2, y, half_w, 1, faint, clear);
+}
+
+static void draw_band(int y, int h) {
+    /* The whole room steps back a little so the band is the front. */
+    gfx_rect(0, 0, SCR_W, SCR_H, RGBA(0, 0, 0, 70));
+    gfx_rect(0, y, SCR_W, h, RGBA(0, 0, 0, 150));
+    /* Flat dark over the screenshot card still leaves it the brightest thing
+       on screen and the text on top of it unreadable, so the band is darkest
+       where the words are and lets the room back in toward the walls. */
+    gfx_shade(SCR_W / 2.0f, y + h / 2.0f, SCR_W * 1.7f, h * 1.1f, 150);
+    band_edge(y);
+    band_edge(y + h);
+}
+
+/* The face buttons, drawn rather than written: the system font has no glyph
+   for them, and spelling TRIANGLE out is longer than the word it would be
+   labelling. A ribbon is a band offset up and down from its own points, so it
+   draws a slope well and a vertical line not at all -- which is why the square
+   is four thin rectangles and the ring starts half a step off the axes, where
+   no segment of it stands upright. */
+enum mark { MARK_CROSS, MARK_CIRCLE, MARK_SQUARE, MARK_TRIANGLE };
+
+#define MARK_W 11
+
+static void draw_mark(enum mark mark, float cx, float cy, unsigned color) {
+    int x = (int)cx, y = (int)cy;
+    unsigned c[13];
+    for (int i = 0; i < 13; i++) c[i] = color;
+    if (mark == MARK_CROSS) {
+        float ax[2] = { cx - 3.5f, cx + 3.5f }, ay[2] = { cy - 3.5f, cy + 3.5f };
+        float bx[2] = { cx - 3.5f, cx + 3.5f }, by[2] = { cy + 3.5f, cy - 3.5f };
+        gfx_ribbon(ax, ay, c, 2, 1.0f);
+        gfx_ribbon(bx, by, c, 2, 1.0f);
+    } else if (mark == MARK_TRIANGLE) {
+        float tx[4] = { cx, cx + 4.5f, cx - 4.5f, cx };
+        float ty[4] = { cy - 4.0f, cy + 3.5f, cy + 3.5f, cy - 4.0f };
+        gfx_ribbon(tx, ty, c, 4, 1.0f);
+    } else if (mark == MARK_SQUARE) {
+        gfx_rect(x - 4, y - 4, 9, 1, color);
+        gfx_rect(x - 4, y + 4, 9, 1, color);
+        gfx_rect(x - 4, y - 4, 1, 9, color);
+        gfx_rect(x + 4, y - 4, 1, 9, color);
+    } else {
+        float rx[13], ry[13];
+        for (int i = 0; i < 13; i++) {
+            float a = (i + 0.5f) * (6.2831853f / 12);
+            rx[i] = cx + cosf(a) * 4.0f;
+            ry[i] = cy + sinf(a) * 4.0f;
+        }
+        gfx_ribbon(rx, ry, c, 13, 1.0f);
+    }
+}
+
+/* One button and the word for what it does, the mark sitting on the text's
+   own line. Returns where the next one may start; a row that has to be
+   centred is measured with the same arithmetic first. */
+static float hint_width(const char *text) {
+    return MARK_W + 4 + font_width(FONT_META, text);
+}
+
+static float draw_hint(float x, float base, enum mark mark, const char *text,
+                       unsigned color) {
+    draw_mark(mark, x + MARK_W / 2.0f, base - 4, color);
+    return font_print(FONT_META, x + MARK_W + 4, base, color, text) + 16;
+}
+
+/* The row of buttons a band carries at its foot, centred and both the same
+   weight: which one is taken is decided by the button pressed, not by a
+   cursor sitting on one of them. */
+static void draw_answers(float base, const char *yes, const char *no) {
+    float x = SCR_W / 2 - (hint_width(yes) + 30 + hint_width(no)) / 2;
+    draw_mark(MARK_CROSS, x + MARK_W / 2.0f, base - 4, g_dim);
+    x = font_print(FONT_META, x + MARK_W + 4, base, g_text, yes) + 30;
+    draw_mark(MARK_CIRCLE, x + MARK_W / 2.0f, base - 4, g_dim);
+    font_print(FONT_META, x + MARK_W + 4, base, g_text, no);
+}
+
+/* ------------------------------------------------------------------- ask */
+
+static void draw_ask(void) {
+    draw_band(BAND_Y, BAND_H);
+    float w = font_width(FONT_BODY, g_ask_title);
+    font_print_clipped(FONT_BODY, SCR_W / 2 - w / 2, BAND_Y + 44, SCR_W - 40,
+                       g_text, g_ask_title);
+    w = font_width(FONT_META, g_ask_line);
+    font_print_clipped(FONT_META, SCR_W / 2 - w / 2, BAND_Y + 68, SCR_W - 40,
+                       g_dim, g_ask_line);
+    draw_answers(BAND_Y + BAND_H - 22, "Yes", "No");
+}
+
+/* ------------------------------------------------------------------ menu */
+
+static void draw_menu(void) {
+    draw_band(MENU_Y, MENU_H);
+
+    float w = font_width(FONT_BODY, g_menu_title);
+    font_print_clipped(FONT_BODY, SCR_W / 2 - w / 2, MENU_Y + 32, SCR_W - 40,
+                       g_text, g_menu_title);
+    band_rule(MENU_Y + 42, 150, 110);
+
+    /* Grey is the whole of what says a choice cannot be taken: no line
+       through it, no bracket after it. */
+    unsigned grey = rgb_pack(rgb_mix(NIGHT_BOTTOM, RGB_WHITE, 0.32f), 255);
+    for (int i = 0; i < g_menu_count; i++) {
+        int y = MENU_Y + 72 + i * 22;
+        int on = i == g_menu_cursor;
+        if (on) {
+            gfx_glow(SCR_W / 2, y - 5, 380, 34, rgb_pack(g_tint, 120));
+            gfx_glow(SCR_W / 2, y + 5, 320, 9,
+                     rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.7f), 150));
+        }
+        unsigned color = !g_menu_on[i] ? grey : on ? g_text : g_dim;
+        w = font_width(FONT_BODY, g_menu_item[i]);
+        font_print_clipped(FONT_BODY, SCR_W / 2 - w / 2, y, SCR_W - 40, color,
+                           g_menu_item[i]);
+    }
+    draw_answers(MENU_Y + MENU_H - 24, "Select", "Back");
+}
+
+/* --------------------------------------------------------------- install */
+
 static void draw_install(void) {
-    int box_y = 96;
-    gfx_rect(0, 0, SCR_W, SCR_H, RGBA(0, 0, 0, 120));
-    gfx_glow(SCR_W / 2, box_y + 40, 560, 200, rgb_pack(g_tint, 80));
-    gfx_rect(0, box_y, SCR_W, 80, RGBA(0, 0, 0, 170));
-    gfx_hgrad(0, box_y, SCR_W, 1, rgb_pack(g_tint, 0), rgb_pack(g_tint, 200));
-    gfx_hgrad(0, box_y + 80, SCR_W, 1, rgb_pack(g_tint, 200), rgb_pack(g_tint, 0));
+    draw_band(BAND_Y, BAND_H);
 
-    font_print_clipped(FONT_H1, 30, box_y + 30, SCR_W - 60, g_text, g_install_name);
-    font_print(FONT_META, 30, box_y + 50, g_accent, g_install_phase);
+    int bar_x = 60, bar_w = SCR_W - 120, bar_y = BAND_Y + 84;
+    font_print_clipped(FONT_BODY, bar_x, BAND_Y + 44, bar_w, g_text, g_install_name);
+    font_print(FONT_META, bar_x, BAND_Y + 68, g_dim, g_install_phase);
 
-    int bar_x = 30, bar_w = SCR_W - 60, bar_y = box_y + 60;
-    gfx_rect(bar_x, bar_y, bar_w, 6, RGBA(255, 255, 255, 30));
+    /* Three pixels of line, not a trough with a fill: the bar is the same
+       kind of thing as the band's own edges. */
+    gfx_rect(bar_x, bar_y, bar_w, 3, RGBA(255, 255, 255, 28));
     if (g_install_total) {
         int filled = (int)((unsigned long long)g_install_done * bar_w / g_install_total);
-        gfx_hgrad(bar_x, bar_y, filled, 6, rgb_pack(g_tint, 255), g_accent);
-        gfx_glow(bar_x + filled, bar_y + 3, 40, 24, rgb_pack(RGB_WHITE, 160));
+        gfx_hgrad(bar_x, bar_y, filled, 3, rgb_pack(g_tint, 255), g_accent);
+        gfx_glow(bar_x + filled, bar_y + 1, 44, 22, rgb_pack(RGB_WHITE, 150));
         char pct[8];
         snprintf(pct, sizeof(pct), "%d%%",
                  (int)((unsigned long long)g_install_done * 100 / g_install_total));
-        font_print(FONT_META, SCR_W - 30 - font_width(FONT_META, pct), box_y + 50,
-                   g_dim, pct);
+        font_print(FONT_META, bar_x + bar_w - font_width(FONT_META, pct),
+                   BAND_Y + 68, g_dim, pct);
     } else if (g_install_done) {
         /* No content-length: show that bytes are moving, not how far. */
         int slide = (int)(gfx_frames() * 3 % (unsigned)bar_w);
         int w = 40 > bar_w - slide ? bar_w - slide : 40;
-        gfx_hgrad(bar_x + slide, bar_y, w, 6, g_accent, rgb_pack(g_tint, 0));
+        gfx_hgrad(bar_x + slide, bar_y, w, 3, g_accent, rgb_pack(g_tint, 0));
     }
 }
+
+/* -------------------------------------------------------------- info band */
+
+/* Labels end and values begin at the same two places all the way down, so the
+   rows read as a column of facts and not as six sentences. */
+#define INFO_LABEL_END 224
+#define INFO_VALUE_X 244
+
+static void info_row(int y, const char *label, const char *value) {
+    font_print(FONT_META, INFO_LABEL_END - font_width(FONT_META, label), y,
+               g_dim, label);
+    font_print_clipped(FONT_META, INFO_VALUE_X, y, SCR_W - INFO_VALUE_X - 30,
+                       g_text, value);
+}
+
+/* wolfSSL names a suite the way its own tables do -- TLS13-CHACHA20-POLY1305-
+   SHA256. In a TLS 1.3 row the version is already said and the hash cannot be
+   anything else, so both ends come off and what is left is the part that
+   differs between one connection and the next. */
+static void tidy_cipher(const char *name, char *out, size_t size) {
+    const char *cut = name;
+    if (strncmp(cut, "TLS13", 5) == 0) cut += 5;
+    else if (strncmp(cut, "TLS", 3) == 0) cut += 3;
+    if (*cut == '-' || *cut == '_') cut++;
+    snprintf(out, size, "%s", *cut ? cut : name);
+    for (char *p = out; *p; p++) if (*p == '_') *p = '-';
+    size_t n = strlen(out);
+    if (n > 7 && strncmp(out + n - 7, "-SHA", 4) == 0) out[n - 7] = '\0';
+}
+
+/* The catalog is named by where it came from, not by which file on it. */
+static void url_host(const char *url, char *out, size_t size) {
+    const char *host = strstr(url, "://");
+    host = host ? host + 3 : url;
+    size_t n = strcspn(host, "/");
+    if (n >= size) n = size - 1;
+    memcpy(out, host, n);
+    out[n] = '\0';
+}
+
+static void draw_info(void) {
+    draw_band(INFO_Y, INFO_H);
+
+    const struct https_info *tls = https_last();
+    char value[96];
+
+    url_host(catalog_url(), value, sizeof(value));
+    info_row(INFO_Y + 34, "Catalog", value);
+
+    if (tls->cipher[0]) {
+        char cipher[48];
+        tidy_cipher(tls->cipher, cipher, sizeof(cipher));
+        snprintf(value, sizeof(value), "TLS 1.3  %s  %s", cipher, tls->group);
+    } else {
+        snprintf(value, sizeof(value), "not connected");
+    }
+    info_row(INFO_Y + 56, "Connection", value);
+
+    snprintf(value, sizeof(value), "%u ms", tls->handshake_ms);
+    info_row(INFO_Y + 78, "Handshake", value);
+
+    snprintf(value, sizeof(value), "%d bits", entropy_bits());
+    info_row(INFO_Y + 100, "Entropy", value);
+
+    int installed = 0;
+    if (g_catalog)
+        for (int i = 0; i < g_catalog->count; i++)
+            if (g_catalog->apps[i].state != APP_NOT_INSTALLED) installed++;
+    snprintf(value, sizeof(value), "%d", installed);
+    info_row(INFO_Y + 122, "Installed", value);
+
+    snprintf(value, sizeof(value), "%u KB",
+             (unsigned)sceKernelTotalFreeMemSize() / 1024);
+    info_row(INFO_Y + 144, "Free", value);
+
+    /* The one thing the panel does rather than says, held off from the facts
+       above it by a line of the same kind as the band's own. */
+    band_rule(INFO_Y + 158, 160, 120);
+    const char *action = "Discard entropy and sweep again";
+    float x = SCR_W / 2 - hint_width(action) / 2;
+    float base = INFO_Y + INFO_H - 14;
+    draw_mark(MARK_CROSS, x + MARK_W / 2.0f, base - 4, g_accent);
+    font_print(FONT_META, x + MARK_W + 4, base, g_accent, action);
+}
+
+/* ---------------------------------------------------------------- footer */
 
 static void draw_footer(void) {
     gfx_vgrad(0, FOOTER_Y + 1, SCR_W, SCR_H - FOOTER_Y - 1, RGBA(0, 0, 0, 110),
               RGBA(0, 0, 0, 190));
+    /* A band carries its own buttons, so the strip under it stays quiet. */
+    if (g_ask_title[0] || g_menu_count || g_installing) return;
+    if (g_info) {
+        font_print(FONT_META, LIST_X, FOOTER_Y + 15, g_dim,
+                   "START or O close");
+        return;
+    }
     if (g_catalog && g_catalog->count <= 0 && g_status[0]) return;   /* said in the middle */
     if (g_status[0]) {
         font_print_clipped(FONT_META, LIST_X, FOOTER_Y + 15, SCR_W - 2 * LIST_X,
@@ -543,15 +793,14 @@ static void draw_footer(void) {
     }
     /* The keys, and only the keys that do anything: the triggers are worth
        naming once there is a second tab to reach with them. */
-    static char keys[96];
-    static int said_tabs = -1;
-    if (g_tabs != said_tabs) {
-        said_tabs = g_tabs;
-        snprintf(keys, sizeof(keys), "X install   %sSELECT refresh   HOME quit",
-                 g_tabs > 1 ? "L R category   " : "");
-    }
-    font_print(FONT_META, LIST_X, FOOTER_Y + 15, g_dim,
-               g_installing ? "installing, do not turn off" : keys);
+    int installed = g_catalog && shell_view_count() > 0 &&
+                    g_catalog->apps[shell_view_index(g_cursor)].state != APP_NOT_INSTALLED;
+    float x = draw_hint(LIST_X, FOOTER_Y + 15, MARK_CROSS,
+                        installed ? "options" : "install", g_dim);
+    if (installed) x = draw_hint(x, FOOTER_Y + 15, MARK_SQUARE, "remove", g_dim);
+    font_print(FONT_META, x, FOOTER_Y + 15, g_dim,
+               g_tabs > 1 ? "L R category   SELECT refresh   START info   HOME quit"
+                          : "SELECT refresh   START info   HOME quit");
 }
 
 /* ------------------------------------------------------------------ frame */
@@ -607,7 +856,10 @@ void shell_draw(const struct catalog *catalog, int cursor) {
     } else {
         font_print(FONT_BODY, LIST_X, 120, g_dim, "The catalog came back empty.");
     }
+    if (g_info) draw_info();
+    if (g_menu_count) draw_menu();
     if (g_installing) draw_install();
+    if (g_ask_title[0]) draw_ask();
     draw_footer();
     if (g_fade > 0) {
         gfx_rect(0, 0, SCR_W, SCR_H, RGBA(0, 0, 0, g_fade));
@@ -659,6 +911,32 @@ void shell_word(const char *word) {
 
 void shell_status(const char *text) {
     snprintf(g_status, sizeof(g_status), "%s", text ? text : "");
+}
+
+void shell_ask(const char *title, const char *line) {
+    snprintf(g_ask_title, sizeof(g_ask_title), "%s", title ? title : "");
+    snprintf(g_ask_line, sizeof(g_ask_line), "%s", line ? line : "");
+    /* The last install's result has been overtaken by a new question. */
+    if (g_ask_title[0]) g_status[0] = '\0';
+}
+
+void shell_menu(const char *title, const char *const *items,
+                const unsigned char *takeable, int count, int cursor) {
+    if (count > MENU_MAX) count = MENU_MAX;
+    if (count < 0) count = 0;
+    g_menu_count = count;
+    g_menu_cursor = cursor;
+    if (!count) return;
+    snprintf(g_menu_title, sizeof(g_menu_title), "%s", title ? title : "");
+    for (int i = 0; i < count; i++) {
+        snprintf(g_menu_item[i], sizeof(g_menu_item[i]), "%s", items[i] ? items[i] : "");
+        g_menu_on[i] = takeable ? takeable[i] : 1;
+    }
+    g_status[0] = '\0';
+}
+
+void shell_info(int open) {
+    g_info = open;
 }
 
 /* ---------------------------------------------------------------- install */

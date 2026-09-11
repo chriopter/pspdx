@@ -39,6 +39,14 @@ struct installed {
 
 int db_read(const char *id, struct installed *out);
 
+/* Removes PSP/GAME/<dir> and forgets the record, in that order: a directory
+   left behind with no record would be offered as uninstalled and written over,
+   while a record with no directory only costs one line in the database. The
+   directory comes from the record and is refused unless it is a plain name --
+   nothing here may be talked into deleting a path of someone else's choosing.
+   Returns 0 when the package is gone. */
+int uninstall(const char *id);
+
 typedef void (*install_phase_cb)(void *ctx, const char *phase);
 
 /* expect_id, when given, is the id the catalog promised: a manifest that

@@ -59,6 +59,12 @@ const char *https_phase(void) { return g_phase; }
 
 void https_prefer(const char *suites) { g_suites = suites ? suites : DEFAULT_SUITES; }
 
+/* What the last handshake settled on. Written by whichever thread made it and
+   read by the one that draws: four short strings that are replaced whole, so
+   the worst a reader can see is the previous connection's. */
+static struct https_info g_last;
+const struct https_info *https_last(void) { return &g_last; }
+
 /* ------------------------------------------------------------------- net */
 
 static struct {
@@ -461,8 +467,15 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
     res->handshake_ms = now_ms() - start;
     {
         const char *group = wolfSSL_get_curve_name(ssl);
-        logline("%s %s %s %u ms", u->host, wolfSSL_get_cipher(ssl),
+        const char *cipher = wolfSSL_get_cipher(ssl);
+        logline("%s %s %s %u ms", u->host, cipher,
                 group ? group : "?", res->handshake_ms);
+        /* The same four facts the log gets, kept for the info panel: what
+           was negotiated is only knowable here, while the session is open. */
+        snprintf(g_last.host, sizeof(g_last.host), "%s", u->host);
+        snprintf(g_last.cipher, sizeof(g_last.cipher), "%s", cipher ? cipher : "?");
+        snprintf(g_last.group, sizeof(g_last.group), "%s", group ? group : "?");
+        g_last.handshake_ms = res->handshake_ms;
     }
 
     phase("request");

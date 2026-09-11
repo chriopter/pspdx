@@ -430,6 +430,34 @@ int db_read(const char *id, struct installed *out) {
     return ok ? 0 : -1;
 }
 
+int uninstall(const char *id) {
+    struct installed rec;
+    if (!manifest_id_is_safe(id)) { logline("uninstall: unusable id"); return -1; }
+    if (db_read(id, &rec) < 0) { logline("uninstall: no record for %s", id); return -2; }
+    /* The record is a file on a stick anyone can edit, and what follows is a
+       recursive delete: only a plain directory name under PSP/GAME is ever
+       acted on, never a path. */
+    if (!rec.dir[0] || strpbrk(rec.dir, "/\\:") || strstr(rec.dir, "..") ||
+        strcmp(rec.dir, ".") == 0) {
+        logline("uninstall: %s names no directory of its own", id);
+        return -3;
+    }
+
+    char dest[128], record[256];
+    snprintf(dest, sizeof(dest), GAME_DIR "/%s", rec.dir);
+    snprintf(record, sizeof(record), DB_DIR "/%s.json", id);
+    /* A directory that was already gone by hand is not a failure: the record
+       is what makes the client think the package is there. */
+    SceUID probe = sceIoDopen(dest);
+    if (probe >= 0) {
+        sceIoDclose(probe);
+        if (rm_rf(dest) < 0) { logline("uninstall: %s did not go", dest); return -4; }
+    }
+    if (sceIoRemove(record) < 0) { logline("uninstall: record %s stayed", id); return -5; }
+    logline("uninstalled %s -> PSP/GAME/%s gone", id, rec.dir);
+    return 0;
+}
+
 /* --------------------------------------------------------------- install */
 
 /* Finishes an install that the battery interrupted between the two renames.

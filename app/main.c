@@ -94,11 +94,14 @@ static void screenshot_settled(int cursor, const char *path) {
     gfx_screenshot(path);
 }
 
-/* row is a row of the shell's view, which is the catalog filtered to the
-   active tab; the catalog index behind it is only needed in here. */
-static int install_app(int row, int screenshot) {
-    int index = shell_view_index(row);
-    if (index < 0) return -1;
+/* index is a catalog index; the row of the shell's view it sits on -- the
+   catalog filtered to the active tab -- is what the frames drawn around
+   the install show, and the entry is on the active tab, since that is
+   where it was chosen. */
+static int install_app(int index, int screenshot) {
+    if (index < 0 || index >= catalog.count) return -1;
+    int row = shell_view_row(index);
+    if (row < 0) row = 0;
     struct app_entry *entry = &catalog.apps[index];
     struct install_report report;
 
@@ -144,6 +147,138 @@ static int install_app(int row, int screenshot) {
     return rc;
 }
 
+static void uninstall_app(int index) {
+    struct app_entry *entry = &catalog.apps[index];
+    char message[96];
+
+    cues_post(CUE_OPEN, 0);
+    int rc = uninstall(entry->id);
+    if (rc == 0) {
+        /* The catalog entry is what the browser reads; the record it was
+           built from has just stopped existing. */
+        entry->state = APP_NOT_INSTALLED;
+        entry->local_rev = 0;
+        entry->local_version[0] = '\0';
+        snprintf(message, sizeof(message), "Removed %s", entry->name);
+    } else {
+        snprintf(message, sizeof(message), "Remove failed (%d): %s",
+                 rc, log_at(log_count() - 1));
+    }
+    logline("%s", message);
+    shell_status(message);
+    cues_post(rc == 0 ? CUE_DONE : CUE_FAIL, 0);
+}
+
+/* --------------------------------------------------------------- questions */
+
+/* Nothing that writes to the stick starts on one press any more. The shell
+   draws the question and the footer that answers it; the answer arrives
+   through the pad, which is read down in the loop, so the two halves meet
+   in these two variables and nowhere else. */
+enum question { ASK_NOTHING, ASK_INSTALL, ASK_REMOVE };
+static enum question g_question;
+static int g_question_of;
+
+static void ask_install(int index) {
+    const struct app_entry *entry = &catalog.apps[index];
+    const char *version = entry->remote_version[0] ? entry->remote_version
+                                                   : entry->release.version;
+    char title[64], line[96];
+    if (entry->state == APP_UPDATE)
+        snprintf(title, sizeof(title), "Update %s to %s?", entry->name, version);
+    else
+        snprintf(title, sizeof(title), "Install %s %s?", entry->name, version);
+    if (entry->has_release && entry->release.size) {
+        /* Tenths: whole megabytes call everything under one of them nothing,
+           and a count of bytes is not a size anybody reads. */
+        unsigned long long size = entry->release.size;
+        snprintf(line, sizeof(line), "%lu.%lu MB to download",
+                 (unsigned long)(size >> 20), (unsigned long)((size * 10 >> 20) % 10));
+    } else {
+        snprintf(line, sizeof(line), "size known once the manifest is read");
+    }
+    shell_ask(title, line);
+    g_question = ASK_INSTALL;
+    g_question_of = index;
+}
+
+static void ask_remove(int index) {
+    const struct app_entry *entry = &catalog.apps[index];
+    struct installed record;
+    if (db_read(entry->id, &record) < 0 || !record.dir[0]) {
+        /* Without a record there is no directory to name, and nothing here
+           guesses at one. */
+        shell_status("no record of where that was installed");
+        return;
+    }
+    char title[64], line[96];
+    snprintf(title, sizeof(title), "Remove %s?", entry->name);
+    snprintf(line, sizeof(line), "This deletes PSP/GAME/%s", record.dir);
+    shell_ask(title, line);
+    g_question = ASK_REMOVE;
+    g_question_of = index;
+}
+
+static void ask_forget(void) {
+    g_question = ASK_NOTHING;
+    shell_ask(NULL, NULL);
+}
+
+/* ------------------------------------------------------------------- menu */
+
+/* An installed package has more than one thing that can be done to it, so X
+   opens the short list of them rather than a yes/no. Exactly one of the two
+   ways of fetching it is ever available: the catalog carries the current
+   release and nothing else, so a package with an update waiting cannot be
+   reinstalled at the version it has, and one already current has nothing to
+   update to. The unavailable one stays on screen, greyed, because which of
+   the two is greyed is itself the answer to "is there an update". */
+enum choice { CHOICE_UPDATE, CHOICE_REINSTALL, CHOICE_DELETE, CHOICE_COUNT };
+
+static char g_choice_text[CHOICE_COUNT][32];
+static const char *g_choice[CHOICE_COUNT];
+static unsigned char g_choice_on[CHOICE_COUNT];
+static char g_menu_title[48];
+static int g_menu_open, g_menu_cursor, g_menu_of;
+
+static void menu_push(void) {
+    shell_menu(g_menu_title, g_choice, g_choice_on, CHOICE_COUNT, g_menu_cursor);
+}
+
+static void menu_open(int index) {
+    const struct app_entry *entry = &catalog.apps[index];
+    int update = entry->state == APP_UPDATE;
+    snprintf(g_menu_title, sizeof(g_menu_title), "%s", entry->name);
+    snprintf(g_choice_text[CHOICE_UPDATE], sizeof(g_choice_text[0]),
+             "Update to %s", entry->remote_version[0] ? entry->remote_version
+                                                      : entry->release.version);
+    snprintf(g_choice_text[CHOICE_REINSTALL], sizeof(g_choice_text[0]), "Reinstall");
+    snprintf(g_choice_text[CHOICE_DELETE], sizeof(g_choice_text[0]), "Delete");
+    for (int i = 0; i < CHOICE_COUNT; i++) g_choice[i] = g_choice_text[i];
+    g_choice_on[CHOICE_UPDATE] = update;
+    g_choice_on[CHOICE_REINSTALL] = !update;
+    g_choice_on[CHOICE_DELETE] = 1;
+    g_menu_cursor = update ? CHOICE_UPDATE : CHOICE_REINSTALL;
+    g_menu_of = index;
+    g_menu_open = 1;
+    menu_push();
+}
+
+static void menu_close(void) {
+    g_menu_open = 0;
+    shell_menu(NULL, NULL, NULL, 0, 0);
+}
+
+/* A greyed row is stepped over rather than landed on: the cursor only ever
+   sits where X would do something. */
+static void menu_move(int by) {
+    for (int i = 0; i < CHOICE_COUNT; i++) {
+        g_menu_cursor = (g_menu_cursor + by + CHOICE_COUNT) % CHOICE_COUNT;
+        if (g_choice_on[g_menu_cursor]) break;
+    }
+    menu_push();
+}
+
 static int auto_install_index(void) {
     char id[96];
     int fd = sceIoOpen("ms0:/PSPDX.INSTALL", PSP_O_RDONLY, 0777);
@@ -186,6 +321,7 @@ static unsigned button_named(const char *name) {
     if (strcmp(name, "ltrigger") == 0) return PSP_CTRL_LTRIGGER;
     if (strcmp(name, "rtrigger") == 0) return PSP_CTRL_RTRIGGER;
     if (strcmp(name, "select") == 0) return PSP_CTRL_SELECT;
+    if (strcmp(name, "start") == 0) return PSP_CTRL_START;
     return 0;
 }
 
@@ -287,6 +423,7 @@ int main(void) {
     int refreshing = 0;                 /* SELECT, with the list already up */
     char keep[96] = "";                 /* the entry to come back to after one */
     int automatic = -1;
+    int info = 0;                       /* the info panel, over the dimmed list */
     unsigned shell_since = now_ms();
     int shot_connecting = 0;
     unsigned dumped_ms = now_ms();
@@ -375,10 +512,10 @@ int main(void) {
                 screenshot_settled(cursor, "ms0:/PSPDX.BMP");
                 dump_diagnostics();
                 automatic = catalog.count > 0 ? auto_install_index() : -1;
-                if (automatic >= 0) automatic = shell_view_row(automatic);
                 if (automatic >= 0) {
-                    cursor = automatic;
-                    install_app(cursor, 1);
+                    cursor = shell_view_row(automatic);
+                    if (cursor < 0) cursor = 0;
+                    install_app(automatic, 1);
                     dump_diagnostics();
                 }
                 keys_load();
@@ -418,18 +555,70 @@ int main(void) {
             count = shell_view_count();
         }
 
+        /* With something standing over the browser, the list stays where it
+           is: a question that scrolls out from under its answer is a trap,
+           and up and down belong to the menu while one is open. */
+        int modal = g_question != ASK_NOTHING || g_menu_open || info;
         /* The list is a ring: past the last entry comes the first. */
-        if ((pressed & PSP_CTRL_DOWN) && count > 0)
+        if ((pressed & PSP_CTRL_DOWN) && count > 0 && !modal)
             cues_post(CUE_MOVE, cursor = (cursor + 1) % count);
-        if ((pressed & PSP_CTRL_UP) && count > 0)
+        if ((pressed & PSP_CTRL_UP) && count > 0 && !modal)
             cues_post(CUE_MOVE, cursor = (cursor + count - 1) % count);
         if (pressed & KEY_SHOT) {
             screenshot_settled(cursor, "ms0:/PSPDX1.BMP");
             logline("shot: PSPDX1.BMP at cursor %d", cursor);
         }
-        if ((pressed & PSP_CTRL_CROSS) && count > 0) {
-            install_app(cursor, 0);
-            dump_diagnostics();
+
+        if (g_question != ASK_NOTHING) {
+            /* The answer, and only then the thing that was asked about. */
+            if (pressed & PSP_CTRL_CROSS) {
+                enum question asked = g_question;
+                int index = g_question_of;
+                ask_forget();
+                if (asked == ASK_INSTALL) install_app(index, 0);
+                else uninstall_app(index);
+                dump_diagnostics();
+            } else if (pressed & PSP_CTRL_CIRCLE) {
+                ask_forget();
+                shell_status("");
+            }
+        } else if (g_menu_open) {
+            if (pressed & PSP_CTRL_DOWN) { menu_move(1); cues_post(CUE_MOVE, 0); }
+            if (pressed & PSP_CTRL_UP) { menu_move(-1); cues_post(CUE_MOVE, 0); }
+            if (pressed & PSP_CTRL_CIRCLE) menu_close();
+            else if (pressed & PSP_CTRL_CROSS) {
+                int chosen = g_menu_cursor, index = g_menu_of;
+                menu_close();
+                /* Deleting is the one of the three that cannot be undone by
+                   pressing the same button again, so it is asked about. */
+                if (chosen == CHOICE_DELETE) ask_remove(index);
+                else { install_app(index, 0); dump_diagnostics(); }
+            }
+        } else if (info) {
+            if (pressed & (PSP_CTRL_START | PSP_CTRL_CIRCLE))
+                shell_info(info = 0);
+            else if (pressed & PSP_CTRL_CROSS) {
+                /* The band's one action. The field drains and is swept
+                   again, and the browser comes back without the band. */
+                shell_info(info = 0);
+                entropy_forget();
+                entropy_init();
+                entropy_screen_run();
+                entropy_save(entropy_screen_is_replay());
+            }
+        } else if (pressed & PSP_CTRL_START) {
+            shell_info(info = 1);
+        } else if (count > 0) {
+            int at = shell_view_index(cursor);
+            if ((pressed & PSP_CTRL_CROSS) && at >= 0) {
+                if (catalog.apps[at].state == APP_NOT_INSTALLED)
+                    ask_install(at);
+                else
+                    menu_open(at);
+            }
+            if ((pressed & PSP_CTRL_SQUARE) && at >= 0 &&
+                catalog.apps[at].state != APP_NOT_INSTALLED)
+                ask_remove(at);
         } else if ((pressed & PSP_CTRL_CROSS) && sync_state() == SYNC_FAILED) {
             /* Once more from the top: the wait comes back with its word,
                and the frames below carry on as they did the first time. */
