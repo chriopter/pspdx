@@ -854,10 +854,18 @@ int main(int argc, char *argv[]) {
                     }
                 } else if (action == 1) {
                     /* The field drains and is swept again, in the room the
-                       browser was already standing in. */
-                    entropy_forget();
+                       browser was already standing in. The old pool is set
+                       aside rather than thrown away until the new one is
+                       made: a sweep takes half a minute of stick work and
+                       this one is two presses from the list, so it has to be
+                       possible to leave -- and leaving may not hand the rest
+                       of the session a pool of nothing to make its keys
+                       from. O puts the old field back, and either way the
+                       session leaves with a seed written from whichever
+                       pool it ended up with. */
+                    entropy_stash();
                     entropy_init();
-                    entropy_screen_run();
+                    if (entropy_screen_run() == 0) entropy_restore();
                     entropy_save(entropy_screen_is_replay());
                 }
             }

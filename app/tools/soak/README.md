@@ -9,6 +9,7 @@ against what the same errand was predicted to leave on the stick.
 ```sh
 python3 app/tools/soak/run.py --runs 100 --seed 1    # the campaign
 python3 app/tools/soak/run.py --perf 20              # twenty stress runs
+python3 app/tools/soak/run.py --edge 30              # the thirty edge cases
 ```
 
 Both build the client against the loopback catalog first, serve that catalog,
@@ -23,13 +24,14 @@ looks:
 mkdir -p app/wolfssl-psp && cp -r ../pspdx/app/wolfssl-psp/prefix app/wolfssl-psp/
 ```
 
-## The four files
+## The five files
 
 | | |
 |---|---|
 | `scenarios.py` | the customers: nine weighted profiles, seeded, so run 47 of seed 1 is always the same person |
 | `model.py` | `main.c`'s input loop and `shell.c`'s view again in Python: what the cursor does, what the tabs do, and which records the run should leave |
 | `run.py` | plants the state, writes the keys, runs the rig, reads the log while it is being written, and checks five things |
+| `edge.py` | the thirty edge cases: what to plant, which keys, and the oracle for each |
 | `rig.sh` | the parts that want `tools/localcat/common.sh`: the throwaway CA, the two builds, the mock site and its server |
 
 `python3 app/tools/soak/scenarios.py --seed 1 --run 7` prints one script and
@@ -88,6 +90,93 @@ it on its own with
 python3 app/tools/soak/run.py --runs 1 --seed 1 --from 47
 ```
 
+## Edge cases
+
+```sh
+python3 app/tools/soak/run.py --edge 30
+python3 app/tools/soak/run.py --edge 1 --only zip-deep-eboot
+```
+
+The soak says what the client does when nothing goes wrong. `edge.py` is the
+other half: thirty named scenarios, each one a thing that can go wrong, each
+with its own oracle. They are deterministic — no run is drawn at random — and
+they take about eighty minutes together.
+
+A scenario is a function returning what to plant, which keys to play, how
+long to leave the emulator up, and what has to be true afterwards. Where the
+client cannot do the damage itself the harness does it: `tools/localcat/serve.py`
+reads a `faults.json` beside the site directory before every request and will
+answer 404 or 500, cut a body short under a `Content-Length` that promised
+more, or go quiet for twenty seconds in the middle of one; the mock server is
+stopped and started under a running emulator from a per-scenario timeline;
+and a storm of four hundred presses at fifty milliseconds goes through
+PPSSPP's debugger, because `PSPDX.KEYS` holds 256 lines in four kilobytes.
+
+| | what it does |
+|---|---|
+| `storm-mixed-keys` | 20 s of nine buttons 40–60 ms apart, through the debugger |
+| `storm-confirm-band` | the install question opened and cancelled thirty times |
+| `storm-bands` | the options menu and the info band, thirty open-and-close each |
+| `storm-refresh-five` | five catalog refetches back to back |
+| `storm-refresh-basket` | a refetch with five in the basket |
+| `bulk-basket-thirty` | all thirty in the basket, Download all |
+| `bulk-update-all` | every update waiting, in one press |
+| `bulk-remove-twenty` | all twenty installed removed one at a time |
+| `bulk-install-remove-install` | thirty in, thirty out, thirty in again |
+| `net-server-killed` | the server stopped mid-run and started again |
+| `net-404-and-500` | a release that answers 404 and one that answers 500 |
+| `net-truncated-body` | a body cut short under its own Content-Length |
+| `net-wrong-sha256` | bytes that do not hash to what the catalog said |
+| `net-stall-then-resume` | a download quiet for 22 s, under the 30 s timeout |
+| `net-offline-at-start` | nothing listening at boot, X to retry, then the catalog |
+| `net-catalog-truncated` | the catalog itself cut off mid-body |
+| `net-slow-link` | 60 KB/s and a hand on the pad throughout |
+| `zip-no-eboot-and-two-eboots` | no EBOOT.PBP, and two at the same depth |
+| `zip-path-escapes` | entries called `../../evil` and `/PSP/GAME/evil` |
+| `zip-header-lies` | central directory against local header, and a body that is not a zip |
+| `zip-stored-and-empty-file` | method 0, a zero-byte file, a subdirectory |
+| `zip-two-thousand-files` | 2000 tiny files in one archive |
+| `zip-deep-eboot` | the EBOOT four directories down |
+| `catalog-bad-entries` | six unusable entries among the thirty |
+| `catalog-hostile-strings` | a 200-character name, a 300-character summary, a 40-character version, a duplicated id, three assets that 404 |
+| `catalog-seventy-apps` | seventy entries against `MAX_APPS` 64 |
+| `stick-broken-records` | garbage, half a JSON document, a record with no directory, a directory with no record |
+| `stick-interrupted-install` | a leftover staging tree and two `.old` directories |
+| `stick-orphan-and-self-record` | a record for an id the catalog does not have, and a self record with the wrong version |
+| `idle-six-minutes` | six minutes of browsing at reading speed, films looping |
+
+Every scenario is judged on its own oracle *and* on five things it does not
+have to ask for:
+
+- the log is this run's, and the client started once;
+- the loop was still drawing at the end — a `frames:` line after the shot and
+  within reach of when the emulator was stopped;
+- the script's last two keys, a `down` and a `shot`, reached it, and
+  `PSPDX1.BMP` is on the stick: the client is still usable after whatever was
+  done to it;
+- no line says `failed`, `refusing`, `MISMATCH` or `cannot` unless the
+  scenario named what it broke;
+- the stick is whole: every record has the directory it names, every
+  `PSPDXMock*` directory has a record, and there is no `.pspdx-stage` or
+  `<dir>.old` left behind.
+
+`results/edge-<name>.json` is written for every scenario; a failed one also
+leaves `results/edge-<name>/` with its keys, its stitched log and its
+screenshots. The table at the end lists all thirty with their worst frame and
+their verdict.
+
+The first full campaign found one thing, and `storm-mixed-keys` found it:
+SELECT, down, X is the info band's second row, "sweep the field again", and
+`entropy_screen_run()` only ended when the pool was full *and* X was pressed.
+With no hand on the analog stick the bar never moves, so two presses from the
+list put the console in a screen with no way out -- the main loop stopped,
+the log stopped with it, and nothing the key file pressed afterwards was ever
+read, because the sweep reads the pad itself. O now leaves that sweep and the
+pool it was replacing is put back (`entropy_stash` / `entropy_restore`), so
+walking out of it costs the session nothing. The first sweep of a run, which
+has no pool behind it, is not offered the way out and still has to be
+finished.
+
 ## Two things about this desk
 
 **The log is a ring of forty lines.** `util/runtime.c` keeps the last forty
@@ -109,9 +198,11 @@ before its own last key is thrown away and started again with a longer
 estimate.
 
 **One emulator at a time.** The memory stick is one directory and everything
-on this desk writes the same `PSPDX.LOG`. Each run stops the `pspdx-ppsspp`
-unit and any emulator running `PSP/GAME/pspdx/EBOOT.PBP` — which is what
-`dev/start` does, and for the same reason — and waits for anybody else's.
+on this desk writes the same `PSPDX.LOG`. A run waits until no emulator is
+up at all and ends nothing it did not start: a session somebody opened by
+hand is theirs to close, and the rig says it is waiting rather than taking
+the desk. Each run's own emulator is stopped by its own `run-ppsspp.sh` when
+its seconds are up.
 A run whose log turns out not to be its own is retried rather than reported.
 The soak serves its catalog on port 8444 as `pspdx-soak-server`, so
 `dev/start --mock` and its `pspdx-mock-server` on 8443 are left alone.

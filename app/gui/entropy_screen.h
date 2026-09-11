@@ -3,7 +3,8 @@
 
 /* The sweep, drawn in the browser's own world: the field starts dry and the
    stick carries a source of water over it. Needs gfx and the font up first.
-   Returns the bits in the pool when it is done. */
+   Returns the bits in the pool when it is done, or 0 when it was left with
+   O -- which only a sweep with a pool set aside behind it offers. */
 
 void entropy_screen_prepare(void);
 int entropy_screen_is_replay(void);

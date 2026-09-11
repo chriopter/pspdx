@@ -6,8 +6,15 @@
 //
 // The program is a JSON array of
 //   { "op": "hold",   "button": "down", "frames": 300 }
+//   { "op": "tap",    "button": "cross", "ms": 50 }
 //   { "op": "analog", "x": -0.8, "y": 0.3, "ms": 250 }
 //   { "op": "wait",   "ms": 400 }
+//
+// A tap is the other thing a key file cannot do: PSPDX.KEYS holds 256 lines
+// in four kilobytes, and twenty seconds of a thumb going at fifty
+// milliseconds is four hundred presses. It is a press of a few frames
+// followed by a wait of that many milliseconds of *this* clock, so the storm
+// is timed in the host's milliseconds, as the scenario describes it.
 //
 // This PPSSPP build aborts when the debugger socket is closed under it, so
 // the process stays connected after the program has run and exits when the
@@ -50,6 +57,14 @@ ws.onopen = async () => {
       // the wait for a hold to finish is stretched the same way run.py
       // stretches a key file's schedule.
       await sleep(step.frames * 1000 / 60 * 1.9 + 200);
+      continue;
+    }
+    if (step.op === "tap") {
+      // Three frames: one is a frame the guest can drop while it is inside a
+      // draw, and a press nobody sees is not a key storm.
+      ws.send(JSON.stringify({ event: "input.buttons.press",
+                               button: step.button, duration: step.frames || 3 }));
+      await sleep(step.ms);
       continue;
     }
     if (step.op === "analog") {

@@ -140,6 +140,36 @@ void entropy_save(int replaying) {
     pool_unlock();
 }
 
+/* The browser's own re-sweep, which the first sweep of a run is not: there is
+   a full pool already, and the screen it opens cannot be finished in under
+   half a minute of stick work. Somebody who opens it by accident -- it is one
+   row of the info band -- has to be able to leave, and leaving may not hand
+   the session a pool of nothing to make its keys from. So the old field is
+   set aside rather than destroyed, and put back if the sweep is abandoned.
+   The seed on the stick still goes at once, as it always did: somebody asking
+   for this wants that file gone, and whichever pool the session ends with
+   writes a new one on the way out. */
+static unsigned char stash[POOL_BYTES];
+static int stash_bits = -1;
+
+void entropy_stash(void) {
+    pool_lock();
+    memcpy(stash, pool, POOL_BYTES);
+    stash_bits = pool_bits;
+    pool_unlock();
+    entropy_forget();
+}
+
+int entropy_stashed(void) { return stash_bits >= 0; }
+
+void entropy_restore(void) {
+    pool_lock();
+    memcpy(pool, stash, POOL_BYTES);
+    pool_bits = stash_bits;
+    pool_unlock();
+    stash_bits = -1;
+}
+
 void entropy_forget(void) {
     pool_lock();
     /* Inside the lock, or an automatic save from the network thread lands

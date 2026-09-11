@@ -47,6 +47,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
+import edge                                             # noqa: E402
 import model                                            # noqa: E402
 import scenarios                                        # noqa: E402
 
@@ -713,6 +714,279 @@ def perf_run(paths, world, seed, run, lock):
     return result
 
 
+# ------------------------------------------------------------------- edge
+
+# The same list as BAD, but a scenario that breaks something on purpose says
+# in its `expect` which of these lines it broke, and only those are allowed.
+EDGE_BAD = BAD
+
+# What a run may begin with. install_recover() and record_self() both run
+# before the shell and both have something to say when the stick was left in
+# an odd state, so the first line of an edge run is not always font:.
+EDGE_FIRST = ("font:", "ripple:", "recovered:", "self:", "db:")
+
+
+def edge_invariants(rep, world):
+    """What has to hold after any run whatever the scenario did: every
+    record of the mock's has the directory it names, every directory of the
+    mock's is remembered by a record, and nothing is half-installed."""
+    fails = []
+    prefix, dir_prefix = world["id_prefix"], world["dir_prefix"]
+    claimed = set()
+    for app_id, record in rep.records.items():
+        if not app_id.startswith(prefix):
+            continue
+        if "unreadable" in record:
+            fails.append("%s is not readable JSON" % app_id)
+            continue
+        name = record.get("dir", "")
+        claimed.add(name)
+        if name and name not in rep.dirs:
+            fails.append("%s says PSP/GAME/%s, which is not there"
+                         % (app_id, name))
+    for name in rep.dirs:
+        if name.startswith(dir_prefix) and name not in claimed:
+            fails.append("PSP/GAME/%s has no record" % name)
+    if ".pspdx-stage" in rep.dirs:
+        fails.append("PSP/GAME/.pspdx-stage was left behind")
+    for name in rep.dirs:
+        if name.endswith(".old"):
+            fails.append("PSP/GAME/%s was left behind" % name)
+    return fails
+
+
+def edge_catalog_up(ms, began, timeout=120):
+    """When the client got as far as its first screenshot, which is the
+    moment the key script's clock starts and the moment a timeline counts
+    from. PSPDX.BMP is written whether the catalog came or the client gave
+    up on it, so the offline scenarios have this too."""
+    path = os.path.join(ms, "PSPDX.BMP")
+    while time.time() - began < timeout:
+        if os.path.exists(path):
+            return time.time()
+        time.sleep(0.3)
+    return time.time()
+
+
+def edge_check(sc, result, tail, rep, ms, began_at, ended_at, keys, world):
+    fails = []
+    lines = rep.lines
+
+    # The soak's runs always start at font:/ripple:, the shell's first two
+    # lines. An edge case can start earlier than the shell: install_recover()
+    # and record_self() run before it and say what they settled, and those
+    # are the two scenarios where that is the point.
+    first = tail.first_snapshot or []
+    if not first or not first[0].startswith(EDGE_FIRST):
+        fails.append("a: the log did not start at one of %r -- the first "
+                     "line was %r" % (EDGE_FIRST, first[:1]))
+    if not any(t.startswith("font:") for t in lines):
+        fails.append("a: no font: line: the shell never came up")
+    if len([t for t in lines if t.startswith("font:")]) > 1:
+        fails.append("a: the client started more than once in one run; "
+                     "another emulator is writing this stick")
+    scripted = [t for t in lines if t.startswith("keys: ")]
+    if not scripted:
+        fails.append("a: the client never loaded a key script")
+    elif scripted[0] != "keys: %d scripted" % len(keys):
+        fails.append("a: the client loaded %r, not %d keys"
+                     % (scripted[0], len(keys)))
+    result["log_gaps"] = tail.gaps
+
+    for text in lines:
+        for bad in EDGE_BAD:
+            if bad in text and not any(ok in text for ok in sc.expect):
+                fails.append("b: %r" % text)
+                break
+
+    catalog_up = mtime(os.path.join(ms, "PSPDX.BMP"))
+    shot_at = mtime(os.path.join(ms, "PSPDX1.BMP"))
+    if shot_at is None:
+        fails.append("e: PSPDX1.BMP was not written; the final shot never "
+                     "happened and the loop was not proved alive")
+    elif shot_at < began_at:
+        fails.append("e: PSPDX1.BMP is older than this run")
+    if not rep.has("shot: PSPDX1.BMP"):
+        fails.append("e: no 'shot:' line: the script's last key never landed")
+    if catalog_up is None:
+        fails.append("a: PSPDX.BMP was not written; the client never got as "
+                     "far as its first screen")
+        catalog_up = began_at
+
+    # The guest against the host, for the liveness window. A scenario whose
+    # last key waits behind a long install measures far more than the soak's
+    # 1.9 and is clamped rather than failed: what it is used for here is one
+    # threshold, not a prediction.
+    slowdown = 1.0
+    if shot_at and catalog_up and keys and keys[-1][0] > 5000:
+        slowdown = max(0.7, min(5.0, (shot_at - catalog_up) /
+                                (keys[-1][0] / 1000.0)))
+    result["slowdown"] = round(slowdown, 2)
+
+    win = rep.windows
+    result["windows"] = len(win)
+    if not win:
+        fails.append("b: no frames: line at all -- the loop never ran ten "
+                     "seconds")
+    else:
+        gap = ended_at - win[-1]["at"]
+        result["silence_s"] = round(gap, 1)
+        if gap > max(25.0, 15.0 * slowdown):
+            fails.append("b: the last frames: line was %.0f s before the "
+                         "emulator was stopped; the loop stopped drawing" % gap)
+        if shot_at is not None and win[-1]["at"] < shot_at:
+            fails.append("b: nothing was logged after the shot -- the run was "
+                         "cut short, give it more tail")
+
+    if sc.invariants:
+        fails.extend("c: " + f for f in edge_invariants(rep, world))
+    fails.extend("o: " + f for f in sc.oracle(sc.ctx, rep))
+
+    result["worst_frame_ms"] = max([w["worst"] for w in win], default=0)
+    result["late_total"] = sum(w["late"] for w in win)
+    result["late_windows"] = [i for i, w in enumerate(win)
+                              if w["late"] and not w["busy"]]
+    return fails
+
+
+def edge_run(paths, world, sc, lock, stretch=SLOWDOWN):
+    """One edge case: plant it, play it, put the desk back, judge it."""
+    work, ms, _app = paths
+    keys = sc.script
+    keyfile = os.path.join(RESULTS, "edge-keys-%s.txt" % sc.name)
+    open(keyfile, "w").write(scenarios.render(keys))
+    progfile = None
+    if sc.driver:
+        progfile = os.path.join(RESULTS, "edge-prog-%s.json" % sc.name)
+        json.dump(sc.driver, open(progfile, "w"))
+
+    catalog_s = sc.catalog_s or CATALOG_S
+    stretch = sc.stretch or stretch
+    secs = catalog_s + keys[-1][0] / 1000.0 * stretch + TAIL_S + sc.extra_s
+    if sc.driver:
+        driver_ms = sum(p.get("ms", 0) + p.get("frames", 0) * 1000 // 60
+                        for p in sc.driver)
+        secs = max(secs, catalog_s + driver_ms / 1000.0 + TAIL_S)
+    for at, _what in sc.timeline:
+        secs = max(secs, catalog_s + at + 30)
+    secs = int(secs)
+
+    result = {"name": sc.name, "why": sc.why, "keys": len(keys),
+              "seconds": secs, "edge": True}
+    ctx = edge.Ctx(work, ms, _app, world)
+    sc.ctx = ctx
+    driver = None
+    fired = []
+    # A timeline action that is still sleeping when the emulator is stopped
+    # must not fire afterwards: it would leave a fault file or a stopped
+    # server behind for the next scenario to trip over.
+    over = threading.Event()
+
+    def timeline_thread(began):
+        """The host's half of the scenario: the server stopped or started
+        again, a fault lifted, the key storm begun -- all of it counted from
+        the moment the client had its first screen, which is the same moment
+        the key script starts."""
+        at_catalog = edge_catalog_up(ms, began)
+        result["catalog_after_s"] = round(at_catalog - began, 1)
+        nonlocal driver
+        if progfile:
+            driver = subprocess.Popen(["node", HOLD, progfile],
+                                      stdout=subprocess.PIPE,
+                                      stderr=subprocess.STDOUT, text=True)
+        for at, what in sorted(sc.timeline, key=lambda t: t[0]):
+            wait = at_catalog + at - time.time()
+            if wait > 0:
+                over.wait(wait)
+            if over.is_set():
+                fired.append("%s skipped: the run was already over" % at)
+                continue
+            try:
+                what(ctx)
+                fired.append(at)
+            except Exception as exc:                     # noqa: BLE001
+                fired.append("%s failed: %s" % (at, exc))
+
+    with lock:
+        wait_idle()
+        # mock-catalog asks the published catalog where the assets are on
+        # every plant, so one DNS hiccup on this desk would otherwise end a
+        # campaign an hour in. It is a hiccup: wait and ask again.
+        for attempt in range(3):
+            planted = subprocess.run(["sh", RIG, "plant"],
+                                     stdout=subprocess.DEVNULL)
+            if planted.returncode == 0:
+                break
+            print("        %s: the plant failed; the host's network, most "
+                  "likely -- waiting" % sc.name)
+            time.sleep(20)
+        else:
+            raise SystemExit("edge: three plants in a row failed")
+        edge.faults(ctx, [])            # whatever the last scenario broke
+        for step in sc.plant:
+            step(ctx)
+        for name in ("PSPDX.LOG", "PSPDX.BMP", "PSPDX1.BMP", "PSPDX2.BMP"):
+            try:
+                os.remove(os.path.join(ms, name))
+            except OSError:
+                pass
+        tail = LogTail(os.path.join(ms, "PSPDX.LOG"))
+        began_at = time.time()
+        proc = run_rig(secs, keyfile, sc.extra_args)
+        tail.start()
+        clock = threading.Thread(target=timeline_thread, args=(began_at,),
+                                 daemon=True)
+        clock.start()
+        proc.wait()
+        ended_at = time.time()
+        over.set()
+        clock.join(timeout=5)
+        if driver:
+            try:
+                driver.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                driver.kill()
+            out = (driver.stdout.read() or "").strip().splitlines()
+            # A refusal comes back as an "error" event; a debugger that was
+            # never reached at all says so and exits non-zero, and that is
+            # the storm not having happened rather than the client passing.
+            result["driver"] = [l for l in out if "error" in l.lower()][:4]
+            if driver.returncode not in (0, None) and not result["driver"]:
+                result["driver"] = ["hold.mjs exited %d: %s"
+                                    % (driver.returncode, out[-1] if out else "")]
+        tail.finish()
+        records, dirs = edge.snapshot(ms)
+        win = windows(tail.lines)
+        free_kb = [int(m.group(3)) for m in
+                   (OUTSIDE_RE.search(t) for _a, t in tail.lines) if m]
+        rep = edge.Report([t for _a, t in tail.lines], records, dirs, ms,
+                          win, free_kb)
+        result["timeline"] = fired
+        # The two numbers the long-idle oracle is about, kept for every run:
+        # a leak shows up as the second being smaller than the first, and it
+        # is worth having the figures on a run that passed as well.
+        result["free_kb_first"] = free_kb[0] if free_kb else 0
+        result["free_kb_last"] = free_kb[-1] if free_kb else 0
+        fails = edge_check(sc, result, tail, rep, ms, began_at, ended_at,
+                           keys, world)
+        # The desk back as it was found, whatever the verdict: the records
+        # and directories this scenario planted outside the mock's prefixes
+        # are the user's own two directories.
+        ctx.restore()
+        if fails:
+            result["kept"] = keep_evidence("edge-" + sc.name, ms, keyfile, tail)
+        else:
+            os.remove(keyfile)
+
+    if result.get("driver"):
+        fails.append("b: the debugger refused something: %s" % result["driver"][0])
+    result["ok"] = not fails
+    result["failures"] = fails
+    json.dump(result, open(os.path.join(RESULTS, "edge-%s.json" % sc.name), "w"),
+              indent=1)
+    return result
+
+
 # ------------------------------------------------------------------- main
 
 class Lock:
@@ -733,12 +1007,72 @@ def paths():
     return out[0], out[1], out[2]
 
 
+def edge_campaign(paths_, world, lock, args):
+    """The thirty edge cases, in order, with a table at the end. Each one
+    plants its own stick and its own site, so a scenario that fails does not
+    poison the next; the rebuild for the published catalog still happens
+    whatever goes wrong."""
+    all_scenarios = edge.build_all(world)
+    if args.only:
+        all_scenarios = [s for s in all_scenarios if args.only in s.name]
+    chosen = all_scenarios[args.start - 1:args.start - 1 + args.edge]
+    print("edge: %d scenarios, %d apps, %d installed to start"
+          % (len(chosen), len(world["apps"]), len(world["db"])))
+
+    results = []
+    try:
+        for i, sc in enumerate(chosen, args.start):
+            began = time.time()
+            stretch = SLOWDOWN
+            for _attempt in range(2):
+                r = edge_run(paths_, world, sc, lock, stretch)
+                again = [f for f in r["failures"]
+                         if f.startswith("a:") or "cut short" in f]
+                if r["ok"] or len(again) != len(r["failures"]):
+                    break
+                if any("cut short" in f for f in again):
+                    stretch = max(stretch, r.get("slowdown", stretch)) * 1.3
+                print("        %s: %s -- trying again" % (sc.name, again[0]))
+            r["wall_s"] = round(time.time() - began, 1)
+            results.append(r)
+            print("%3d  %-32s %3d keys %4ds  worst %4d ms  late %2d  %s"
+                  % (i, sc.name, r["keys"], r["seconds"], r["worst_frame_ms"],
+                     r["late_total"], "ok" if r["ok"] else "FAIL"))
+            for line in r["failures"]:
+                print("        %s" % line)
+    finally:
+        with lock:
+            subprocess.run(["sh", RIG, "stop"])
+            subprocess.run(["sh", RIG, "clean"])
+            if not args.keep_real:
+                subprocess.run(["sh", RIG, "build-real"])
+
+    bad = [r for r in results if not r["ok"]]
+    print("\n%-34s %6s %6s %6s %5s  %s"
+          % ("scenario", "keys", "wall", "worst", "late", "verdict"))
+    for r in results:
+        print("%-34s %6d %5.0fs %5dms %5d  %s"
+              % (r["name"], r["keys"], r["wall_s"], r["worst_frame_ms"],
+                 r["late_total"], "ok" if r["ok"] else "FAIL"))
+    print("\n%d scenarios, %d failed, %.0f s of emulator"
+          % (len(results), len(bad), sum(r["wall_s"] for r in results)))
+    for r in bad:
+        print("  %s: %s" % (r["name"], r["failures"][0]))
+        print("         kept under %s" % r.get("kept", "-"))
+    return 1 if bad else 0
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--runs", type=int, default=10)
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--perf", type=int, metavar="N",
                     help="N stress runs instead, through the debugger")
+    ap.add_argument("--edge", type=int, metavar="N", nargs="?", const=30,
+                    help="the first N of the thirty edge cases instead")
+    ap.add_argument("--only", metavar="TEXT",
+                    help="with --edge: only the scenarios whose name has "
+                         "TEXT in it")
     ap.add_argument("--from", dest="start", type=int, default=1)
     ap.add_argument("--no-build", action="store_true",
                     help="the EBOOT on the stick is already the mock build")
@@ -757,6 +1091,8 @@ def main():
 
     work, ms, _app = paths()
     world = model.load_world(os.path.join(work, "mock-site"))
+    if args.edge:
+        return edge_campaign((work, ms, _app), world, lock, args)
     total = args.perf if args.perf else args.runs
     kind = "perf" if args.perf else "soak"
     print("%s: %d runs, seed %d, %d apps, %d installed to start"

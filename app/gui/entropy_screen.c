@@ -152,6 +152,11 @@ static void draw_chrome(float t, int percent, int ready) {
 
     char right[48];
     if (ready) snprintf(right, sizeof(right), "%d bits   X to continue", entropy_bits());
+    else if (entropy_stashed())
+        /* The way out of a sweep the browser asked for, said where the way
+           on is said: an escape nobody is told about is not one. */
+        snprintf(right, sizeof(right), "%d%%   %d bits   O to leave",
+                 percent, entropy_bits());
     else snprintf(right, sizeof(right), "%d%%   %d bits", percent, entropy_bits());
     float w = font_width(FONT_META, right);
     font_print(FONT_META, SCR_W - 16 - w, 232, ready ? accent : dim, right);
@@ -162,7 +167,7 @@ int entropy_screen_run(void) {
     sceCtrlSetSamplingCycle(0);
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
 
-    int frame = 0;
+    int frame = 0, left = 0;
     unsigned worst_us = 0, frame_us = now_us();
     for (;;) {
         SceCtrlData pad;
@@ -214,10 +219,20 @@ int entropy_screen_run(void) {
         frame++;
         record_frame(frame);
         if (ready && (pad.Buttons & PSP_CTRL_CROSS)) break;
+        /* O leaves a sweep that has a pool behind it. Without this the only
+           way out of this loop is a full sweep: the bar cannot fill without
+           a hand on the stick, and a screen reached by two presses from the
+           browser would hold the console until the battery did. The first
+           sweep of a run has nothing to go back to and is not offered it. */
+        if (!ready && entropy_stashed() && (pad.Buttons & PSP_CTRL_CIRCLE)) {
+            left = 1;
+            break;
+        }
     }
 
     lattice_settle();
     trace_save();
-    logline("sweep: %d frames, worst %u ms", frame, worst_us / 1000);
-    return entropy_bits();
+    logline("sweep: %d frames, worst %u ms%s", frame, worst_us / 1000,
+            left ? ", left with O" : "");
+    return left ? 0 : entropy_bits();
 }
