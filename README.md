@@ -312,10 +312,11 @@ at the catalog a few seconds in; `--sweep` replays `app/testdata/sweep.trace`
 through the entropy screen instead. A replayed sweep never writes a seed,
 because replayed input is not entropy.
 
-That trace is one entry per frame, `{ u8 lx, u8 ly, u16 buttons }`: the
-first six seconds of `sweep-full.trace`, 1608 samples of a human actually
-moving the stick, cut just past the 128-bit mark with a press of X after it.
-The full one stays as what the bits-per-field rate was measured on. To replay it by hand instead,
+That trace is one entry per frame, `{ u8 lx, u8 ly, u16 buttons }`, and
+comes out of `app/tools/sweep-trace.py`: a hand drawn from `/dev/urandom`,
+heading by heading, until the screen's own rule has paid its 128 bits, then
+X, about six seconds of it. `sweep-full.trace` is 1608 samples of a human
+actually moving the stick and stays as what the rate was measured on. To replay it by hand instead,
 copy it to `PSPDX.TRACE` on the emulator's stick and touch `PSPDX.REPLAY` next
 to it; remove that file to go back to collecting. A replayed run says so on
 screen and never writes a seed: the path is public, so it is a development

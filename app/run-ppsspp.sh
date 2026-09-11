@@ -18,12 +18,12 @@
 # obviously not entropy; nothing from a rig run is fit to sign anything.
 #
 # --sweep replays testdata/sweep.trace through the entropy screen instead,
-# for working on that screen. That trace is the first six seconds of
-# sweep-full.trace, so the screen is over in six seconds; it was cut at the
-# 128-bit mark when a field alone earned a bit, and now that only a turn does
-# it ends with the bar a few bits along, which a replay may. The full one is
-# what the rate in logic/entropy.h was measured on. A replayed sweep never writes a seed -- the
-# client refuses, since replayed input is not entropy either -- so the next
+# for working on that screen. That trace is a hand drawn from /dev/urandom by
+# tools/sweep-trace.py: headings by lot until the screen has its 128 bits,
+# then X, so the screen is over in about six seconds. sweep-full.trace is a
+# human at the stick and what the rate in logic/entropy.h was measured on.
+# A replayed sweep never writes a seed -- the client refuses, since replayed
+# input is not entropy either -- so the next
 # default run seeds itself again.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
