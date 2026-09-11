@@ -8,6 +8,18 @@
 #   dev/start --no-build
 #   dev/start --quiet    no speakers: the emulator gets no audio socket
 #   dev/start --slow     the network held to a PSP-1004's 180 KB/s (802.11b)
+#   dev/start --mock     a made-up catalog of thirty served from the host
+#
+# --mock builds the client against tools/localcat's throwaway CA and a
+# loopback catalog URL, has dev/mock-catalog generate thirty entries out of
+# the three published apps' assets, plants db records so a third of the rows
+# are installed and a third have an update waiting, and serves the lot over
+# TLS as the user unit pspdx-mock-server, which outlives this shell. A later
+# dev/start without it stops that server, rebuilds for the published catalog
+# and takes the mock's records and PSP/GAME directories off the stick again
+# -- the ones it wrote down and anything wearing the same prefix, which is
+# what an install done from the mock catalog leaves; never anything
+# installed for real.
 #
 # The stick gets what a run needs and PPSSPP does not provide: the system
 # font (PPSSPP has it but does not mount flash0 for the guest), the clips
@@ -22,19 +34,41 @@ RESET=0
 BUILD=1
 AUDIO=""
 SLOW=0
+MOCK=0
 for arg in "$@"; do
 	case "$arg" in
 		--reset) RESET=1 ;;
 		--no-build) BUILD=0 ;;
 		--quiet) AUDIO="--nosocket=pulseaudio" ;;
 		--slow) SLOW=1 ;;
+		--mock) MOCK=1 ;;
 		*) echo "unknown option $arg" >&2; exit 2 ;;
 	esac
 done
 
-if [ "$BUILD" = 1 ]; then
-	(cd "$APP" && docker run --rm -v "$PWD:/src" -w /src pspdev/pspdev:latest make 2>&1 \
-		| grep -E 'error|EBOOT\.PBP' || true)
+. "$APP/tools/localcat/common.sh"
+
+if [ "$MOCK" = 1 ]; then
+	python3 "$HERE/dev/mock-catalog" make --work "$WORK" --ms "$MS" --url "$LOCALCAT_URL"
+	# The URL and the CA are compiled in, so a client already built for the
+	# host only needs building again when something else changed.
+	if [ "$BUILD" = 1 ] || ! localcat_is_local; then
+		localcat_build_local || { echo "mock build failed" >&2; exit 1; }
+	fi
+else
+	# Whatever the mock left behind goes first: the server on the port, the
+	# records and directories it planted, and an EBOOT that still points at
+	# the host. That last one has to be rebuilt even under --no-build, or
+	# the run would quietly be a mock run.
+	localcat_stop_server
+	python3 "$HERE/dev/mock-catalog" clean --work "$WORK" --ms "$MS"
+	if localcat_is_local; then
+		echo "rebuilding for the published catalog"
+		localcat_build_real || { echo "build failed" >&2; exit 1; }
+	elif [ "$BUILD" = 1 ]; then
+		(cd "$APP" && docker run --rm -v "$PWD:/src" -w /src pspdev/pspdev:latest make 2>&1 \
+			| grep -E 'error|EBOOT\.PBP' || true)
+	fi
 fi
 [ -f "$APP/EBOOT.PBP" ] || { echo "no EBOOT.PBP" >&2; exit 1; }
 
@@ -69,6 +103,11 @@ if [ "$RESET" = 1 ]; then
 	rm -f "$MS/PSPDX.SEED"
 else
 	[ -f "$MS/PSPDX.SEED" ] || printf 'PSPDX-TEST-SEED-0000' >"$MS/PSPDX.SEED"
+fi
+
+if [ "$MOCK" = 1 ]; then
+	localcat_start_server "$WORK/mock-site"
+	echo "mock catalog on $LOCALCAT_URL (systemctl --user stop pspdx-mock-server)"
 fi
 
 systemctl --user stop pspdx-ppsspp 2>/dev/null || true

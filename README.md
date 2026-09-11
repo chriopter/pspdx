@@ -277,6 +277,7 @@ dev/start           # build, then open it in PPSSPP, one instance, straight to t
 dev/start-reset     # the same without the seed: the sweep runs, as on a new PSP
 dev/start --quiet   # without speakers
 dev/start --slow    # the network held to a PSP-1004's 180 KB/s
+dev/start --mock    # a made-up catalog of thirty served from the host, a third of it installed
 ```
 
 Both plant what a run needs on the emulator's stick -- the system font,

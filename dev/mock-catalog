@@ -1,0 +1,324 @@
+#!/usr/bin/env python3
+"""A mixed catalog for the desk: thirty entries made out of the three
+published apps' assets, so the interactive emulator shows a list that has a
+bit of everything -- all five categories, names short enough to fit and one
+long enough to be clipped, entries missing an icon, a screenshot, a film or
+all three, summaries of every length, three authors, and a third of the rows
+in each install state.
+
+Called by dev/start --mock; not meant to be run by hand.
+
+    mock-catalog make  --work DIR --ms DIR [--url URL]
+    mock-catalog clean --work DIR --ms DIR
+
+make writes the site under <work>/mock-site, plants db records and PSP/GAME
+directories on the emulator's stick, and lists everything it planted in
+<work>/mock-planted. clean removes that, and anything else on the stick
+wearing the mock's id or directory prefix, and nothing besides: the user's
+own installs live in the same directories and carry neither prefix.
+
+The generation is seeded and the assets are cached, so the same list comes
+back every time and only the first run goes to the network.
+"""
+import hashlib, io, json, os, random, shutil, sys, urllib.request, zipfile
+
+SRC = "https://chriopter." + "github.io/pspdx-catalog/"
+SEED = 20260911
+COUNT = 30
+DEFAULT_URL = "https://127.0.0.1:8443/catalog.json"
+
+# What a planted record, directory and cached asset are called. Only names
+# carrying one of these are ever removed -- a published id is
+# io.github.something and a real install is named after its own archive, so
+# nothing of the user's can wear one by accident.
+ID_PREFIX = "dev.pspdx.mock."
+DIR_PREFIX = "PSPDXMock"
+
+# Thirty rows: the name, the category, which of the three authors, and which
+# of icon/screenshot/video it has. Written out rather than generated, because
+# the point of the list is the variety and that is easier to read than to
+# derive. assets: i icon, s screenshot, v film.
+#                         name                                    category    author assets
+ROWS = [
+    ("Tux",                                                       "games",     0, "isv"),
+    ("Pixel Pilot",                                               "games",     0, "isv"),
+    ("Chronicles of the Dawnbringer Saga II",                     "games",     1, "isv"),
+    ("Hex",                                                       "games",     2, "is"),
+    ("Downhill",                                                  "games",     0, "isv"),
+    ("Orbital Freight Company",                                   "games",     1, "sv"),
+    ("Mine Cart Mayhem",                                          "games",     2, "isv"),
+    ("Nine Lives",                                                "games",     0, ""),
+    ("Lantern",                                                   "demos",     1, "isv"),
+    ("Thirteen Tricks",                                           "demos",     0, "isv"),
+    ("Plasma",                                                    "demos",     2, "iv"),
+    ("Rust Raytracer",                                            "demos",     0, "isv"),
+    ("A Study in Bilinear Filtering and Fog",                     "demos",     1, "is"),
+    ("Vector Field",                                              "demos",     2, "isv"),
+    ("Notes",                                                     "apps",      0, "i"),
+    ("Memory Stick Inspector",                                    "apps",      1, "isv"),
+    ("Clock",                                                     "apps",      2, "isv"),
+    ("IRC",                                                       "apps",      0, "sv"),
+    ("Weather Station Readout and Barometer",                     "apps",      1, "isv"),
+    ("File Browser",                                              "apps",      2, "is"),
+    ("Calculator",                                                "apps",      0, "isv"),
+    ("gpSP",                                                      "emulators", 1, "isv"),
+    ("Chip-8",                                                    "emulators", 2, "iv"),
+    ("Master System",                                             "emulators", 0, "isv"),
+    ("NEC PC Engine and SuperGrafx",                              "emulators", 1, "isv"),
+    ("ScummVM",                                                   "emulators", 2, "is"),
+    ("CPU Clock",                                                 "plugins",   0, "i"),
+    ("Screenshot Key",                                            "plugins",   1, "isv"),
+    ("Remote Joystick Bridge for the USB Port",                   "plugins",   2, "isv"),
+    ("Battery Meter",                                             "plugins",   0, "isv"),
+]
+
+AUTHORS = ["chriopter", "Homebrew Collective", "anon"]
+
+# Summaries of every length: nothing at all, a few words, a line that fills
+# the row, and one past the sixty characters the client keeps.
+SUMMARIES = [
+    "",
+    "Small.",
+    "Downhill racing with a penguin.",
+    "Thirteen Graphics Engine tricks, one scene each.",
+    "Real-time ray tracing on a 333 MHz MIPS CPU.",
+    "A tidy little thing that does one job and gets out of the way again.",
+    "Reads the stick.",
+    "Plays music.",
+    "An unusually long summary, written to run past the sixty characters the "
+    "client keeps for one, so the end of it has to go somewhere.",
+    "Fast.",
+]
+
+LICENSES = ["GPL-2.0", "MIT", "BSD-3-Clause", "Apache-2.0", "Zlib"]
+
+# Revisions count from a fixed point, so the numbers look like the published
+# catalog's without depending on the clock.
+REV_BASE = 1789000000
+
+
+def slug(name):
+    out = "".join(c for c in name if c.isalnum())
+    return out[:16] or "App"
+
+
+def fetch(url, dest):
+    if os.path.exists(dest):
+        return dest
+    os.makedirs(os.path.dirname(dest), exist_ok=True)
+    urllib.request.urlretrieve(url, dest + ".part")
+    os.replace(dest + ".part", dest)
+    return dest
+
+
+def assets(work):
+    """The three published apps' icons, shots and films, and one real EBOOT,
+    fetched once into the work directory and reused from there."""
+    cache = os.path.join(work, "mock-assets")
+    cat = json.load(urllib.request.urlopen(SRC + "catalog.json"))
+    apps = cat["apps"]
+    have = {"icon": [], "screenshot": [], "video": []}
+    for a in apps:
+        for kind in have:
+            rel = a.get(kind)
+            if rel:
+                have[kind].append(fetch(SRC + rel, os.path.join(cache, rel)))
+
+    # A real EBOOT.PBP, out of the smallest published release: it goes into
+    # every planted PSP/GAME directory so START has something to launch, and
+    # into every package so an install is a real install.
+    eboot = os.path.join(cache, "EBOOT.PBP")
+    if not os.path.exists(eboot):
+        small = min((a for a in apps if a.get("release")),
+                    key=lambda a: a["release"]["size"])
+        raw = urllib.request.urlopen(small["release"]["url"]).read()
+        z = zipfile.ZipFile(io.BytesIO(raw))
+        name = sorted(n for n in z.namelist() if n.lower().endswith("eboot.pbp"))[0]
+        os.makedirs(cache, exist_ok=True)
+        open(eboot, "wb").write(z.read(name))
+    return have, eboot
+
+
+def package(site, entry_id, dirname, payload):
+    """One package per entry, with the EBOOT one directory down under the
+    name that directory will have on the stick, so thirty installs do not
+    land on top of each other."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as w:
+        w.writestr("README.md", "%s, from the mock catalog.\n" % dirname)
+        w.writestr("%s/EBOOT.PBP" % dirname, payload)
+    blob = buf.getvalue()
+    rel = "pkgs/%s.zip" % entry_id
+    out = os.path.join(site, rel)
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    open(out, "wb").write(blob)
+    return rel, hashlib.sha256(blob).hexdigest(), len(blob)
+
+
+def make(work, ms, base):
+    rng = random.Random(SEED)
+    # A run starts from the state this file describes and no other: an
+    # install or an update done in the client during the last one left a
+    # record of its own behind, and those thirds are the point.
+    clean(work, ms, quiet=True)
+    site = os.path.join(work, "mock-site")
+    shutil.rmtree(site, ignore_errors=True)
+    os.makedirs(site)
+    have, eboot = assets(work)
+    payload = open(eboot, "rb").read()
+
+    # A third of the rows in each state, mixed rather than every third row.
+    third = COUNT // 3
+    states = (["current"] * third + ["update"] * third +
+              ["none"] * (COUNT - 2 * third))
+    rng.shuffle(states)
+
+    db_dir = os.path.join(ms, "PSP/PSPDX/db")
+    game_dir = os.path.join(ms, "PSP/GAME")
+    os.makedirs(db_dir, exist_ok=True)
+    os.makedirs(game_dir, exist_ok=True)
+    planted = []
+    apps = []
+
+    for i, (name, category, author, kinds) in enumerate(ROWS[:COUNT]):
+        entry_id = "%s%02d.%s" % (ID_PREFIX, i, slug(name).lower())
+        dirname = "%s%02d%s" % (DIR_PREFIX, i, slug(name))
+        rev = REV_BASE + i * 1000
+        version = "%d.%d.%d" % (1 + i // 10, i % 10, i % 3)
+        rel, sha, size = package(site, entry_id, dirname, payload)
+
+        app = {
+            "id": entry_id,
+            "name": name,
+            "author": AUTHORS[author],
+            "summary": SUMMARIES[rng.randrange(len(SUMMARIES))],
+            "category": category,
+            "license": LICENSES[i % len(LICENSES)],
+            "release": {
+                "rev": rev,
+                "url": base + rel,
+                "sha256": sha,
+                "size": size,
+                "version": version,
+            },
+        }
+        # The assets: copied out of the cache under this entry's own name, so
+        # the client fetches them from the host like any other catalog.
+        for kind, letter, folder, ext in (("icon", "i", "icons", "png"),
+                                          ("screenshot", "s", "shots", "png"),
+                                          ("video", "v", "vids", "mp4")):
+            if letter not in kinds:
+                continue
+            src = have[kind][i % len(have[kind])]
+            rel_asset = "%s/%s.%s" % (folder, entry_id, ext)
+            dest = os.path.join(site, rel_asset)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            shutil.copyfile(src, dest)
+            app[kind] = rel_asset
+        apps.append(app)
+
+        state = states[i]
+        if state == "none":
+            continue
+        if state == "current":
+            record = {"id": entry_id, "rev": rev, "dir": dirname,
+                      "manifest": "", "version": version}
+        else:
+            # Behind the catalog by a revision and a version, which is the
+            # one thing that puts the update arrows on a row.
+            record = {"id": entry_id, "rev": rev - 500, "dir": dirname,
+                      "manifest": "",
+                      "version": "%d.%d.%d" % (i // 10, i % 10, i % 3)}
+        rec_path = os.path.join(db_dir, entry_id + ".json")
+        open(rec_path, "w").write(json.dumps(record, separators=(",", ":")) + "\n")
+        planted.append("db " + rec_path)
+
+        # An installed app is a directory with an EBOOT in it, or START has
+        # nothing to launch.
+        target = os.path.join(game_dir, dirname)
+        os.makedirs(target, exist_ok=True)
+        shutil.copyfile(eboot, os.path.join(target, "EBOOT.PBP"))
+        planted.append("dir " + target)
+
+    catalog = {
+        "schema": "https://github.com/chriopter/pspdx/blob/master/manifest.md",
+        "generated": "2026-01-01T00:00:00Z",
+        "apps": apps,
+    }
+    json.dump(catalog, open(os.path.join(site, "catalog.json"), "w"))
+    open(os.path.join(work, "mock-planted"), "w").write("\n".join(planted) + "\n")
+
+    waiting = states.count("update")
+    print("mock catalog: %d apps, %d installed, %d updates waiting"
+          % (len(apps), states.count("current") + waiting, waiting))
+
+
+def clean(work, ms, quiet=False):
+    """What make wrote down, and what an install done from the mock catalog
+    in the client added next to it: a record whose id carries the mock
+    prefix, a PSP/GAME directory named with it, a cached asset under one of
+    those ids. Every path is checked for the prefix and for the directory it
+    is supposed to sit in before anything is removed -- the user's real
+    installs are in the same two directories and carry neither."""
+    db_dir = os.path.realpath(os.path.join(ms, "PSP/PSPDX/db"))
+    game_dir = os.path.realpath(os.path.join(ms, "PSP/GAME"))
+    cache_dir = os.path.realpath(os.path.join(ms, "PSP/PSPDX/cache"))
+
+    # The manifest names what make planted; the sweep of the three
+    # directories catches what the client planted afterwards.
+    listing = os.path.join(work, "mock-planted")
+    found = []
+    if os.path.exists(listing):
+        for line in open(listing):
+            kind, _, path = line.strip().partition(" ")
+            if kind in ("db", "dir") and path:
+                found.append(path)
+        os.remove(listing)
+    for directory in (db_dir, game_dir, cache_dir):
+        for name in sorted(os.listdir(directory)) if os.path.isdir(directory) else []:
+            found.append(os.path.join(directory, name))
+
+    gone = 0
+    for path in found:
+        real = os.path.realpath(path)
+        parent, base = os.path.split(real)
+        if parent == game_dir:
+            if not base.startswith(DIR_PREFIX):
+                continue
+        elif parent in (db_dir, cache_dir):
+            if not base.startswith(ID_PREFIX):
+                continue
+        else:
+            continue
+        if os.path.isdir(real):
+            shutil.rmtree(real)
+        elif os.path.exists(real):
+            os.remove(real)
+        else:
+            continue
+        gone += 1
+    if gone and not quiet:
+        print("mock catalog: %d planted records, directories and assets removed"
+              % gone)
+
+
+def main():
+    if len(sys.argv) < 2 or sys.argv[1] not in ("make", "clean"):
+        sys.exit(__doc__)
+    opts = dict(zip(sys.argv[2::2], sys.argv[3::2]))
+    work, ms = opts.get("--work"), opts.get("--ms")
+    if not work or not ms:
+        sys.exit("mock-catalog: --work and --ms are required")
+    os.makedirs(work, exist_ok=True)
+    if sys.argv[1] == "clean":
+        clean(work, ms)
+    else:
+        # Packages are named by an absolute URL; the assets beside them are
+        # relative to the catalog, as in the published one. The caller owns
+        # the address, so it says what it is.
+        url = opts.get("--url", DEFAULT_URL)
+        make(work, ms, url.rsplit("/", 1)[0] + "/")
+
+
+if __name__ == "__main__":
+    main()

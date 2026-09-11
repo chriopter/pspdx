@@ -5,32 +5,14 @@
 # arguments given, and rebuilds the client for the real catalog afterwards.
 #
 #   sh tools/localcat/run [rig arguments]
+#
+# The work directory, the CA and the two builds are common.sh's; dev/start
+# --mock uses the same ones for a mixed catalog on the desk.
 set -e
 HERE="$(cd "$(dirname "$0")" && pwd)"
-APP="$HERE/../.."
-WORK="${LOCALCAT_WORK:-$HERE/work}"
+APP="$(cd "$HERE/../.." && pwd)"
+. "$HERE/common.sh"
 mkdir -p "$WORK/site"
-
-# The CA and a server certificate for the loopback address, once.
-if [ ! -f "$WORK/ca.crt" ]; then
-	openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
-		-keyout "$WORK/ca.key" -out "$WORK/ca.crt" -days 30 -subj "/CN=localcat CA" >/dev/null 2>&1
-	openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes \
-		-keyout "$WORK/srv.key" -out "$WORK/srv.csr" -subj "/CN=127.0.0.1" >/dev/null 2>&1
-	printf 'subjectAltName=IP:127.0.0.1\n' > "$WORK/san.cnf"
-	openssl x509 -req -in "$WORK/srv.csr" -CA "$WORK/ca.crt" -CAkey "$WORK/ca.key" \
-		-CAcreateserial -out "$WORK/srv.crt" -days 30 -extfile "$WORK/san.cnf" >/dev/null 2>&1
-	{
-		echo '/* Throwaway CA for tools/localcat; defines ca_certs.h'"'"'s guard so'
-		echo '   the client trusts this and nothing else. Generated. */'
-		echo '#ifndef PSPDX_CA_CERTS_H'
-		echo '#define PSPDX_CA_CERTS_H'
-		echo 'static const char PSPDX_CA_PEM[] ='
-		sed 's/.*/"&\\n"/' "$WORK/ca.crt"
-		echo ';'
-		echo '#endif'
-	} > "$WORK/testca.h"
-fi
 
 # The published catalog and its assets, fetched once, then forty entries
 # made of them.
@@ -40,21 +22,11 @@ fi
 
 # The client, pointed at the host. The objects that see the URL or the CA
 # are rebuilt here and again at the end.
-(cd "$APP" && rm -f network/https.o update/catalog.o && docker run --rm -v "$PWD:/src" -w /src pspdev/pspdev:latest \
-	make EXTRA_CFLAGS="-include tools/localcat/work/testca.h -DCATALOG_URL='\"https://127.0.0.1:8443/catalog.json\"'" 2>&1 | grep -E 'error' || true)
+localcat_build_local
 
-cd "$WORK/site"
-python3 - <<'PY' &
-import http.server, ssl
-ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-ctx.minimum_version = ssl.TLSVersion.TLSv1_3
-ctx.load_cert_chain('../srv.crt', '../srv.key')
-class Quiet(http.server.SimpleHTTPRequestHandler):
-    def log_message(self, *a): pass
-srv = http.server.ThreadingHTTPServer(('127.0.0.1', 8443), Quiet)
-srv.socket = ctx.wrap_socket(srv.socket, server_side=True)
-srv.serve_forever()
-PY
+# A mock server from dev/start --mock would be holding the port.
+localcat_stop_server
+python3 "$HERE/serve.py" "$WORK/site" "$WORK/srv.crt" "$WORK/srv.key" "$LOCALCAT_PORT" &
 SRV=$!
 sleep 1
 trap 'kill $SRV 2>/dev/null' EXIT
@@ -62,4 +34,4 @@ trap 'kill $SRV 2>/dev/null' EXIT
 sh "$APP/run-ppsspp.sh" "$@" || true
 
 # Back to the real catalog.
-(cd "$APP" && rm -f network/https.o update/catalog.o && docker run --rm -v "$PWD:/src" -w /src pspdev/pspdev:latest make 2>&1 | grep -E 'error' || true)
+localcat_build_real
