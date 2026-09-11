@@ -17,10 +17,14 @@
 
 enum icon_state { ICON_NONE, ICON_WANTED, ICON_READY, ICON_MISSING };
 
+/* At most a screenful is ever wanted at once, and the list holds six rows. */
+#define WANTED 8
+
 static const struct catalog *g_catalog;
 static struct gfx_texture g_icons[MAX_APPS];
 static volatile enum icon_state g_state[MAX_APPS];
-static volatile int g_first, g_count;
+static volatile int g_want[WANTED];
+static volatile int g_want_count;
 
 void icons_bind(const struct catalog *catalog) { g_catalog = catalog; }
 
@@ -29,18 +33,23 @@ void icons_reset(void) {
         gfx_texture_free(&g_icons[i]);
         g_state[i] = ICON_NONE;
     }
-    g_first = g_count = 0;
+    g_want_count = 0;
 }
 
-int icons_want(int first, int count) {
+int icons_want(const int *index, int count) {
     if (!g_catalog) return 0;
-    if (first < 0) first = 0;
-    if (first + count > g_catalog->count) count = g_catalog->count - first;
-    g_first = first;
-    g_count = count;
-    int fresh = 0;
-    for (int i = first; i < first + count; i++)
-        if (g_state[i] == ICON_NONE) { g_state[i] = ICON_WANTED; fresh = 1; }
+    if (count > WANTED) count = WANTED;
+    int fresh = 0, n = 0;
+    /* The count goes to zero first: the media thread reads the two without
+       a lock, and a stale index is worse than a short list for one frame. */
+    g_want_count = 0;
+    for (int i = 0; i < count; i++) {
+        int at = index[i];
+        if (at < 0 || at >= g_catalog->count) continue;
+        g_want[n++] = at;
+        if (g_state[at] == ICON_NONE) { g_state[at] = ICON_WANTED; fresh = 1; }
+    }
+    g_want_count = n;
     return fresh;
 }
 
@@ -50,9 +59,11 @@ const struct gfx_texture *icons_get(int index) {
 }
 
 int icons_pending(void) {
-    int first = g_first, count = g_count;
-    for (int i = first; i < first + count && i < MAX_APPS; i++)
-        if (g_state[i] == ICON_WANTED) return i;
+    int count = g_want_count;
+    for (int i = 0; i < count && i < WANTED; i++) {
+        int at = g_want[i];
+        if (at >= 0 && at < MAX_APPS && g_state[at] == ICON_WANTED) return at;
+    }
     return -1;
 }
 

@@ -13,6 +13,7 @@
 #include "audio/cues.h"
 #include "gui/entropy_screen.h"
 #include "gui/gfx.h"
+#include "gui/icons.h"
 #include "gui/preview.h"
 #include "gui/screen.h"
 #include "gui/lattice.h"
@@ -93,7 +94,11 @@ static void screenshot_settled(int cursor, const char *path) {
     gfx_screenshot(path);
 }
 
-static int install_app(int index, int screenshot) {
+/* row is a row of the shell's view, which is the catalog filtered to the
+   active tab; the catalog index behind it is only needed in here. */
+static int install_app(int row, int screenshot) {
+    int index = shell_view_index(row);
+    if (index < 0) return -1;
     struct app_entry *entry = &catalog.apps[index];
     struct install_report report;
 
@@ -134,8 +139,8 @@ static int install_app(int index, int screenshot) {
     }
     shell_install_end(message);
     cues_post(rc == 0 ? CUE_DONE : CUE_FAIL, 0);
-    shell_draw(&catalog, index);
-    if (screenshot) screenshot_settled(index, "ms0:/PSPDX2.BMP");
+    shell_draw(&catalog, row);
+    if (screenshot) screenshot_settled(row, "ms0:/PSPDX2.BMP");
     return rc;
 }
 
@@ -172,7 +177,14 @@ static unsigned button_named(const char *name) {
     if (strcmp(name, "shot") == 0) return KEY_SHOT;
     if (strcmp(name, "up") == 0) return PSP_CTRL_UP;
     if (strcmp(name, "down") == 0) return PSP_CTRL_DOWN;
+    if (strcmp(name, "left") == 0) return PSP_CTRL_LEFT;
+    if (strcmp(name, "right") == 0) return PSP_CTRL_RIGHT;
     if (strcmp(name, "cross") == 0) return PSP_CTRL_CROSS;
+    if (strcmp(name, "square") == 0) return PSP_CTRL_SQUARE;
+    if (strcmp(name, "triangle") == 0) return PSP_CTRL_TRIANGLE;
+    if (strcmp(name, "circle") == 0) return PSP_CTRL_CIRCLE;
+    if (strcmp(name, "ltrigger") == 0) return PSP_CTRL_LTRIGGER;
+    if (strcmp(name, "rtrigger") == 0) return PSP_CTRL_RTRIGGER;
     if (strcmp(name, "select") == 0) return PSP_CTRL_SELECT;
     return 0;
 }
@@ -272,6 +284,8 @@ int main(void) {
     int cursor = 0;
     int synced = 0;
     int rounds = 0;                     /* times the sync has come back */
+    int refreshing = 0;                 /* SELECT, with the list already up */
+    char keep[96] = "";                 /* the entry to come back to after one */
     int automatic = -1;
     unsigned shell_since = now_ms();
     int shot_connecting = 0;
@@ -324,6 +338,27 @@ int main(void) {
             }
             if (sync_done()) {
                 synced = 1;
+                /* A fresh catalog is a fresh set of tabs, and the icons
+                   cached against the old one no longer stand for the same
+                   entries. */
+                cursor = 0;
+                shell_view_rebuild(&catalog);
+                if (keep[0]) {
+                    /* Back to the package the cursor was on, if the catalog
+                       still has it; the top of the list if it does not. */
+                    for (int i = 0; i < catalog.count; i++)
+                        if (strcmp(catalog.apps[i].id, keep) == 0) {
+                            int row = shell_view_row(i);
+                            if (row >= 0) cursor = row;
+                            break;
+                        }
+                    keep[0] = '\0';
+                }
+                if (refreshing) {
+                    refreshing = 0;
+                    icons_reset();
+                    preview_resume();
+                }
                 if (sync_state() == SYNC_DONE) shell_status("");
                 else {
                     /* Nothing came: say so, and offer the one thing that
@@ -340,6 +375,7 @@ int main(void) {
                 screenshot_settled(cursor, "ms0:/PSPDX.BMP");
                 dump_diagnostics();
                 automatic = catalog.count > 0 ? auto_install_index() : -1;
+                if (automatic >= 0) automatic = shell_view_row(automatic);
                 if (automatic >= 0) {
                     cursor = automatic;
                     install_app(cursor, 1);
@@ -369,7 +405,18 @@ int main(void) {
         last_buttons = pad.Buttons;
         pressed |= repeat(pad.Buttons & (PSP_CTRL_UP | PSP_CTRL_DOWN));
         if (synced) pressed |= keys_pressed();
-        int count = shown()->count;
+        /* Everything below counts in rows of the shell's view -- the
+           catalog filtered to the active tab -- and there are none of those
+           while the catalog is being fetched. */
+        int count = shown()->count > 0 ? shell_view_count() : 0;
+
+        /* The triggers walk the tabs, and the list under them starts again
+           at the top. */
+        if ((pressed & (PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER)) && count > 0) {
+            shell_tab_move(pressed & PSP_CTRL_RTRIGGER ? 1 : -1);
+            cues_post(CUE_MOVE, cursor = 0);
+            count = shell_view_count();
+        }
 
         /* The list is a ring: past the last entry comes the first. */
         if ((pressed & PSP_CTRL_DOWN) && count > 0)
@@ -389,13 +436,24 @@ int main(void) {
             shell_word("Connecting");
             if (sync_start(&catalog) == 0) synced = 0;
         }
-        if (pressed & PSP_CTRL_SELECT) {
-            /* The field drains and is swept again, in the room the browser
-               was already standing in. */
-            entropy_forget();
-            entropy_init();
-            entropy_screen_run();
-            entropy_save(entropy_screen_is_replay());
+        if ((pressed & PSP_CTRL_SELECT) && synced) {
+            /* The catalog is fetched again from where the browser stands:
+               the list gives way to the word and the status line, and comes
+               back with whatever is now published. The sync thread and the
+               media thread share the one HTTPS stack and the one asset
+               buffer, so the media thread steps aside for the length of it,
+               as it does for an install. */
+            int at = shell_view_index(cursor);
+            snprintf(keep, sizeof(keep), "%s", at >= 0 ? catalog.apps[at].id : "");
+            preview_quiesce();
+            shell_word("Refreshing");
+            if (sync_start(&catalog) == 0) {
+                synced = 0;
+                refreshing = 1;
+            } else {
+                keep[0] = '\0';
+                preview_resume();
+            }
         }
 
         unsigned tick0 = now_us();

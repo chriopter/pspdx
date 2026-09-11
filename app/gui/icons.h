@@ -16,9 +16,10 @@
 void icons_bind(const struct catalog *catalog);
 void icons_reset(void);
 
-/* Main thread: the rows on screen. Returns 1 when that means there is
+/* Main thread: the entries the rows on screen stand for, which a filtered
+   list does not leave in one run. Returns 1 when that means there is
    something new to fetch, so the caller can wake the media thread. */
-int icons_want(int first, int count);
+int icons_want(const int *index, int count);
 
 /* Main thread: the icon of an entry, or NULL while it is not here. */
 const struct gfx_texture *icons_get(int index);

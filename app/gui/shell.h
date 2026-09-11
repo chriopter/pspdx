@@ -17,6 +17,29 @@ void shell_shutdown(void);
 /* One frame, paced at 60 Hz by the vblank wait inside. */
 void shell_draw(const struct catalog *catalog, int cursor);
 
+/* ------------------------------------------------------------------ tabs */
+
+/* The browser shows one category at a time, chosen by the tabs across the
+   top. The view is the catalog filtered to the active tab, and a cursor
+   anywhere in this program is a row of the view rather than a catalog
+   index -- so there is one filter and no second copy of the entries.
+
+   Called whenever the catalog has been rewritten: it works out which tabs
+   have anything in them, keeps the active category if it survived, and
+   builds the view. */
+void shell_view_rebuild(const struct catalog *catalog);
+
+int shell_view_count(void);
+int shell_view_index(int row);      /* view row -> catalog index, -1 if none */
+int shell_view_row(int index);      /* catalog index -> view row, -1 if hidden */
+
+/* How many tabs are on screen: one means there is nothing to switch. */
+int shell_tab_count(void);
+
+/* L and R: one tab along, wrapping. The view follows; the caller resets
+   its cursor. */
+void shell_tab_move(int step);
+
 /* True once nothing is mid-transition: the start fade is over, the selection
    bar has arrived, the screenshot has faded in. What a screenshot of the
    screen should wait for. */

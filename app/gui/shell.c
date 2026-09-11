@@ -119,6 +119,76 @@ static char g_word[24] = "Connecting";
 static const struct catalog *g_catalog;
 static int g_cursor;
 
+/* --------------------------------------------------------------- the view */
+
+/* The tabs, in the order they are shown. The first takes everything; the
+   rest match the catalog's own lowercase category word. */
+static const char *const TAB_NAME[] = {
+    "All", "Games", "Demos", "Apps", "Emulators", "Plugins"
+};
+static const char *const TAB_KEY[] = {
+    "", "games", "demos", "apps", "emulators", "plugins"
+};
+#define TAB_ALL 6
+
+static int g_tab[TAB_ALL];              /* which of the six have anything */
+static int g_tabs;
+static int g_tab_at;                    /* index into g_tab, not into TAB_NAME */
+static const struct catalog *g_view_of;
+static unsigned char g_view[MAX_APPS];
+static int g_view_count;
+
+static void build_view(void) {
+    g_view_count = 0;
+    if (!g_view_of || g_tabs <= 0) return;
+    const char *key = TAB_KEY[g_tab[g_tab_at]];
+    for (int i = 0; i < g_view_of->count; i++)
+        if (!key[0] || strcmp(g_view_of->apps[i].category, key) == 0)
+            g_view[g_view_count++] = (unsigned char)i;
+    /* The list and the card both start again from the top of what is now
+       shown, and the card is told to fetch afresh: the row a cursor names
+       is a different package than it was a moment ago. */
+    g_first = 0;
+    g_last_cursor = -1;
+}
+
+void shell_view_rebuild(const struct catalog *catalog) {
+    int was = g_tabs ? g_tab[g_tab_at] : 0;
+    g_view_of = catalog;
+    g_tabs = 0;
+    g_tab_at = 0;
+    if (!catalog || catalog->count <= 0) { g_view_count = 0; return; }
+    for (int t = 0; t < TAB_ALL; t++) {
+        int has = !TAB_KEY[t][0];
+        for (int i = 0; !has && i < catalog->count; i++)
+            has = strcmp(catalog->apps[i].category, TAB_KEY[t]) == 0;
+        if (!has) continue;
+        if (t == was) g_tab_at = g_tabs;
+        g_tab[g_tabs++] = t;
+    }
+    build_view();
+}
+
+int shell_view_count(void) { return g_view_count; }
+
+int shell_view_index(int row) {
+    return row >= 0 && row < g_view_count ? g_view[row] : -1;
+}
+
+int shell_view_row(int index) {
+    for (int row = 0; row < g_view_count; row++)
+        if (g_view[row] == index) return row;
+    return -1;
+}
+
+int shell_tab_count(void) { return g_tabs; }
+
+void shell_tab_move(int step) {
+    if (g_tabs <= 1) return;
+    g_tab_at = (g_tab_at + step + g_tabs) % g_tabs;
+    build_view();
+}
+
 int shell_init(void) {
     if (!font_init()) return 0;
     gfx_init();
@@ -142,6 +212,31 @@ static void draw_shade(int cx, int cy, int w, int h) {
     gfx_shade(cx, cy, w * 1.6f, h * 1.8f, 170);
 }
 
+/* The tabs sit between the name and the count, spread across whatever room
+   the two of them leave. The active one is lit rather than boxed: a word in
+   the text colour with the room's own light welling up under it. */
+static void draw_tabs(float left, float right) {
+    if (g_tabs <= 1) return;
+    float words = 0;
+    for (int i = 0; i < g_tabs; i++) words += font_width(FONT_META, TAB_NAME[g_tab[i]]);
+    float gap = (right - left - words) / (g_tabs - 1);
+    if (gap > 22) gap = 22;
+    if (gap < 7) gap = 7;
+    float x = left + (right - left - words - gap * (g_tabs - 1)) / 2;
+    if (x < left) x = left;
+    for (int i = 0; i < g_tabs; i++) {
+        const char *name = TAB_NAME[g_tab[i]];
+        float w = font_width(FONT_META, name);
+        if (i == g_tab_at) {
+            gfx_glow(x + w / 2, 17, w + 30, 30, rgb_pack(g_tint, 110));
+            gfx_glow(x + w / 2, 24, w + 8, 7,
+                     rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.6f), 120));
+        }
+        font_print(FONT_META, x, 21, i == g_tab_at ? g_text : g_dim, name);
+        x += w + gap;
+    }
+}
+
 static void draw_chrome(const struct catalog *catalog) {
     gfx_vgrad(0, 0, SCR_W, HEADER_H, RGBA(255, 255, 255, 14), RGBA(255, 255, 255, 0));
     unsigned bright = rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.5f), 150);
@@ -154,24 +249,32 @@ static void draw_chrome(const struct catalog *catalog) {
     gfx_glow(LIST_X + 24, 18, 110, 56, rgb_pack(g_tint, 80));
     font_print(FONT_H1, LIST_X, 23, g_text, "PSPDX");
 
-    /* The counts change when the catalog does, which is not every frame. */
+    /* The count is the count of what is shown: the whole catalog under All,
+       the tab's own word under any other. It changes when the catalog or
+       the tab does, which is not every frame. */
     static char right[64];
-    static int said_total = -1, said_updates = -1;
+    static int said_total = -1, said_updates = -1, said_tab = -1;
+    int tab = g_tabs ? g_tab[g_tab_at] : 0;
+    int shown = tab ? g_view_count : catalog->total;
     int updates = 0;
-    for (int i = 0; i < catalog->count; i++)
-        if (catalog->apps[i].state == APP_UPDATE) updates++;
-    if (catalog->total != said_total || updates != said_updates) {
-        said_total = catalog->total;
+    for (int row = 0; row < g_view_count; row++)
+        if (catalog->apps[g_view[row]].state == APP_UPDATE) updates++;
+    if (shown != said_total || updates != said_updates || tab != said_tab) {
+        said_total = shown;
         said_updates = updates;
+        said_tab = tab;
+        const char *what = tab ? TAB_KEY[tab] : "apps";
         if (updates)
-            snprintf(right, sizeof(right), "%d apps  %d update%s", catalog->total,
+            snprintf(right, sizeof(right), "%d %s  %d update%s", shown, what,
                      updates, updates == 1 ? "" : "s");
         else
-            snprintf(right, sizeof(right), "%d apps", catalog->total);
+            snprintf(right, sizeof(right), "%d %s", shown, what);
     }
-    if (catalog->count > 0)
-        font_print(FONT_META, SCR_W - LIST_X - font_width(FONT_META, right), 21,
-                   g_dim, right);
+    if (catalog->count > 0) {
+        float x = SCR_W - LIST_X - font_width(FONT_META, right);
+        font_print(FONT_META, x, 21, g_dim, right);
+        draw_tabs(LIST_X + font_width(FONT_H1, "PSPDX") + 22, x - 16);
+    }
 }
 
 /* ------------------------------------------------------------------- list */
@@ -208,20 +311,28 @@ static const char *state_word(const struct app_entry *entry, unsigned *color) {
     }
 }
 
+/* The same colour, quieter: a mark on a row the eye is not on should be
+   read only when it is looked for. */
+static unsigned faded(unsigned color, int alpha) {
+    return (color & 0x00FFFFFFu) | ((unsigned)alpha << 24);
+}
+
 /* A tick, the way a list is ticked: two strokes, the short one down to the
-   corner and the long one up from it. What an installed package gets. */
+   corner and the long one up from it. What an installed package gets --
+   eight pixels of hairline, which on this screen is a mark and not a
+   badge. */
 static void draw_tick(float cx, float cy, unsigned color) {
-    float x[3] = { cx - 5.5f, cx - 1.5f, cx + 6.0f };
-    float y[3] = { cy + 0.5f, cy + 4.5f, cy - 4.5f };
+    float x[3] = { cx - 4.0f, cx - 1.3f, cx + 4.0f };
+    float y[3] = { cy + 0.4f, cy + 3.1f, cy - 3.2f };
     unsigned c[3] = { color, color, color };
-    gfx_ribbon(x, y, c, 3, 1.1f);
+    gfx_ribbon(x, y, c, 3, 0.6f);
 }
 
 /* The system's own sign for an update: two arrows chasing each other
    round a circle. Each is an arc of a little under a half turn with a
    head on its leading end. */
 static void draw_update_arrows(float cx, float cy, unsigned color, float t) {
-    const float r = 5.5f;
+    const float r = 4.0f;
     float spin = t * 1.2f;
     for (int arrow = 0; arrow < 2; arrow++) {
         float x[8], y[8];
@@ -233,14 +344,14 @@ static void draw_update_arrows(float cx, float cy, unsigned color, float t) {
             y[i] = cy + sinf(a) * r;
             c[i] = color;
         }
-        gfx_ribbon(x, y, c, 6, 1.0f);
+        gfx_ribbon(x, y, c, 6, 0.7f);
         /* The head: a short stroke to either side of the arc's end, laid
            back along it. */
         float a = a0 + 2.4f, tx = -sinf(a), ty = cosf(a);
         float ex = x[5], ey = y[5];
-        float hx[3] = { ex - tx * 3.2f - cosf(a) * 2.6f, ex, ex - tx * 3.2f + cosf(a) * 2.6f };
-        float hy[3] = { ey - ty * 3.2f - sinf(a) * 2.6f, ey, ey - ty * 3.2f + sinf(a) * 2.6f };
-        gfx_ribbon(hx, hy, c, 3, 1.0f);
+        float hx[3] = { ex - tx * 2.3f - cosf(a) * 1.9f, ex, ex - tx * 2.3f + cosf(a) * 1.9f };
+        float hy[3] = { ey - ty * 2.3f - sinf(a) * 1.9f, ey, ey - ty * 2.3f + sinf(a) * 1.9f };
+        gfx_ribbon(hx, hy, c, 3, 0.7f);
     }
 }
 
@@ -255,7 +366,7 @@ static void draw_list(const struct catalog *catalog, int cursor, float t) {
     float target = LIST_Y + (cursor - g_first) * ITEM_H;
     g_sel_y += (target - g_sel_y) * 0.25f;
 
-    int rows = catalog->count < VISIBLE ? catalog->count : VISIBLE;
+    int rows = g_view_count < VISIBLE ? g_view_count : VISIBLE;
     draw_shade(LIST_X + LIST_W / 2, LIST_Y + rows * ITEM_H / 2, LIST_W, rows * ITEM_H);
 
     /* The selected row glows: a breathing light behind it and a thin
@@ -269,17 +380,22 @@ static void draw_list(const struct catalog *catalog, int cursor, float t) {
     gfx_glow(LIST_X + LIST_W / 2, g_sel_y + ITEM_H - 3, LIST_W + 30, 10,
              rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.7f), 160));
 
+    /* The icons module counts in catalog entries, so the rows on screen are
+       handed over as the entries they stand for. */
+    int wanted[VISIBLE], want_count = 0;
+    for (int i = g_first; i < g_view_count && i < g_first + VISIBLE; i++)
+        wanted[want_count++] = g_view[i];
     icons_bind(catalog);
-    if (icons_want(g_first, VISIBLE)) preview_poke();
+    if (icons_want(wanted, want_count)) preview_poke();
 
-    for (int i = g_first; i < catalog->count && i < g_first + VISIBLE; i++) {
-        const struct app_entry *entry = &catalog->apps[i];
+    for (int i = g_first; i < g_view_count && i < g_first + VISIBLE; i++) {
+        const struct app_entry *entry = &catalog->apps[g_view[i]];
         int y = LIST_Y + (i - g_first) * ITEM_H;
         int selected = i == cursor;
 
         /* The bundle's own icon, dimmed with the name; a dark plate where
            it has not arrived, so the column reads as a column. */
-        const struct gfx_texture *icon = icons_get(i);
+        const struct gfx_texture *icon = icons_get(g_view[i]);
         int iy = y + (ITEM_H - ICON_H) / 2;
         if (icon)
             gfx_texture_draw(icon, LIST_X, iy, ICON_W, ICON_H,
@@ -290,25 +406,25 @@ static void draw_list(const struct catalog *catalog, int cursor, float t) {
         /* A mark, not a word, at the end of the row: the line ticked off
            when the package is on the stick, the system's turning arrows
            when a newer one waits, nothing for the rest. */
-        float mx = LIST_X + LIST_W - 10, my = y + ITEM_H / 2 - 1;
+        float mx = LIST_X + LIST_W - 8, my = y + ITEM_H / 2 - 1;
         int name_w = LIST_X + LIST_W - NAME_X;
         if (entry->state == APP_UPDATE) {
-            gfx_glow(mx, my, 34, 34, RGBA(140, 255, 170, 140));
-            draw_update_arrows(mx, my, RGB(170, 255, 190), t);
-            name_w -= 24;
+            gfx_glow(mx, my, 26, 26, RGBA(140, 255, 170, selected ? 130 : 60));
+            draw_update_arrows(mx, my, faded(RGB(170, 255, 190), selected ? 255 : 153), t);
+            name_w -= 18;
         } else if (entry->state != APP_NOT_INSTALLED) {
-            draw_tick(mx, my, selected ? g_accent : g_dim);
-            name_w -= 24;
+            draw_tick(mx, my, selected ? g_accent : faded(g_dim, 153));
+            name_w -= 18;
         }
 
         font_print_clipped(FONT_BODY, NAME_X, y + 21, name_w,
                            selected ? g_text : g_dim, entry->name);
     }
 
-    if (catalog->count > VISIBLE) {
+    if (g_view_count > VISIBLE) {
         int track = FOOTER_Y - 6 - LIST_Y;
-        int knob = track * VISIBLE / catalog->count;
-        int at = track * g_first / catalog->count;
+        int knob = track * VISIBLE / g_view_count;
+        int at = track * g_first / g_view_count;
         gfx_rect(LIST_X + LIST_W + 10, LIST_Y, 2, track, RGBA(255, 255, 255, 24));
         gfx_rect(LIST_X + LIST_W + 10, LIST_Y + at, 2, knob, g_accent);
     }
@@ -425,10 +541,17 @@ static void draw_footer(void) {
                            g_accent, g_status);
         return;
     }
-    const char *hint = g_installing
-        ? "installing, do not turn off"
-        : "X install or update    SELECT discard entropy    HOME quit";
-    font_print(FONT_META, LIST_X, FOOTER_Y + 15, g_dim, hint);
+    /* The keys, and only the keys that do anything: the triggers are worth
+       naming once there is a second tab to reach with them. */
+    static char keys[96];
+    static int said_tabs = -1;
+    if (g_tabs != said_tabs) {
+        said_tabs = g_tabs;
+        snprintf(keys, sizeof(keys), "X install   %sSELECT refresh   HOME quit",
+                 g_tabs > 1 ? "L R category   " : "");
+    }
+    font_print(FONT_META, LIST_X, FOOTER_Y + 15, g_dim,
+               g_installing ? "installing, do not turn off" : keys);
 }
 
 /* ------------------------------------------------------------------ frame */
@@ -470,9 +593,9 @@ void shell_draw(const struct catalog *catalog, int cursor) {
     lattice_draw(t, g_tint);
     unsigned t1 = now_us();
     draw_chrome(catalog);
-    if (catalog->count > 0) {
+    if (catalog->count > 0 && g_view_count > 0) {
         draw_list(catalog, cursor, t);
-        draw_panel(&catalog->apps[cursor], t);
+        draw_panel(&catalog->apps[g_view[cursor < g_view_count ? cursor : 0]], t);
     } else if (g_status[0]) {
         /* Nothing to browse yet: the word stands in the room, leaning
            slowly, lit from behind, and under it what is being waited for.
@@ -511,8 +634,9 @@ int shell_settled(void) {
 /* ------------------------------------------------------------- screenshot */
 
 void shell_shot_sync(const struct catalog *catalog, int cursor) {
-    if (catalog->count <= 0) return;
-    const struct app_entry *entry = &catalog->apps[cursor];
+    int index = shell_view_index(cursor);
+    if (catalog->count <= 0 || index < 0) return;
+    const struct app_entry *entry = &catalog->apps[index];
 
     if (cursor != g_last_cursor) {
         /* The first selection is the app starting up, not the user
