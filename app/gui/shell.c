@@ -882,7 +882,8 @@ static void draw_footer(void) {
                    "SELECT or O close");
         return;
     }
-    if (g_catalog && g_catalog->count <= 0 && g_status[0]) return;   /* said in the middle */
+    /* What is being waited for -- access point, dns, tls handshake -- goes
+       where the keys go, in the strip; the word in the room stands alone. */
     if (g_status[0]) {
         font_print_clipped(FONT_META, LIST_X, FOOTER_Y + 15, SCR_W - 2 * LIST_X,
                            g_accent, g_status);
@@ -970,13 +971,9 @@ void shell_draw(const struct catalog *catalog, int cursor) {
         draw_list(catalog, cursor, t);
         draw_panel(&catalog->apps[g_view[cursor < g_view_count ? cursor : 0]], t);
     } else if (g_status[0]) {
-        /* Nothing to browse yet: the word stands in the room, leaning
-           slowly, lit from behind, and under it what is being waited for.
-           The dots count the seconds. */
-        float cx = SCR_W / 2.0f, cy = 116.0f;
-        title_draw(cx, cy, t, g_tint);
-        float w = font_width(FONT_META, g_status);
-        font_print(FONT_META, cx - w / 2, cy + 74, g_dim, g_status);
+        /* Nothing to browse yet: the word stands in the room, lit from
+           behind; what it is waiting for is said in the strip below. */
+        title_draw(SCR_W / 2.0f, 116.0f, t, g_tint);
     } else {
         font_print(FONT_BODY, LIST_X, 120, g_dim, "The catalog came back empty.");
     }
