@@ -764,19 +764,20 @@ int main(int argc, char *argv[]) {
            while the catalog is being fetched. */
         int count = shown()->count > 0 ? shell_view_count() : 0;
 
+        /* With something standing over the browser, the list stays where it
+           is: a question that scrolls out from under its answer is a trap,
+           up and down belong to the menu while one is open, and a tab
+           changing under a band would change what the band is about. */
+        int modal = g_question != ASK_NOTHING || g_menu_open || info;
+
         /* The triggers and left/right walk the tabs, and the list under
            them starts again at the top. */
         unsigned tabs = PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER | PSP_CTRL_LEFT | PSP_CTRL_RIGHT;
-        if ((pressed & tabs) && count > 0) {
+        if ((pressed & tabs) && count > 0 && !modal) {
             shell_tab_move(pressed & (PSP_CTRL_RTRIGGER | PSP_CTRL_RIGHT) ? 1 : -1);
             cues_post(CUE_MOVE, cursor = 0);
             count = shell_view_count();
         }
-
-        /* With something standing over the browser, the list stays where it
-           is: a question that scrolls out from under its answer is a trap,
-           and up and down belong to the menu while one is open. */
-        int modal = g_question != ASK_NOTHING || g_menu_open || info;
         /* The list is a ring: past the last entry comes the first. */
         if ((pressed & PSP_CTRL_DOWN) && count > 0 && !modal)
             cues_post(CUE_MOVE, cursor = (cursor + 1) % count);

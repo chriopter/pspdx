@@ -1,0 +1,4 @@
+# What a campaign leaves behind: one JSON per run, and the log, keys and
+# screenshots of any that failed.
+*
+!.gitignore

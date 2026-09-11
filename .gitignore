@@ -25,3 +25,6 @@ shot1.png
 shot-install.png
 shot-updates.png
 .claude/
+
+# Python caches from app/tools
+__pycache__/
