@@ -394,39 +394,53 @@ static float tab_width(int tab) {
          + font_width(FONT_META, tab_count(tab));
 }
 
-/* The tabs sit between the name and the count, spread across whatever room
-   the two of them leave. The active one is lit rather than boxed: a word in
-   the text colour with the room's own light welling up under it. */
+/* The tabs stand where they stand. The named ones start at a fixed
+   column and step right by a fixed gap, so All is always in the same
+   place whatever the count on the right says and however many tabs there
+   are; the two that come and go -- updates and the basket -- hang to the
+   left of that column, growing leftward, so their appearing never moves a
+   word the eye has learned the place of. The active one is lit rather
+   than boxed: a word in the text colour with the room's own light welling
+   up under it. */
+#define TAB_X 232.0f
+#define TAB_GAP 22.0f
+
+static void draw_tab(int tab, int on, float x, float t) {
+    float w = tab_width(tab);
+    if (on) {
+        gfx_glow(x + w / 2, 17, w + 30, 30, rgb_pack(g_tint, 110));
+        gfx_glow(x + w / 2, 24, w + 8, 7,
+                 rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.6f), 120));
+    }
+    if (tab >= 0) {
+        font_print(FONT_META, x, 21, on ? g_text : g_dim, TAB_NAME[tab]);
+    } else {
+        enum mark m = tab == TAB_UPDATES ? MARK_UPDATE : MARK_BASKET;
+        unsigned c = tab == TAB_UPDATES
+            ? faded(UPDATE_RGB, (int)((on ? 255 : 170) * update_pulse(t)))
+            : (on ? g_text : g_dim);
+        mark_draw(m, x + mark_width(m) / 2.0f, 16, c, on ? MARK_LIT : MARK_PLAIN,
+                  tab == TAB_UPDATES ? UPDATE_RGB : rgb_pack(g_tint, 255), t);
+        font_print(FONT_META, x + mark_width(m) + 5, 21, on ? g_text : g_dim,
+                   tab_count(tab));
+    }
+}
+
 static void draw_tabs(float left, float right, float t) {
+    (void)left; (void)right;
     if (g_tabs <= 1) return;
-    float words = 0;
-    for (int i = 0; i < g_tabs; i++) words += tab_width(g_tab[i]);
-    float gap = (right - left - words) / (g_tabs - 1);
-    if (gap > 22) gap = 22;
-    if (gap < 7) gap = 7;
-    float x = left + (right - left - words - gap * (g_tabs - 1)) / 2;
-    if (x < left) x = left;
+    float x = TAB_X;
     for (int i = 0; i < g_tabs; i++) {
-        int tab = g_tab[i], on = i == g_tab_at;
-        float w = tab_width(tab);
-        if (on) {
-            gfx_glow(x + w / 2, 17, w + 30, 30, rgb_pack(g_tint, 110));
-            gfx_glow(x + w / 2, 24, w + 8, 7,
-                     rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.6f), 120));
-        }
-        if (tab >= 0) {
-            font_print(FONT_META, x, 21, on ? g_text : g_dim, TAB_NAME[tab]);
-        } else {
-            enum mark m = tab == TAB_UPDATES ? MARK_UPDATE : MARK_BASKET;
-            unsigned c = tab == TAB_UPDATES
-                ? faded(UPDATE_RGB, (int)((on ? 255 : 170) * update_pulse(t)))
-                : (on ? g_text : g_dim);
-            mark_draw(m, x + mark_width(m) / 2.0f, 16, c, on ? MARK_LIT : MARK_PLAIN,
-                      tab == TAB_UPDATES ? UPDATE_RGB : rgb_pack(g_tint, 255), t);
-            font_print(FONT_META, x + mark_width(m) + 5, 21, on ? g_text : g_dim,
-                       tab_count(tab));
-        }
-        x += w + gap;
+        if (g_tab[i] < 0) continue;
+        draw_tab(g_tab[i], i == g_tab_at, x, t);
+        x += tab_width(g_tab[i]) + TAB_GAP;
+    }
+    x = TAB_X - TAB_GAP;
+    for (int i = g_tabs - 1; i >= 0; i--) {
+        if (g_tab[i] >= 0) continue;
+        x -= tab_width(g_tab[i]);
+        draw_tab(g_tab[i], i == g_tab_at, x, t);
+        x -= TAB_GAP;
     }
 }
 
