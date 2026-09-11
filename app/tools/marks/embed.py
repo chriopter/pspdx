@@ -32,7 +32,7 @@ ORDER = [
     'cross', 'circle', 'triangle', 'square',
     'tick', 'update', 'basket', 'stick', 'play', 'download', 'info',
     'all', 'games', 'demos', 'apps', 'emulators', 'plugins',
-    'start', 'select', 'l', 'r', 'home',
+    'start', 'select', 'l', 'r', 'home', 'gear',
 ]
 
 # Every glyph is drawn with a pixel of margin around it so the anti-aliasing

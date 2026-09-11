@@ -12,6 +12,15 @@ The same twenty seconds [with sound](pspdx.mp4): the tune, and the notes the lis
 
 Runs under PPSSPP; nobody has put it on real hardware yet.
 
+The keys are the system's own: **×** installs or updates what the cursor is
+on, **△** opens the options (Run, Reinstall, Delete, Add to basket,
+Information), **○** goes back, **□** sets a row aside in the basket, **START**
+runs an installed app. The shoulders and left/right walk the tabs: the gear
+(the session: connection, entropy, frames, *Update catalog*), the stick (what
+is installed, updates first, *Update all* while any wait), the basket, then
+the categories. Left alone for ten seconds the shell fades out and leaves the
+water and the film; any key brings it back.
+
 To get your open source licensed brew listed, send a PR to
 [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) or open an issue.
 
@@ -75,8 +84,8 @@ record rather than an empty file. Removing an app deletes the tree first
 and the record second, so a directory left behind can never be silently
 overwritten later.
 
-An update is a comparison, nothing more: at start, and again on SELECT →
-fetch, the client reads every record and holds each `rev` against the
+An update is a comparison, nothing more: at start, and again on *Update
+catalog* under the gear tab, the client reads every record and holds each `rev` against the
 `release.rev` in the catalog. A larger number in the catalog marks the
 row with the turning arrows and offers *Update to <version>*; the same
 number is a tick; no record is *not installed*. Updating is the install
@@ -368,7 +377,7 @@ that works on a real PSP, and on a host whose desktop is locked.
 | `PSPDX.BMP` | the catalog screen, 480x272, 24-bit |
 | `PSPDX1.BMP` | the screen a scripted `shot` key asked for |
 | `PSPDX2.BMP` | the screen after an install |
-| `PSPDX.KEYS` | scripted input, one `<ms> <key>` per line from the moment the catalog is up: `up`, `down`, `cross`, `select`, or `shot` |
+| `PSPDX.KEYS` | scripted input, one `<ms> <key>` per line from the moment the catalog is up: `up`, `down`, `left`, `right`, `cross`, `circle`, `square`, `triangle`, `ltrigger`, `rtrigger`, `select`, `start`, or `shot` |
 | `PSPDX.INSTALL` | a manifest URL here installs that app unattended, for testing |
 | `PSP/PSPDX/cache/<served name>` | a picture once fetched, so it costs one handshake per stick, not per run. The catalog serves every asset under `<id>-<sha8>.<ext>`, a name that carries the bytes, so a changed picture arrives under a new name and the old file is simply never asked for again. An entry that links nothing is looked up as `<id>.<ext>`, which is where the rig plants a clip |
 | `PSP/PSPDX/font/ltn8.pgf` | never written by the client: where it looks for the system font when `flash0:` has none |

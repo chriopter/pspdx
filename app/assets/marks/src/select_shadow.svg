@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="49" height="20" viewBox="0 0 49 20">
+  <!-- The pill's dark body, three pixels in from the shadow cell's edge so
+       it lies exactly under the rim in select.svg. -->
+  <rect x="4.5" y="4.5" width="40" height="11" rx="5.5" fill="#000000"/>
+</svg>

@@ -32,6 +32,7 @@ scale=4         # rendered this much larger, blurred, then scaled back
 
 for path in "$src"/*.svg; do
     name=$(basename "$path" .svg)
+    case "$name" in *_shadow) continue ;; esac
 
     # The cell is whatever the source says it is.
     w=$(sed -n 's/.*<svg[^>]* width="\([0-9.]*\)".*/\1/p' "$path" | head -1)
@@ -55,10 +56,18 @@ for path in "$src"/*.svg; do
     big_sw=$((sw * scale))
     big_sh=$((sh * scale))
     big_sigma=$(awk "BEGIN { print $sigma * $scale }")
+    # A mark may bring its own twin instead: a filled shape under an outline
+    # is how the system draws its SELECT and START pills, and a blur of the
+    # outline is not that. The twin's cell is the shadow cell, unblurred.
+    if [ -f "$src/${name}_shadow.svg" ]; then
+        rsvg-convert -w "$sw" -h "$sh" "$src/${name}_shadow.svg" -o "$tmp/s.png"
+        magick "$tmp/s.png" -alpha extract "$tmp/sa.png"
+    else
     rsvg-convert -w "$big_w" -h "$big_h" "$path" -o "$tmp/s.png"
     magick "$tmp/s.png" -alpha extract -background black -gravity center \
            -extent "${big_sw}x${big_sh}" -blur "0x$big_sigma" \
            -resize "${sw}x${sh}!" "$tmp/sa.png"
+    fi
     magick -size "${sw}x${sh}" xc:black "$tmp/sa.png" -alpha off \
            -compose copy_opacity -composite "PNG32:$marks/${name}_shadow.png"
 

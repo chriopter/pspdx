@@ -18,6 +18,7 @@
 #include "gui/preview.h"
 #include "gui/screen.h"
 #include "gui/lattice.h"
+#include "gui/marks.h"
 #include "gui/shell.h"
 #include "install/install.h"
 #include "logic/entropy.h"
@@ -409,6 +410,8 @@ static void install_all(void) {
         if (at < 0) continue;
         const struct app_entry *entry = &catalog.apps[at];
         if (!entry->has_release || !entry->release.size) continue;
+        /* On the stick the job is the updates alone. */
+        if (shell_tab_kind() == SHELL_TAB_STICK && entry->state != APP_UPDATE) continue;
         list[n] = at;
         n++;
     }
@@ -438,7 +441,8 @@ static void install_all(void) {
    reinstalled at the version it has, and one already current has nothing to
    update to. The unavailable one stays on screen, greyed, because which of
    the two is greyed is itself the answer to "is there an update". */
-enum choice { CHOICE_UPDATE, CHOICE_REINSTALL, CHOICE_DELETE, CHOICE_COUNT };
+enum choice { CHOICE_RUN, CHOICE_REINSTALL, CHOICE_DELETE, CHOICE_BASKET, CHOICE_DETAILS,
+              CHOICE_COUNT };
 
 static char g_choice_text[CHOICE_COUNT][32];
 static const char *g_choice[CHOICE_COUNT];
@@ -446,27 +450,41 @@ static unsigned char g_choice_on[CHOICE_COUNT];
 static char g_menu_title[48];
 static int g_menu_open, g_menu_cursor, g_menu_of;
 
+/* The keys that do a row's thing without the menu, named at the row: the
+   menu is where they are learned. */
+static const signed char g_choice_key[CHOICE_COUNT] = {
+    [CHOICE_RUN] = MARK_START, [CHOICE_REINSTALL] = -1, [CHOICE_DELETE] = -1,
+    [CHOICE_BASKET] = MARK_SQUARE, [CHOICE_DETAILS] = -1,
+};
+
 static void menu_push(void) {
-    shell_menu(g_menu_title, g_choice, g_choice_on, CHOICE_COUNT, g_menu_cursor);
+    shell_menu(g_menu_title, g_choice, g_choice_on, g_choice_key, CHOICE_COUNT,
+               g_menu_cursor);
 }
 
 static void menu_open(int index) {
     const struct app_entry *entry = &catalog.apps[index];
-    int update = entry->state == APP_UPDATE;
+    int installed = entry->state != APP_NOT_INSTALLED;
     snprintf(g_menu_title, sizeof(g_menu_title), "%s", entry->name);
-    snprintf(g_choice_text[CHOICE_UPDATE], sizeof(g_choice_text[0]),
-             "Update to %s", entry->remote_version[0] ? entry->remote_version
-                                                      : entry->release.version);
+    /* Five rows, the same five for every package, in the same places; what
+       a row cannot do to this package it says by being grey. Installing and
+       updating are not among them: that is what X is, and the card, the
+       list and the stick tab already say which of the two it would be. */
+    snprintf(g_choice_text[CHOICE_RUN], sizeof(g_choice_text[0]), "Run");
     snprintf(g_choice_text[CHOICE_REINSTALL], sizeof(g_choice_text[0]), "Reinstall");
     snprintf(g_choice_text[CHOICE_DELETE], sizeof(g_choice_text[0]), "Delete");
+    /* The basket is here so that it can be found; square is the short way
+       once it has been. */
+    snprintf(g_choice_text[CHOICE_BASKET], sizeof(g_choice_text[0]),
+             shell_basket_has(index) ? "Take out of basket" : "Add to basket");
+    snprintf(g_choice_text[CHOICE_DETAILS], sizeof(g_choice_text[0]), "Information");
     for (int i = 0; i < CHOICE_COUNT; i++) g_choice[i] = g_choice_text[i];
-    g_choice_on[CHOICE_UPDATE] = update;
-    g_choice_on[CHOICE_REINSTALL] = !update;
-    /* Greyed rather than missing, for the same reason the other two are: the
-       row stays where it is and says that deleting is a thing that exists and
-       not a thing this package allows. */
-    g_choice_on[CHOICE_DELETE] = strcmp(entry->id, PSPDX_SELF_ID) != 0;
-    g_menu_cursor = update ? CHOICE_UPDATE : CHOICE_REINSTALL;
+    g_choice_on[CHOICE_RUN] = installed;
+    g_choice_on[CHOICE_REINSTALL] = installed;
+    g_choice_on[CHOICE_DELETE] = installed && strcmp(entry->id, PSPDX_SELF_ID) != 0;
+    g_choice_on[CHOICE_BASKET] = 1;
+    g_choice_on[CHOICE_DETAILS] = 1;
+    g_menu_cursor = installed ? CHOICE_RUN : CHOICE_BASKET;
     g_menu_of = index;
     g_menu_open = 1;
     menu_push();
@@ -474,7 +492,7 @@ static void menu_open(int index) {
 
 static void menu_close(void) {
     g_menu_open = 0;
-    shell_menu(NULL, NULL, NULL, 0, 0);
+    shell_menu(NULL, NULL, NULL, NULL, 0, 0);
 }
 
 /* A greyed row is stepped over rather than landed on: the cursor only ever
@@ -638,6 +656,10 @@ int main(int argc, char *argv[]) {
     char keep[96] = "";                 /* the entry to come back to after one */
     int automatic = -1;
     int info = 0, action = 0;           /* the info band and the row X takes */
+    int hidden = 0;                     /* idle: the room without the shell */
+    int details = 0;                    /* the band about one package */
+    unsigned idle_since = now_ms();     /* the last time a key was down */
+    unsigned last_frame_ms = now_ms();  /* to notice the loop having been away */
     unsigned shell_since = now_ms();
     int shot_connecting = 0;
     unsigned dumped_ms = now_ms();
@@ -768,16 +790,42 @@ int main(int argc, char *argv[]) {
            is: a question that scrolls out from under its answer is a trap,
            up and down belong to the menu while one is open, and a tab
            changing under a band would change what the band is about. */
-        int modal = g_question != ASK_NOTHING || g_menu_open || info;
+        int modal = g_question != ASK_NOTHING || g_menu_open || details;
+
+        /* Ten seconds without a key and the interface fades away, leaving
+           the room and the picture; the first key pressed after that,
+           whichever it is, brings it back and does nothing else: what
+           cannot be seen is not to be pressed. The stick still stirs the
+           water, and does not count as a key. */
+        /* An install or a refetch holds the loop for as long as it takes,
+           and that is not idling: the clock starts again when the loop is
+           back, or the first key after a long fetch would only lift a
+           veil that came down while nobody could have pressed anything. */
+        unsigned frame_ms = now_ms();
+        if (frame_ms - last_frame_ms > 300) idle_since = frame_ms;
+        last_frame_ms = frame_ms;
+        if (pad.Buttons || pressed || count == 0) idle_since = now_ms();
+        else if (!hidden && !modal && !info &&
+                 now_ms() - idle_since > 10000)
+            shell_hide(hidden = 1);
+        if (hidden) {
+            if (pressed & ~KEY_SHOT) shell_hide(hidden = 0);
+            pressed &= KEY_SHOT;
+        }
 
         /* The triggers and left/right walk the tabs, and the list under
-           them starts again at the top. */
+           them starts again at the top. The leftmost tab is the band about
+           the session: walking onto it opens the band, walking off it
+           closes it, so the band is left the way any tab is. */
         unsigned tabs = PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER | PSP_CTRL_LEFT | PSP_CTRL_RIGHT;
         if ((pressed & tabs) && count > 0 && !modal) {
             shell_tab_move(pressed & (PSP_CTRL_RTRIGGER | PSP_CTRL_RIGHT) ? 1 : -1);
             cues_post(CUE_MOVE, cursor = 0);
             count = shell_view_count();
+            info = shell_tab_kind() == SHELL_TAB_GEAR;
+            shell_info(info, action = 0);
         }
+        modal = modal || info;
         /* The list is a ring: past the last entry comes the first. */
         if ((pressed & PSP_CTRL_DOWN) && count > 0 && !modal)
             cues_post(CUE_MOVE, cursor = (cursor + 1) % count);
@@ -806,16 +854,42 @@ int main(int argc, char *argv[]) {
                 shell_status("");
             }
         } else if (g_menu_open) {
-            if (pressed & PSP_CTRL_DOWN) { menu_move(1); cues_post(CUE_MOVE, 0); }
-            if (pressed & PSP_CTRL_UP) { menu_move(-1); cues_post(CUE_MOVE, 0); }
-            if (pressed & PSP_CTRL_CIRCLE) menu_close();
+            /* The keys the menu names work from inside it too, so that what
+               is read there can be pressed there: square, START and SELECT
+               do their row's thing and take the menu with them. */
+            int index = g_menu_of;
+            if (pressed & PSP_CTRL_SQUARE) {
+                menu_close();
+                shell_basket_toggle(index);
+                cues_post(CUE_MOVE, cursor);
+                view_settled(&cursor);
+                count = shell_view_count();
+            } else if ((pressed & PSP_CTRL_START) &&
+                       catalog.apps[index].state != APP_NOT_INSTALLED) {
+                menu_close();
+                launch_app(index);
+            }
+            if (!g_menu_open) { /* taken by one of the keys above */ }
+            else if (pressed & PSP_CTRL_DOWN) { menu_move(1); cues_post(CUE_MOVE, 0); }
+            else if (pressed & PSP_CTRL_UP) { menu_move(-1); cues_post(CUE_MOVE, 0); }
+            else if (pressed & PSP_CTRL_CIRCLE) menu_close();
             else if (pressed & PSP_CTRL_CROSS) {
                 int chosen = g_menu_cursor, index = g_menu_of;
                 menu_close();
-                /* Deleting is the one of the three that cannot be undone by
-                   pressing the same button again, so it is asked about. */
+                /* Deleting cannot be undone by pressing the same button
+                   again, and a first install is a download worth a look at
+                   the size, so both are asked about. */
                 if (chosen == CHOICE_DELETE) ask_remove(index);
-                else {
+                else if (chosen == CHOICE_RUN) launch_app(index);
+                else if (chosen == CHOICE_BASKET) {
+                    shell_basket_toggle(index);
+                    cues_post(CUE_MOVE, cursor);
+                    view_settled(&cursor);
+                    count = shell_view_count();
+                } else if (chosen == CHOICE_DETAILS) {
+                    shell_details(&catalog.apps[index]);
+                    details = 1;
+                } else {
                     install_app(index, 0, 0, 0);
                     dump_diagnostics();
                     view_settled(&cursor);
@@ -828,10 +902,16 @@ int main(int argc, char *argv[]) {
             if (pressed & PSP_CTRL_UP)
                 shell_info(1, action = (action + SHELL_INFO_ACTIONS - 1) %
                                        SHELL_INFO_ACTIONS);
-            if (pressed & (PSP_CTRL_SELECT | PSP_CTRL_CIRCLE))
+            /* O steps off the band's tab onto the one after it, and so
+               does taking either of the band's two actions: both leave the
+               browser standing in a list again. */
+            if (pressed & (PSP_CTRL_CIRCLE | PSP_CTRL_CROSS)) {
                 shell_info(info = 0, action);
-            else if (pressed & PSP_CTRL_CROSS) {
-                shell_info(info = 0, action);
+                shell_tab_move(1);
+                cues_post(CUE_MOVE, cursor = 0);
+                count = shell_view_count();
+            }
+            if (pressed & PSP_CTRL_CROSS) {
                 if (action == 0 && synced) {
                     /* The catalog is fetched again from where the browser
                        stands: the list gives way to the word and the status
@@ -869,31 +949,35 @@ int main(int argc, char *argv[]) {
                     entropy_save(entropy_screen_is_replay());
                 }
             }
-        } else if (pressed & PSP_CTRL_SELECT) {
-            shell_info(info = 1, action);
+        } else if (details) {
+            if (pressed & PSP_CTRL_CIRCLE) {
+                shell_details(0);
+                details = 0;
+            }
         } else if (count > 0) {
             int at = shell_view_index(cursor);
             if (pressed & PSP_CTRL_CROSS) {
+                /* X is the one thing there is to do to the package: have
+                   it, or have the newer one. With nothing of that to do it
+                   opens the options, as triangle does. */
                 if (at == SHELL_ROW_ACTION) ask_all();
-                else if (at >= 0 && catalog.apps[at].state == APP_NOT_INSTALLED)
+                else if (at >= 0 && (catalog.apps[at].state == APP_NOT_INSTALLED ||
+                                     catalog.apps[at].state == APP_UPDATE))
                     ask_install(at);
-                else if (at >= 0)
-                    menu_open(at);
+                else if (at >= 0) menu_open(at);
             }
-            /* Triangle sets a package aside for later and takes it out
+            if ((pressed & PSP_CTRL_TRIANGLE) && at >= 0) menu_open(at);
+            /* Square sets a package aside for later and takes it out
                again -- including from the basket tab, where the row the
                cursor is on is one that was set aside. The basket appearing
                or emptying is a tab appearing or going, so the tabs are
                worked out again before the next frame draws them. */
-            if ((pressed & PSP_CTRL_TRIANGLE) && at >= 0) {
+            if ((pressed & PSP_CTRL_SQUARE) && at >= 0) {
                 shell_basket_toggle(at);
                 cues_post(CUE_MOVE, cursor);
                 view_settled(&cursor);
                 count = shell_view_count();
             }
-            if ((pressed & PSP_CTRL_SQUARE) && at >= 0 &&
-                catalog.apps[at].state != APP_NOT_INSTALLED)
-                ask_remove(at);
             if ((pressed & PSP_CTRL_START) && at >= 0 &&
                 catalog.apps[at].state != APP_NOT_INSTALLED)
                 launch_app(at);

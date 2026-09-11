@@ -68,6 +68,15 @@ struct vtexc { short u, v; unsigned color; short x, y, z; };
 #define BATCH_STRIP_VERTS 1200
 
 static int g_batching;
+static int g_veil = 256;
+
+void gfx_veil(int keep) { g_veil = keep < 0 ? 0 : keep > 256 ? 256 : keep; }
+
+unsigned gfx_veiled(unsigned color) {
+    if (g_veil == 256) return color;
+    unsigned a = (color >> 24) * (unsigned)g_veil >> 8;
+    return (color & 0x00FFFFFF) | (a << 24);
+}
 static struct vtexc *g_sprite;          /* two vertices per sprite */
 static int g_sprites;
 static struct vcol *g_strip;
@@ -353,10 +362,10 @@ static void quad(int x, int y, int w, int h,
     flush_batch();
     struct vcol *v = sceGuGetMemory(4 * sizeof(struct vcol));
     if (!v) return;
-    v[0].color = tl; v[0].x = x;     v[0].y = y;     v[0].z = 0;
-    v[1].color = bl; v[1].x = x;     v[1].y = y + h; v[1].z = 0;
-    v[2].color = tr; v[2].x = x + w; v[2].y = y;     v[2].z = 0;
-    v[3].color = br; v[3].x = x + w; v[3].y = y + h; v[3].z = 0;
+    v[0].color = gfx_veiled(tl); v[0].x = x;     v[0].y = y;     v[0].z = 0;
+    v[1].color = gfx_veiled(bl); v[1].x = x;     v[1].y = y + h; v[1].z = 0;
+    v[2].color = gfx_veiled(tr); v[2].x = x + w; v[2].y = y;     v[2].z = 0;
+    v[3].color = gfx_veiled(br); v[3].x = x + w; v[3].y = y + h; v[3].z = 0;
     flat_state();
     sceGuDrawArray(GU_TRIANGLE_STRIP,
                    GU_COLOR_8888 | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
@@ -693,6 +702,7 @@ void gfx_mirror_end(void) {
 
 void gfx_glow(float cx, float cy, float w, float h, unsigned color) {
     if (!g_glow.pixels) return;
+    color = gfx_veiled(color);
     if (g_batching) {
         flush_strips();
         if (g_sprites == BATCH_SPRITES) flush_sprites();
@@ -735,7 +745,7 @@ void gfx_texture_draw(const struct gfx_texture *t, int x, int y, int w, int h,
     if (!v) return;
     bind(t);
     sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
-    sceGuColor(tint);
+    sceGuColor(gfx_veiled(tint));
     v[0].u = 0;              v[0].v = 0;
     v[0].x = x;              v[0].y = y;              v[0].z = 0;
     v[1].u = (short)t->w;    v[1].v = (short)t->h;
@@ -759,7 +769,7 @@ void gfx_texture_draw_part(const struct gfx_texture *t, int sx, int sy,
        that samples half a texel off is how a two-pixel stroke goes soft. */
     sceGuTexFilter(GU_NEAREST, GU_NEAREST);
     sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
-    sceGuColor(tint);
+    sceGuColor(gfx_veiled(tint));
     short px = (short)(x + 0.5f), py = (short)(y + 0.5f);
     v[0].u = (short)sx;         v[0].v = (short)sy;
     v[0].x = px;                v[0].y = py;                v[0].z = 0;
@@ -807,7 +817,7 @@ void gfx_shade(float cx, float cy, float w, float h, int alpha) {
     if (!v) return;
     bind(&g_glow);
     sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
-    sceGuColor(RGBA(0, 0, 0, alpha));
+    sceGuColor(gfx_veiled(RGBA(0, 0, 0, alpha)));
     v[0].u = 0;         v[0].v = 0;
     v[0].x = (short)(cx - w / 2); v[0].y = (short)(cy - h / 2); v[0].z = 0;
     v[1].u = GLOW_SIZE; v[1].v = GLOW_SIZE;
@@ -908,7 +918,11 @@ void gfx_bake_end(struct gfx_texture *into) {
     g_baking = 0;
 }
 
-void gfx_card_draw(const struct gfx_texture *t, const struct gfx_card *c) {
+void gfx_card_draw(const struct gfx_texture *t, const struct gfx_card *cc) {
+    /* The veil takes the picture's own alpha down with everything else's. */
+    struct gfx_card veiled = *cc;
+    const struct gfx_card *c = &veiled;
+    veiled.alpha = (int)((unsigned)cc->alpha * (unsigned)g_veil >> 8);
     float hw = c->w * PX / 2, hh = c->h * PX / 2;
 
     /* The shadow is flat, under the card, offset the way the card leans. */
@@ -923,7 +937,8 @@ void gfx_card_draw(const struct gfx_texture *t, const struct gfx_card *c) {
     float f = c->bare ? 0.0f : 1.5f * PX;
     if (!c->bare)
         card_quad(-hw - f, hh + f, hw + f, -hh - f, -0.002f,
-                  RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200), RGBA(0, 0, 0, 200));
+                  gfx_veiled(RGBA(0, 0, 0, 200)), gfx_veiled(RGBA(0, 0, 0, 200)),
+                  gfx_veiled(RGBA(0, 0, 0, 200)), gfx_veiled(RGBA(0, 0, 0, 200)));
 
     if (t && t->pixels) {
         float u1 = (float)t->w / t->tw, v1 = (float)t->h / t->th;

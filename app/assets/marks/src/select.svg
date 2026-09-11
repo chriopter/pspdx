@@ -1,6 +1,11 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="19" height="9" viewBox="0 0 19 9">
-  <!-- The other pill: the same button with nothing in it, which is how the
-       pair tells itself apart at seven pixels tall. -->
-  <rect x="1.75" y="1.75" width="15.5" height="5.5" rx="2.75" fill="none"
-        stroke="#ffffff" stroke-width="1.5"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="43" height="14" viewBox="0 0 43 14">
+  <!-- The system's own SELECT button as it stands in its dialogs: a dark
+       pill with the word in light letters and a thin light rim. The pill's
+       fill is not here, coverage is white, but in select_shadow.svg,
+       which is the black twin the shell paints under every mark anyway. -->
+  <rect x="1.5" y="1.5" width="40" height="11" rx="5.5" fill="none"
+        stroke="#ffffff" stroke-width="1"/>
+  <text x="21.5" y="10.6" text-anchor="middle" fill="#ffffff"
+        font-family="Nimbus Sans Narrow, Liberation Sans Narrow, DejaVu Sans Condensed, sans-serif"
+        font-weight="bold" font-size="9.4" letter-spacing="0.3">SELECT</text>
 </svg>

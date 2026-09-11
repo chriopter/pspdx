@@ -1,8 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="11" height="15" viewBox="0 0 11 15">
-  <!-- The Memory Stick: taller than it is wide, one corner taken off wide
-       enough to be seen at this size, and the label patch near the foot
-       that says which way up it goes. -->
-  <path d="M2 2.5 H6.4 L9 5.1 V12.5 H2 Z" fill="none" stroke="#ffffff"
-        stroke-width="1.7" stroke-linejoin="round"/>
-  <rect x="3.4" y="9.2" width="4.2" height="1.8" rx="0.5" fill="#ffffff"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="13" height="17" viewBox="0 0 13 17">
+  <!-- The Memory Stick: a card with its corner cut, the notch at its foot.
+       Drawn to the same optical size as the category signs beside it: the
+       body nearly the cell's height and the stroke as heavy as theirs, so
+       that a narrow shape does not read as a smaller one. -->
+  <path d="M2 2 H7.6 L11 5.4 V15 H2 Z" fill="none" stroke="#ffffff"
+        stroke-width="2" stroke-linejoin="round"/>
+  <rect x="4" y="10.6" width="5" height="2.2" rx="0.5" fill="#ffffff"/>
 </svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 17 17">
+  <!-- A cog: a ring with a hole and six teeth, the way every settings screen
+       says settings. Six teeth and not eight, because at fifteen pixels
+       eight teeth run into one another and the ring reads as a sun. -->
+  <circle cx="8.5" cy="8.5" r="4.6" fill="none" stroke="#ffffff" stroke-width="2.4"/>
+  <g stroke="#ffffff" stroke-width="2.4" stroke-linecap="round">
+    <line x1="8.5" y1="1.6" x2="8.5" y2="3.4"/>
+    <line x1="8.5" y1="13.6" x2="8.5" y2="15.4"/>
+    <line x1="2.52" y1="5.05" x2="4.08" y2="5.95"/>
+    <line x1="12.92" y1="11.05" x2="14.48" y2="11.95"/>
+    <line x1="2.52" y1="11.95" x2="4.08" y2="11.05"/>
+    <line x1="12.92" y1="5.95" x2="14.48" y2="5.05"/>
+  </g>
+</svg>

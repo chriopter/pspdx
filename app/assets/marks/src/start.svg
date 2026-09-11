@@ -1,9 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="19" height="9" viewBox="0 0 19 9">
-  <!-- The pill on the face of the machine, with the go mark inside it. The
-       stroke is one and a half: at seven pixels tall a stroke of two leaves
-       three pixels of inside, and nothing fits in three. -->
-  <rect x="1.75" y="1.75" width="15.5" height="5.5" rx="2.75" fill="none"
-        stroke="#ffffff" stroke-width="1.5"/>
-  <path d="M7.7 2.9 L11.5 4.5 L7.7 6.1 Z" fill="#ffffff" stroke="#ffffff"
-        stroke-width="0.5" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="39" height="14" viewBox="0 0 39 14">
+  <!-- The same pill, the other word. -->
+  <rect x="1.5" y="1.5" width="36" height="11" rx="5.5" fill="none"
+        stroke="#ffffff" stroke-width="1"/>
+  <text x="19.5" y="10.6" text-anchor="middle" fill="#ffffff"
+        font-family="Nimbus Sans Narrow, Liberation Sans Narrow, DejaVu Sans Condensed, sans-serif"
+        font-weight="bold" font-size="9.4" letter-spacing="0.3">START</text>
 </svg>

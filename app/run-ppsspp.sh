@@ -36,7 +36,7 @@ while [ $# -gt 0 ]; do
 	case "$1" in
 		--sweep) SWEEP=1 ;;
 		--keys) KEYS="$2"; shift ;;
-		--slow) SLOW="${2:-180}"; case "$SLOW" in ''|*[!0-9]*) SLOW=180 ;; *) shift ;; esac ;;
+		--slow) case "${2:-}" in ''|*[!0-9]*) SLOW=180 ;; *) SLOW="$2"; shift ;; esac ;;
 		*) SECS="$1" ;;
 	esac
 	shift
@@ -99,12 +99,20 @@ INI="$MS/PSP/SYSTEM/ppsspp.ini"
 # log.
 # --nosocket=pulseaudio: a rig run has no ear on it. The client's own stream
 # is checked through the emulator's DumpAudio, not through the speakers.
+# The emulator inside the sandbox is not in the launcher's process group, so
+# it is found again by a tag in its environment -- this run's own pid -- and
+# only that one is stopped. Whatever else is running, a desk instance or
+# someone's own, is not this run's to touch.
+RIG="rig-$$"
 SDL_VIDEODRIVER=wayland setsid flatpak run --socket=wayland --share=network \
-  --nosocket=pulseaudio \
+  --nosocket=pulseaudio --env=PSPDX_RIG="$RIG" \
   --filesystem="$MS" org.ppsspp.PPSSPP --fullscreen=0 \
   "$MS/PSP/GAME/pspdx/EBOOT.PBP" >"$HERE/ppsspp.out" 2>&1 &
 PID=$!
 sleep "$SECS"
+for p in $(pgrep -x PPSSPPSDL); do
+	tr '\0' '\n' <"/proc/$p/environ" 2>/dev/null | grep -qx "PSPDX_RIG=$RIG" && kill "$p" 2>/dev/null
+done
 kill -- -"$PID" 2>/dev/null || kill "$PID" 2>/dev/null || true
 sleep 2
 

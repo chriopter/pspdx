@@ -218,6 +218,12 @@ void gfx_bake_end(struct gfx_texture *into);
 /* A soft dark spot, composited rather than added: a shadow. */
 void gfx_shade(float cx, float cy, float w, float h, int alpha);
 
+/* A veil over everything drawn after it: every alpha is scaled by keep/256,
+   so a whole layer can be faded by the one call rather than by touching each
+   colour. 256 lifts it. */
+void gfx_veil(int keep);
+unsigned gfx_veiled(unsigned color);
+
 /* Reads back whatever is on screen right now, GU or debug screen: it asks the
    display which buffer is front rather than assuming the start of VRAM. */
 void gfx_screenshot(const char *path);

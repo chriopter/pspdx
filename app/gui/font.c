@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "gui/font.h"
+#include "gui/gfx.h"
 #include "util/runtime.h"
 
 /* ltn8 is the sans-serif face the system shell uses; ltn0 is the serif one
@@ -22,13 +23,13 @@ static intraFont *g_font;
 
 /* size is intraFont's scale factor, where 1.0 is the face at its design size
    -- about 20 px tall on this screen. */
-/* Sized for a 4.3-inch panel held at arm's length: the body is what the
-   system shell uses for its menus, the rest steps from there. */
+/* The system shell's own sizes: names at the size of an XMB item, the
+   rows a step under, and nothing smaller than the XMB's smallest line. */
 static const struct { float size; unsigned shadow; } STYLES[] = {
     [FONT_DISPLAY] = { 1.35f, 0x00000000 },
-    [FONT_H1]   = { 0.92f, 0xA0000000 },
-    [FONT_BODY] = { 0.70f, 0x80000000 },
-    [FONT_META] = { 0.56f, 0x70000000 },
+    [FONT_H1]   = { 1.00f, 0xA0000000 },
+    [FONT_BODY] = { 0.82f, 0x80000000 },
+    [FONT_META] = { 0.72f, 0x70000000 },
 };
 
 /* ---------------------------------------------------------- measurements */
@@ -112,9 +113,10 @@ static int g_styled = -1;
 static unsigned g_color;
 
 static void use(enum font_style style, unsigned color) {
+    color = gfx_veiled(color);
     if ((int)style == g_styled && color == g_color) return;
-    intraFontSetStyle(g_font, STYLES[style].size, color, STYLES[style].shadow,
-                      0.0f, INTRAFONT_ALIGN_LEFT);
+    intraFontSetStyle(g_font, STYLES[style].size, color,
+                      gfx_veiled(STYLES[style].shadow), 0.0f, INTRAFONT_ALIGN_LEFT);
     g_styled = style;
     g_color = color;
 }

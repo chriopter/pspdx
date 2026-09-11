@@ -37,7 +37,8 @@ int shell_view_row(int index);      /* catalog index -> view row, -1 if hidden *
    this session has filled. Both stand to the left of All, both come and go
    with what is in them, and both carry one row that is not a package but the
    whole tab as a thing to do. */
-enum shell_tab_kind { SHELL_TAB_CATEGORY, SHELL_TAB_UPDATES, SHELL_TAB_BASKET };
+enum shell_tab_kind { SHELL_TAB_CATEGORY, SHELL_TAB_STICK, SHELL_TAB_BASKET,
+                      SHELL_TAB_GEAR };
 enum shell_tab_kind shell_tab_kind(void);
 
 /* That row. shell_view_index() answers SHELL_ROW_ACTION for it, which is
@@ -110,12 +111,16 @@ void shell_word(const char *word);
    empty title takes the question away again. */
 void shell_ask(const char *title, const char *line);
 
-/* A short menu in the same band: a title, up to four choices, and the cursor
-   on one of them. takeable[i] zero draws that row grey -- the choice exists
-   and cannot be taken, which is how a package that has no update says so.
-   count 0 closes it. Like the question, it is drawn here and driven there. */
+/* The options menu, the system's own: a panel sliding in from the right
+   with a title and the choices under it, the cursor on one. takeable[i]
+   zero draws that row grey -- the choice exists and cannot be taken, which
+   is how a package that has no update says so. keys[i], where not -1, is
+   the mark of the key that does the same thing without the menu, drawn at
+   the row's end: the menu is where the keys are learned. count 0 slides it
+   out again. Like the question, it is drawn here and driven there. */
 void shell_menu(const char *title, const char *const *items,
-                const unsigned char *takeable, int count, int cursor);
+                const unsigned char *takeable, const signed char *keys,
+                int count, int cursor);
 
 /* The info band over the dimmed browser: what this session is connected to
    and what it is standing on, and at its foot the two things that can be
@@ -124,6 +129,14 @@ void shell_menu(const char *title, const char *const *items,
    under it is read in the main loop. */
 #define SHELL_INFO_ACTIONS 2
 void shell_info(int open, int action);
+
+/* Idle: the whole interface gone but the picture, the room left standing
+   on its own. */
+void shell_hide(int hidden);
+
+/* Square: the band that says everything the catalog knows about one package.
+   NULL takes it down. */
+void shell_details(const struct app_entry *entry);
 
 /* Install progress, drawn over the browser. The two middle ones match the
    callback types install() expects.
