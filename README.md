@@ -233,6 +233,7 @@ the wolfSSL step.
 dev/start           # build, then open it in PPSSPP, one instance, straight to the catalog
 dev/start-reset     # the same without the seed: the sweep runs, as on a new PSP
 dev/start --quiet   # without speakers
+dev/start --slow    # the network held to a PSP-1004's 180 KB/s
 ```
 
 Both plant what a run needs on the emulator's stick -- the system font,

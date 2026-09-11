@@ -7,6 +7,7 @@
 #   dev/start --reset    also forget the seed: the sweep runs, as on a new PSP
 #   dev/start --no-build
 #   dev/start --quiet    no speakers: the emulator gets no audio socket
+#   dev/start --slow     the network held to a PSP-1004's 180 KB/s (802.11b)
 #
 # The stick gets what a run needs and PPSSPP does not provide: the system
 # font (PPSSPP has it but does not mount flash0 for the guest), the clips
@@ -20,11 +21,13 @@ MS="$HOME/.var/app/org.ppsspp.PPSSPP/config/ppsspp"
 RESET=0
 BUILD=1
 AUDIO=""
+SLOW=0
 for arg in "$@"; do
 	case "$arg" in
 		--reset) RESET=1 ;;
 		--no-build) BUILD=0 ;;
 		--quiet) AUDIO="--nosocket=pulseaudio" ;;
+		--slow) SLOW=1 ;;
 		*) echo "unknown option $arg" >&2; exit 2 ;;
 	esac
 done
@@ -46,7 +49,10 @@ for clip in "$HERE"/../pspdx-catalog/apps/*/video.mp4 "$HERE"/catalog/apps/*/vid
 	cp "$clip" "$MS/PSP/PSPDX/cache/$(basename "$(dirname "$clip")").mp4"
 done
 
-rm -f "$MS/PSPDX.REPLAY" "$MS/PSPDX.KEYS" "$MS/PSPDX.INSTALL"
+rm -f "$MS/PSPDX.REPLAY" "$MS/PSPDX.KEYS" "$MS/PSPDX.INSTALL" "$MS/PSPDX.SLOW"
+# The host's network is ten times a PSP's; with the file there the client
+# holds every fetch to what the 1004's radio and stack actually deliver.
+[ "$SLOW" = 1 ] && printf '180' >"$MS/PSPDX.SLOW"
 if [ "$RESET" = 1 ]; then
 	rm -f "$MS/PSPDX.SEED"
 else
