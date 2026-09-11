@@ -545,12 +545,12 @@ static void band_rule(int y, int half_w, int alpha) {
 
 static void draw_band(int y, int h) {
     /* The whole room steps back a little so the band is the front. */
-    gfx_rect(0, 0, SCR_W, SCR_H, RGBA(0, 0, 0, 70));
-    gfx_rect(0, y, SCR_W, h, RGBA(0, 0, 0, 150));
+    gfx_rect(0, 0, SCR_W, SCR_H, RGBA(0, 0, 0, 110));
+    gfx_rect(0, y, SCR_W, h, RGBA(0, 0, 0, 215));
     /* Flat dark over the screenshot card still leaves it the brightest thing
        on screen and the text on top of it unreadable, so the band is darkest
        where the words are and lets the room back in toward the walls. */
-    gfx_shade(SCR_W / 2.0f, y + h / 2.0f, SCR_W * 1.7f, h * 1.1f, 150);
+    gfx_shade(SCR_W / 2.0f, y + h / 2.0f, SCR_W * 1.7f, h * 1.1f, 170);
     band_edge(y);
     band_edge(y + h);
 }
@@ -559,8 +559,7 @@ static void draw_band(int y, int h) {
    for them, and spelling TRIANGLE out is longer than the word it would be
    labelling. A ribbon is a band offset up and down from its own points, so it
    draws a slope well and a vertical line not at all -- which is why the square
-   is four thin rectangles and the ring starts half a step off the axes, where
-   no segment of it stands upright. */
+   is four thin rectangles and the ring is a circle of single pixels. */
 enum mark { MARK_CROSS, MARK_CIRCLE, MARK_SQUARE, MARK_TRIANGLE };
 
 #define MARK_W 11
@@ -584,13 +583,13 @@ static void draw_mark(enum mark mark, float cx, float cy, unsigned color) {
         gfx_rect(x - 4, y - 4, 1, 9, color);
         gfx_rect(x + 4, y - 4, 1, 9, color);
     } else {
-        float rx[13], ry[13];
-        for (int i = 0; i < 13; i++) {
-            float a = (i + 0.5f) * (6.2831853f / 12);
-            rx[i] = cx + cosf(a) * 4.0f;
-            ry[i] = cy + sinf(a) * 4.0f;
+        /* The ring as sixteen points on a circle: at this size a ribbon
+           round it reads as a swirl, a row of pixels reads as a ring. */
+        for (int i = 0; i < 16; i++) {
+            float a = i * (6.2831853f / 16);
+            gfx_rect((int)(cx + cosf(a) * 4.0f + 0.5f), (int)(cy + sinf(a) * 4.0f + 0.5f),
+                     1, 1, color);
         }
-        gfx_ribbon(rx, ry, c, 13, 1.0f);
     }
 }
 
