@@ -47,6 +47,46 @@ Copy: [`app.json.template`](app.json.template)
 </details>
 
 <details>
+<summary><b>The id, and how an update is noticed</b> — one name that is a URL, a cache file and a record on the stick; one number that says whether the stick is behind.</summary>
+
+The id is the app's directory name in the catalog, in the reverse-domain
+style of Flatpak ids: `io.github.chriopter.rustraytracer` for a repository
+under `github.com/chriopter`. Lowercase letters, digits, dots and dashes,
+at most eighty characters, no `..`. The rules are strict because the same
+string becomes a URL (`icons/<id>.png`), a file in the cache
+(`PSP/PSPDX/cache/<id>.mp4`) and a record on the stick, so it has to be a
+path component everywhere. It is not the directory under `PSP/GAME`: that
+one comes out of the archive, and the record remembers it.
+
+What is installed lives in `PSP/PSPDX/db/<id>.json`, one file per app,
+one line:
+
+```json
+{"id":"io.github.chriopter.rustraytracer","rev":1789071038,"dir":"RustRaytracer","manifest":"","version":"0.4.0"}
+```
+
+`rev` is the release's publication time as a number, taken from GitHub by
+the scanner; `dir` is the directory actually written under `PSP/GAME`,
+which removing and replacing need; `version` is only for display. The
+record is the last thing an install writes, after the staging directory
+has been renamed into place — to a temporary name first and then over the
+old record, so a battery that dies between the two leaves the previous
+record rather than an empty file. Removing an app deletes the tree first
+and the record second, so a directory left behind can never be silently
+overwritten later.
+
+An update is a comparison, nothing more: at start, and again on SELECT →
+fetch, the client reads every record and holds each `rev` against the
+`release.rev` in the catalog. A larger number in the catalog marks the
+row with the turning arrows and offers *Update to <version>*; the same
+number is a tick; no record is *not installed*. Updating is the install
+path over again — download, checksum, unpack into staging, rename — with
+the previous copy stepping aside as `<dir>.old` until the new one is in
+place, then gone.
+
+</details>
+
+<details>
 <summary><b><code>app.pspdx</code></b> — optional. In the author's repository.</summary>
 
 ```json
