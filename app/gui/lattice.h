@@ -26,6 +26,16 @@ void lattice_stir(float x, float y);
 
 void lattice_draw(float t, struct rgb tint);
 
+/* A picture lying in the water: what is on the card, drawn again on the
+   surface below it. px and pw are the card's left edge and its width in
+   pixels, bottom the pixel its picture ends on and ph its height; alpha is
+   how far the picture itself has faded in, so a still crossing into a film
+   crosses in the water too. Called after lattice_draw, from where the card
+   is drawn -- the water is already down by then, and this goes on top of
+   it. Anything the card does not stand over takes nothing. */
+void lattice_mirror(const struct gfx_texture *t, int alpha,
+                    float px, float bottom, float pw, float ph);
+
 /* The colour the room is heading for. Call it from shell_draw where draw_lot
    picks the target for a new selection, with the colour it drew: the water
    then turns from the last touch point outward, a front running with the

@@ -732,7 +732,9 @@ static void draw_panel(const struct app_entry *entry, float t) {
     card.h = SHOT_H;
     card.yaw = 0.0f;
     card.pitch = 0.0f;
-    card.reflect_h = REFLECT_H + 6;
+    /* No mirrored strip under the card: what the picture is reflected in is
+       the water, which is under it anyway and moving. */
+    card.reflect_h = 0;
     /* No sweep across the glass: a highlight travelling over a picture reads
        as a smear on the screen rather than as light in the room. The light
        that used to cross the card crosses the water now, where it has a
@@ -747,6 +749,17 @@ static void draw_panel(const struct app_entry *entry, float t) {
     const struct gfx_texture *film = preview_film(&film_alpha);
     enum preview_state picture = preview_state();
     if (still || film) {
+        /* The reflection first and under everything: it runs down over the
+           water where the lines below the card are about to be written, and
+           it belongs behind them. The same two pictures in the same order as
+           on the card, so a still crossing into a film crosses in the water
+           at the same moment. */
+        if (still && !(film && film_alpha >= 250))
+            lattice_mirror(still, still_alpha, PANEL_X, SHOT_Y + SHOT_H,
+                           SHOT_W, SHOT_H);
+        if (film)
+            lattice_mirror(film, film_alpha, PANEL_X, SHOT_Y + SHOT_H,
+                           SHOT_W, SHOT_H);
         /* The still first, the film fading in over it. */
         if (still && !(film && film_alpha >= 250)) {
             card.alpha = still_alpha;

@@ -284,6 +284,9 @@ unsigned gfx_frames(void) { return g_frames; }
 static void flat_state(void) {
     sceGuDisable(GU_TEXTURE_2D);
     sceGuDisable(GU_DEPTH_TEST);
+    /* The water leaves a light burning, and a vertex with no normal in its
+       format would be lit off whatever the last one had. */
+    sceGuDisable(GU_LIGHTING);
     sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
 }
 
@@ -301,6 +304,9 @@ static void bind(const struct gfx_texture *t) {
     sceGuTexFunc(GU_TFX_MODULATE, t->opaque ? GU_TCC_RGB : GU_TCC_RGBA);
     sceGuTexFilter(GU_LINEAR, GU_LINEAR);
     sceGuTexWrap(GU_CLAMP, GU_CLAMP);
+    /* The water leaves the tile's own scale and creep behind it. */
+    sceGuTexScale(1.0f, 1.0f);
+    sceGuTexOffset(0.0f, 0.0f);
 }
 
 static void flush_sprites(void) {
@@ -455,11 +461,26 @@ void gfx_ribbon(const float *x, const float *y, const unsigned *color, int n,
    into the water and back out. Fixed, because the camera is. */
 static const float EYE[3] = { 0.0f, -0.966f, 0.259f };
 
+/* The same sun the palette is built from, as the GE wants it: a direction in
+   the world the mesh lives in, where x runs across, y up and z toward the
+   viewer. The tile's axes are x across, y away and z up, so the two swap.
+   Its height over the horizon is held at the palette's and only its bearing
+   follows the light around, since what a long low swell does with a sun
+   depends on how flat that sun lies: this flat, a face turned away from it
+   has no light on it at all, which is what makes the troughs black. */
+#define SUN_UP 0.30f
+static ScePspFVector3 g_sun = { 0.0f, SUN_UP, -0.954f };
+
 static float channel(float v) { return v < 0 ? 0 : v > 255 ? 255 : v; }
 
 void gfx_water_light(float lx, float ly, float lz,
                      unsigned deep, unsigned sky, unsigned glint) {
     float k = 1.0f / sqrtf(lx * lx + ly * ly + lz * lz + 1e-6f);
+    float sx = lx * k, sz = -ly * k;
+    float sk = 1.0f / sqrtf(sx * sx + sz * sz + 1e-6f);
+    g_sun.x = sx * sk;
+    g_sun.y = SUN_UP;
+    g_sun.z = sz * sk;
     /* Halfway between the light and the eye: a texel whose normal points
        there is the one that sends the light straight down the lens. */
     float hx = lx * k + EYE[0], hy = ly * k + EYE[1], hz = lz * k + EYE[2];
@@ -490,17 +511,47 @@ void gfx_water_light(float lx, float ly, float lz,
     }
 }
 
+/* The surface and the strips cut out of it live here from frame to frame:
+   the GE has finished with them by the time the next frame is drawn, since
+   frame_end syncs before it swaps. */
+static struct gfx_water_vertex *g_mesh;
+static int g_mesh_verts;
+static unsigned short *g_index;
+static int g_index_count;
+
 struct gfx_water_vertex *gfx_water_mesh(int verts) {
     if (!g_ripple) return 0;
-    return sceGuGetMemory(verts * sizeof(struct gfx_water_vertex));
+    if (!g_mesh || verts > g_mesh_verts) {
+        free(g_mesh);
+        g_mesh = memalign(16, verts * sizeof(struct gfx_water_vertex));
+        g_mesh_verts = g_mesh ? verts : 0;
+    }
+    return g_mesh;
 }
 
-void gfx_water_begin(int frame) {
-    if (!g_ripple) return;
-    flush_batch();
-    /* The vanishing point belongs at the horizon and not at the middle of the
-       screen, and the cheapest way to put it there is to tell the GE the
-       screen is 20 rows higher than it is. Undone in end(). */
+unsigned short *gfx_water_index(int count) {
+    if (!g_index || count > g_index_count) {
+        free(g_index);
+        g_index = memalign(16, (size_t)count * sizeof(unsigned short));
+        g_index_count = g_index ? count : 0;
+    }
+    return g_index;
+}
+
+void gfx_water_ready(void) {
+    if (g_mesh)
+        sceKernelDcacheWritebackRange(g_mesh,
+            (unsigned)g_mesh_verts * sizeof(struct gfx_water_vertex));
+    if (g_index)
+        sceKernelDcacheWritebackRange(g_index,
+            (unsigned)g_index_count * sizeof(unsigned short));
+}
+
+/* The camera the water is drawn through, which the picture in it borrows.
+   The vanishing point belongs at the horizon and not at the middle of the
+   screen, and the cheapest way to put it there is to tell the GE the screen
+   is 20 rows higher than it is. Undone in end(). */
+static void water_camera(void) {
     sceGuOffset(2048 - SCR_W / 2, 2048 - (unsigned)GFX_HORIZON);
     sceGumMatrixMode(GU_PROJECTION);
     sceGumLoadIdentity();
@@ -512,6 +563,44 @@ void gfx_water_begin(int frame) {
     sceGumLoadIdentity();
     sceGumMatrixMode(GU_MODEL);
     sceGumLoadIdentity();
+}
+
+/* What the mesh's own light does, as against the ripple's: the ambient is
+   the water's dark, which the crossing's colour is read through; the diffuse
+   is the swell standing up into a sun that lies all but flat on the horizon,
+   so a face turned toward it whitens and one turned away goes to the
+   ambient alone; the specular is the glint path, which the GE draws for
+   itself because it puts the eye where the eye is -- the half vector turns
+   with the pixel, and the facets that send the sun down the lens lie in a
+   path from under it to the viewer. */
+#define WATER_AMBIENT RGBA(36, 36, 36, 255)
+#define WATER_DIFFUSE RGBA(255, 255, 255, 255)
+#define WATER_SPECULAR RGBA(255, 255, 255, 255)
+#define WATER_SHINE 10.0f
+
+void gfx_water_begin(float du, float dv) {
+    if (!g_ripple) return;
+    flush_batch();
+    water_camera();
+
+    /* The light the swell is lit by. Every colour here is a grey: the room's
+       colour is in the crossings and the ripple's palette already, and a
+       light with a colour of its own would lay it on twice. */
+    sceGuEnable(GU_LIGHTING);
+    sceGuEnable(GU_LIGHT0);
+    sceGuLightMode(GU_SINGLE_COLOR);
+    sceGuLight(0, GU_DIRECTIONAL, GU_DIFFUSE_AND_SPECULAR, &g_sun);
+    sceGuLightColor(0, GU_DIFFUSE, WATER_DIFFUSE);
+    sceGuLightColor(0, GU_SPECULAR, WATER_SPECULAR);
+    /* A directional light does not fall off, but the GE is told so rather
+       than left with whatever the last caller wanted. */
+    sceGuLightAtt(0, 1.0f, 0.0f, 0.0f);
+    sceGuAmbient(WATER_AMBIENT);
+    sceGuSpecular(WATER_SHINE);
+    /* The crossing's colour is the material: its own for the ambient and the
+       diffuse, white for the glint, and its alpha is what comes out. */
+    sceGuModelColor(0, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF);
+    sceGuColorMaterial(GU_AMBIENT | GU_DIFFUSE);
 
     sceGuDisable(GU_DEPTH_TEST);
     sceGuEnable(GU_TEXTURE_2D);
@@ -521,9 +610,8 @@ void gfx_water_begin(int frame) {
     sceGuTexFilter(GU_LINEAR_MIPMAP_LINEAR, GU_LINEAR);
     sceGuTexWrap(GU_REPEAT, GU_REPEAT);
     sceGuTexScale(1.0f, 1.0f);
-    sceGuTexOffset(0.0f, 0.0f);
+    sceGuTexOffset(du, dv);
     additive();
-    (void)frame;
 }
 
 void gfx_water_step(int which, int frame, float weight) {
@@ -548,18 +636,57 @@ void gfx_water_step(int which, int frame, float weight) {
     }
 }
 
-void gfx_water_strip(const struct gfx_water_vertex *v, int n, float level) {
+void gfx_water_shine(float keep) {
+    if (!g_ripple) return;
+    int q = (int)(keep * 255.0f);
+    if (q < 0) q = 0; else if (q > 255) q = 255;
+    sceGuLightColor(0, GU_SPECULAR, RGBA(q, q, q, 255));
+}
+
+void gfx_water_strip(const struct gfx_water_vertex *v, const unsigned short *idx,
+                     int n, float level) {
     if (!g_ripple || n < 4) return;
     if (level < 0.0f) level = 0.0f;
     else if (level > RIPPLE_LEVELS - 1) level = RIPPLE_LEVELS - 1;
     sceGuTexLevelMode(GU_TEXTURE_CONST, level);
     sceGumDrawArray(GU_TRIANGLE_STRIP,
-                    GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF |
-                    GU_TRANSFORM_3D, n, 0, v);
+                    GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_NORMAL_32BITF |
+                    GU_VERTEX_32BITF | GU_TRANSFORM_3D | GU_INDEX_16BIT,
+                    n, idx, v);
 }
 
 void gfx_water_end(void) {
     if (!g_ripple) return;
+    sceGuOffset(2048 - SCR_W / 2, 2048 - SCR_H / 2);
+    flat_state();
+}
+
+/* ----------------------------------------------------------- the mirror */
+
+void gfx_mirror_begin(const struct gfx_texture *t) {
+    if (!t || !t->pixels) return;
+    flush_batch();
+    water_camera();
+    /* Clamped rather than repeated: past the picture's edge the corner holds
+       the edge it left, and the caller has faded it out by then anyway. */
+    bind(t);
+    additive();
+    sceGuDisable(GU_LIGHTING);
+    sceGuTexLevelMode(GU_TEXTURE_AUTO, 0.0f);
+}
+
+struct gfx_mirror_vertex *gfx_mirror_room(int verts) {
+    return sceGuGetMemory(verts * sizeof(struct gfx_mirror_vertex));
+}
+
+void gfx_mirror_strip(const struct gfx_mirror_vertex *v, int n) {
+    if (n < 4) return;
+    sceGumDrawArray(GU_TRIANGLE_STRIP,
+                    GU_TEXTURE_32BITF | GU_COLOR_8888 | GU_VERTEX_32BITF |
+                    GU_TRANSFORM_3D, n, 0, v);
+}
+
+void gfx_mirror_end(void) {
     sceGuOffset(2048 - SCR_W / 2, 2048 - SCR_H / 2);
     flat_state();
 }

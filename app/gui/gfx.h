@@ -46,6 +46,8 @@ void gfx_ribbon(const float *x, const float *y, const unsigned *color, int n,
 
 /* ------------------------------------------------------------------ water */
 
+struct gfx_texture;
+
 /* The water is the one surface drawn in real space rather than projected by
    hand: a plane in perspective texture-maps evenly, and a plane faked in 2D
    does not -- the GE interpolates a flat quad's texture affinely, and on the
@@ -68,10 +70,19 @@ static inline void gfx_water_project(float x, float y, float z,
 }
 
 /* One corner: where it is in the world (x across, y up, z away from the
-   viewer), where it sits in the ripple tile in tiles, and the colour the
-   swell gave it -- which multiplies the texture, so it carries the wet fade
-   in its alpha and the shading of the big waves in its channels. */
-struct gfx_water_vertex { float u, v; unsigned color; float x, y, z; };
+   viewer), where it sits in the ripple tile in tiles, the way the surface
+   faces there, and the colour it carries -- the room's, as a fraction of the
+   one the palette was built on, with the wet fade and the distance in its
+   alpha. The light is the GE's: the normal and this colour go in as the
+   material, and what comes out multiplies the texture. The GE reads the
+   components in a fixed order -- texture, colour, normal, position -- so the
+   members are declared in it. */
+struct gfx_water_vertex {
+    float u, v;
+    unsigned color;
+    float nx, ny, nz;
+    float x, y, z;
+};
 
 /* The palette is the lighting. gfx's ripple tiles hold a quantised normal per
    texel rather than a colour, and this turns all 256 of them into colours for
@@ -82,11 +93,17 @@ struct gfx_water_vertex { float u, v; unsigned color; float x, y, z; };
 void gfx_water_light(float lx, float ly, float lz,
                      unsigned deep, unsigned sky, unsigned glint);
 
-/* Room for the whole surface, filled by the caller and handed back a strip at
-   a time so it is written once. Between begin and end nothing else may draw;
-   frame picks one of the ripple's animation steps. */
+/* Room for the whole surface and for the indices that cut it into strips,
+   both kept from frame to frame: a crossing belongs to the strip above it
+   and the one below, and written once and pointed at twice it is written
+   half as often. ready() puts what the caller wrote where the GE can read
+   it. Between begin and end nothing else may draw. */
 struct gfx_water_vertex *gfx_water_mesh(int verts);
-void gfx_water_begin(int frame);
+unsigned short *gfx_water_index(int count);
+void gfx_water_ready(void);
+/* du and dv are where the tile sits this frame: the whole surface creeps
+   together, so it creeps once here rather than in every corner. */
+void gfx_water_begin(float du, float dv);
 
 /* The ripple has a handful of baked steps, and cut from one to the next
    it stutters against the swell, which moves every frame. So the surface
@@ -96,8 +113,28 @@ void gfx_water_step(int which, int frame, float weight);
 /* level is the mip level the strip is sampled at, 0 = the full tile: the
    GE would pick one per triangle from the triangle's shape, and a strip a
    pixel tall and the screen wide is the wrong shape to ask. */
-void gfx_water_strip(const struct gfx_water_vertex *v, int n, float level);
+void gfx_water_strip(const struct gfx_water_vertex *v, const unsigned short *idx,
+                     int n, float level);
+/* How much of the glint the strips drawn after this one may keep, 0 to 1.
+   A crossing far enough away stands over a cell tens of pixels wide and two
+   tall, and a glint found at one corner of it is drawn as a dash across it.
+   The surface itself is flattened with distance for the same reason; this
+   is the same retreat for the light that flattening cannot reach, since a
+   glint is between the eye and the light and not in the surface alone. */
+void gfx_water_shine(float keep);
 void gfx_water_end(void);
+
+/* A picture laid on the water: the same mesh a second time, textured with
+   whatever is on the card and added on, so the surface breaks it. The
+   caller places the corners itself -- it has the mesh -- and only says
+   where they are and what of the picture is there. Clamped, so a corner
+   past the picture's edge holds still rather than repeating it. */
+struct gfx_mirror_vertex { float u, v; unsigned color; float x, y, z; };
+
+void gfx_mirror_begin(const struct gfx_texture *t);
+struct gfx_mirror_vertex *gfx_mirror_room(int verts);
+void gfx_mirror_strip(const struct gfx_mirror_vertex *v, int n);
+void gfx_mirror_end(void);
 
 /* A soft radial light, added onto what is behind it. The alpha in color is
    how strong; the rgb is what it tints toward. Cheap enough to draw dozens
