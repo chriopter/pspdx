@@ -33,25 +33,28 @@ static void play(enum cue cue, int index) {
         last_ms = now;
         int note = 74 - SCALE[index % 5] - 12 * (index / 5);
         if (note < 55) note = 55;
-        synth_strike(note, run ? 0.09f : 0.16f, SYNTH_GLASS, 0.2f, 0);
+        /* Quiet and round: mostly the pad, a breath of glass over it. */
+        synth_strike(note, run ? 0.035f : 0.06f, SYNTH_GLASS, 0.2f, 0);
         if (run) break;
-        synth_strike(note + 7, 0.06f, SYNTH_GLASS, 0.6f, 0);
-        synth_strike(note - 12, 0.07f, SYNTH_PAD, -0.4f, 0);
+        synth_strike(note - 12, 0.06f, SYNTH_PAD, -0.3f, 0);
+        synth_strike(note - 5, 0.03f, SYNTH_PAD, 0.4f, 0);
         break;
     }
     case CUE_OPEN:
-        synth_strike(62, 0.26f, SYNTH_GLASS, -0.4f, 0);
-        synth_strike(69, 0.22f, SYNTH_GLASS, 0.4f, 0);
+        synth_strike(62, 0.12f, SYNTH_GLASS, -0.4f, 0);
+        synth_strike(69, 0.10f, SYNTH_GLASS, 0.4f, 0);
+        synth_strike(50, 0.08f, SYNTH_PAD, 0.0f, 0);
         break;
     case CUE_DONE:
-        synth_strike(62, 0.24f, SYNTH_GLASS, -0.5f, 0);
-        synth_strike(66, 0.24f, SYNTH_GLASS, -0.2f, 0);
-        synth_strike(69, 0.26f, SYNTH_GLASS, 0.2f, 0);
-        synth_strike(74, 0.20f, SYNTH_GLASS, 0.5f, 0);
+        synth_strike(62, 0.11f, SYNTH_GLASS, -0.5f, 0);
+        synth_strike(66, 0.11f, SYNTH_GLASS, -0.2f, 0);
+        synth_strike(69, 0.12f, SYNTH_GLASS, 0.2f, 0);
+        synth_strike(74, 0.09f, SYNTH_GLASS, 0.5f, 0);
+        synth_strike(50, 0.10f, SYNTH_PAD, 0.0f, 0);
         break;
     case CUE_FAIL:
-        synth_strike(50, 0.28f, SYNTH_GLASS, -0.3f, 0);
-        synth_strike(53, 0.20f, SYNTH_GLASS, 0.3f, 0);
+        synth_strike(50, 0.13f, SYNTH_GLASS, -0.3f, 0);
+        synth_strike(53, 0.10f, SYNTH_GLASS, 0.3f, 0);
         break;
     }
 }

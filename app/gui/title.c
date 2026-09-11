@@ -53,12 +53,13 @@ void title_prepare(const char *text, struct rgb tint) {
 void title_draw(float cx, float cy, float t, struct rgb tint) {
     if (!g_rendered) return;
     struct gfx_card card;
-    card.cx = cx + sinf(t * 0.5f) * 5.0f;
-    card.cy = cy + sinf(t * 0.8f) * 3.0f;
+    /* Fixed in place: a word that rocks looks cheap. The light moves. */
+    card.cx = cx;
+    card.cy = cy;
     card.w = BAKE_W;
     card.h = TARGET_H;
-    card.yaw = sinf(t * 0.6f) * 0.28f;
-    card.pitch = sinf(t * 0.4f) * 0.10f;
+    card.yaw = 0.0f;
+    card.pitch = 0.0f;
     card.alpha = 255;
     card.reflect_h = 26;
     card.bare = 1;

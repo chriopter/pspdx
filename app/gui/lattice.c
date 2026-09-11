@@ -61,7 +61,7 @@ static float frand(void) {
     return (g_lcg >> 8) / 16777216.0f;
 }
 
-static struct { float x, y, size, phase; } g_stars[STARS];
+static struct { float x, y, vx, vy, size, phase; } g_stars[STARS];
 static struct { float x, y, vy, size, phase; } g_specks[SPECKS];
 
 /* A sine and a falling exponential cost a few hundred cycles each out of
@@ -187,6 +187,9 @@ void lattice_init(void) {
         g_stars[i].y = 6 + frand() * (GFX_HORIZON - 30);
         g_stars[i].size = 3 + frand() * 6;
         g_stars[i].phase = frand() * 6.283f;
+        /* Adrift, each its own way, a few pixels a second. */
+        g_stars[i].vx = (frand() - 0.5f) * 0.12f;
+        g_stars[i].vy = (frand() - 0.5f) * 0.05f;
     }
     for (int i = 0; i < SPECKS; i++) speck_reset(i, 1);
 
@@ -500,6 +503,12 @@ void lattice_draw(float t, struct rgb tint) {
     /* Sky: a few points of light, and the horizon burning under them. */
     unsigned white = rgb_pack(RGB_WHITE, 0);
     for (int i = 0; i < STARS; i++) {
+        g_stars[i].x += g_stars[i].vx + fsin(t * 0.3f + g_stars[i].phase) * 0.03f;
+        g_stars[i].y += g_stars[i].vy;
+        if (g_stars[i].x < -8) g_stars[i].x += SCR_W + 16;
+        else if (g_stars[i].x > SCR_W + 8) g_stars[i].x -= SCR_W + 16;
+        if (g_stars[i].y < 4) { g_stars[i].y = 4; g_stars[i].vy = -g_stars[i].vy; }
+        else if (g_stars[i].y > GFX_HORIZON - 24) { g_stars[i].y = GFX_HORIZON - 24; g_stars[i].vy = -g_stars[i].vy; }
         float tw = 0.5f + 0.5f * fsin(t * 1.3f + g_stars[i].phase);
         gfx_glow(g_stars[i].x, g_stars[i].y, g_stars[i].size, g_stars[i].size,
                  tinted(white, (int)(30 + 70 * tw)));

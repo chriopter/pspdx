@@ -126,12 +126,14 @@ static void draw_chrome(float t, int percent, int ready) {
 
     /* The name as the browser sets its words: baked once, on a card in
        perspective, with the light going through it. */
-    title_draw(SCR_W / 2.0f, 52.0f, t, TINT);
+    title_draw(SCR_W / 2.0f, 58.0f, t, TINT);
 
+    /* Under the name, centred, what the hand is for. */
     const char *head = replaying
-        ? "REPLAY -- recorded input, the entropy here is NOT real"
-        : "COLLECT ENTROPY -- sweep the field with the analog stick";
-    font_print(FONT_META, 16, 96, replaying ? rgb_pack(ALARM, 255) : text, head);
+        ? "Replaying recorded input: the entropy here is not real"
+        : "Move the analog stick to collect entropy for TLS 1.3";
+    float hw = font_width(FONT_BODY, head);
+    font_print(FONT_BODY, (SCR_W - hw) / 2, 104, replaying ? rgb_pack(ALARM, 255) : text, head);
 
     /* The bar is the shore drawn straight: how much of the field is water. */
     int bar_x = 16, bar_y = 238, bar_w = SCR_W - 32;

@@ -208,13 +208,40 @@ static const char *state_word(const struct app_entry *entry, unsigned *color) {
     }
 }
 
-/* A Memory Stick, seven by eleven: the card with its cut corner and the
-   label stripe. What an installed package looks like in the list. */
-static void draw_memory_stick(int x, int y, unsigned color, unsigned dark) {
-    gfx_rect(x, y, 7, 11, color);
-    gfx_rect(x + 5, y, 2, 3, dark);         /* the notch */
-    gfx_rect(x + 1, y + 5, 5, 4, dark);     /* the label */
-    gfx_rect(x + 2, y + 6, 3, 1, color);
+/* A tick, the way a list is ticked: two strokes, the short one down to the
+   corner and the long one up from it. What an installed package gets. */
+static void draw_tick(float cx, float cy, unsigned color) {
+    float x[3] = { cx - 5.5f, cx - 1.5f, cx + 6.0f };
+    float y[3] = { cy + 0.5f, cy + 4.5f, cy - 4.5f };
+    unsigned c[3] = { color, color, color };
+    gfx_ribbon(x, y, c, 3, 1.1f);
+}
+
+/* The system's own sign for an update: two arrows chasing each other
+   round a circle. Each is an arc of a little under a half turn with a
+   head on its leading end. */
+static void draw_update_arrows(float cx, float cy, unsigned color, float t) {
+    const float r = 5.5f;
+    float spin = t * 1.2f;
+    for (int arrow = 0; arrow < 2; arrow++) {
+        float x[8], y[8];
+        unsigned c[8];
+        float a0 = spin + arrow * 3.1416f;
+        for (int i = 0; i < 6; i++) {
+            float a = a0 + i * (2.4f / 5);
+            x[i] = cx + cosf(a) * r;
+            y[i] = cy + sinf(a) * r;
+            c[i] = color;
+        }
+        gfx_ribbon(x, y, c, 6, 1.0f);
+        /* The head: a short stroke to either side of the arc's end, laid
+           back along it. */
+        float a = a0 + 2.4f, tx = -sinf(a), ty = cosf(a);
+        float ex = x[5], ey = y[5];
+        float hx[3] = { ex - tx * 3.2f - cosf(a) * 2.6f, ex, ex - tx * 3.2f + cosf(a) * 2.6f };
+        float hy[3] = { ey - ty * 3.2f - sinf(a) * 2.6f, ey, ey - ty * 3.2f + sinf(a) * 2.6f };
+        gfx_ribbon(hx, hy, c, 3, 1.0f);
+    }
 }
 
 static void draw_list(const struct catalog *catalog, int cursor, float t) {
@@ -260,21 +287,21 @@ static void draw_list(const struct catalog *catalog, int cursor, float t) {
         else
             gfx_rect(LIST_X, iy, ICON_W, ICON_H, RGBA(255, 255, 255, selected ? 24 : 12));
 
-        /* A mark, not a word, on the icon's corner: the stick for what is
-           on the stick, lit green when an update waits, nothing for the
-           rest. */
-        int sx = LIST_X + ICON_W - 9, sy = iy + ICON_H - 13;
+        /* A mark, not a word, at the end of the row: the line ticked off
+           when the package is on the stick, the system's turning arrows
+           when a newer one waits, nothing for the rest. */
+        float mx = LIST_X + LIST_W - 10, my = y + ITEM_H / 2 - 1;
+        int name_w = LIST_X + LIST_W - NAME_X;
         if (entry->state == APP_UPDATE) {
-            gfx_glow(sx + 4, sy + 6, 26, 26, RGBA(140, 255, 170, 170));
-            gfx_rect(sx - 1, sy - 1, 9, 13, RGB(10, 40, 20));
-            draw_memory_stick(sx, sy, RGB(150, 255, 180), RGB(20, 70, 40));
+            gfx_glow(mx, my, 34, 34, RGBA(140, 255, 170, 140));
+            draw_update_arrows(mx, my, RGB(170, 255, 190), t);
+            name_w -= 24;
         } else if (entry->state != APP_NOT_INSTALLED) {
-            gfx_rect(sx - 1, sy - 1, 9, 13, rgb_pack(NIGHT_BOTTOM, 255));
-            draw_memory_stick(sx, sy, g_accent,
-                              rgb_pack(rgb_mix(NIGHT_BOTTOM, g_tint, 0.3f), 255));
+            draw_tick(mx, my, selected ? g_accent : g_dim);
+            name_w -= 24;
         }
 
-        font_print_clipped(FONT_BODY, NAME_X, y + 21, LIST_X + LIST_W - NAME_X,
+        font_print_clipped(FONT_BODY, NAME_X, y + 21, name_w,
                            selected ? g_text : g_dim, entry->name);
     }
 
