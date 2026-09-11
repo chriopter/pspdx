@@ -1249,7 +1249,7 @@ static void draw_footer(void) {
            the same key that takes it back out again. */
         if (entry)
             x = draw_hint(x, FOOTER_Y + 15, MARK_TRIANGLE,
-                          shell_tab_kind() == SHELL_TAB_BASKET ? "remove"
+                          shell_tab_kind() == SHELL_TAB_BASKET ? "take out"
                                                                : "basket", g_dim);
     }
     font_print(FONT_META, x, FOOTER_Y + 15, g_dim,
