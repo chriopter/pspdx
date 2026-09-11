@@ -43,7 +43,10 @@ while [ $# -gt 0 ]; do
 done
 
 mkdir -p "$MS/PSP/GAME/pspdx"
-cp "$HERE/EBOOT.PBP" "$MS/PSP/GAME/pspdx/"
+# EBOOT names another build to run instead of the one beside this script:
+# a campaign copies its own aside, so a rebuild in app/ meanwhile -- by a
+# hand, by another agent -- cannot swap the client under it.
+cp "${EBOOT:-$HERE/EBOOT.PBP}" "$MS/PSP/GAME/pspdx/EBOOT.PBP"
 
 # PPSSPP ships the PSP system fonts but does not mount flash0 for the guest,
 # so put one where the client's fallback looks. Test rig only: on hardware the

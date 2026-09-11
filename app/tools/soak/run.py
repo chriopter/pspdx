@@ -455,11 +455,25 @@ def wait_idle(timeout=180):
         time.sleep(10)
 
 
+# The build this campaign runs, copied aside once it is made: app/EBOOT.PBP
+# is whatever the last make left there, and a make during a two-hour
+# campaign would otherwise run some other client against the mock's
+# expectations from that run on.
+CAMPAIGN_EBOOT = os.path.join(RESULTS, "EBOOT.PBP")
+
+
+def keep_build():
+    import shutil
+    os.makedirs(RESULTS, exist_ok=True)
+    shutil.copyfile(os.path.join(APP, "EBOOT.PBP"), CAMPAIGN_EBOOT)
+
+
 def run_rig(secs, keyfile, extra=()):
+    env = dict(os.environ, EBOOT=CAMPAIGN_EBOOT)
     return subprocess.Popen(
         ["sh", os.path.join(APP, "run-ppsspp.sh"), str(secs),
          "--keys", keyfile, *extra],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env)
 
 
 def keep_evidence(tag, ms, keyfile, tail):
@@ -737,6 +751,7 @@ def main():
     with lock:
         subprocess.run(["sh", RIG, "plant" if args.no_build else "setup"],
                        check=True)
+        keep_build()
         subprocess.run(["sh", RIG, "serve"], check=True)
     time.sleep(1)
 
