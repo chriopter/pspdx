@@ -6,7 +6,7 @@ Gives you a [catalog](https://chriopter.github.io/pspdx-catalog/) of sick & curr
 
 **[Browse the catalog →](https://chriopter.github.io/pspdx-catalog/)**
 
-<img src="pspdx.gif" width="480" alt="Start, the entropy sweep, the catalog, three moves down the list, the info menu">
+<img src="pspdx.webp" width="480" alt="Start, the entropy sweep, the catalog, three moves down the list, the info menu">
 
 The same twenty seconds [with sound](pspdx.mp4): the tune, and the notes the list plays.
 
