@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 17 17">
+  <!-- A spark: four points with a waist pulled right into the middle, which
+       is what stops it looking like a plus sign. -->
+  <path fill="#ffffff" stroke="#ffffff" stroke-width="0.6" stroke-linejoin="round"
+        d="M8.5 1.5 Q9.3 7.7 15.5 8.5 Q9.3 9.3 8.5 15.5
+           Q7.7 9.3 1.5 8.5 Q7.7 7.7 8.5 1.5 Z"/>
+</svg>

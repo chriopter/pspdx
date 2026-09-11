@@ -620,6 +620,31 @@ void gfx_texture_draw(const struct gfx_texture *t, int x, int y, int w, int h,
     flat_state();
 }
 
+void gfx_texture_draw_part(const struct gfx_texture *t, int sx, int sy,
+                           int w, int h, float x, float y, unsigned tint) {
+    if (!t || !t->pixels || w <= 0 || h <= 0) return;
+    flush_batch();
+    struct vtex *v = sceGuGetMemory(2 * sizeof(struct vtex));
+    if (!v) return;
+    bind(t);
+    /* Nearest, against the linear the rest of the texture work wants: a
+       sprite drawn at one to one has nothing to interpolate, and a filter
+       that samples half a texel off is how a two-pixel stroke goes soft. */
+    sceGuTexFilter(GU_NEAREST, GU_NEAREST);
+    sceGuBlendFunc(GU_ADD, GU_SRC_ALPHA, GU_ONE_MINUS_SRC_ALPHA, 0, 0);
+    sceGuColor(tint);
+    short px = (short)(x + 0.5f), py = (short)(y + 0.5f);
+    v[0].u = (short)sx;         v[0].v = (short)sy;
+    v[0].x = px;                v[0].y = py;                v[0].z = 0;
+    v[1].u = (short)(sx + w);   v[1].v = (short)(sy + h);
+    v[1].x = (short)(px + w);   v[1].y = (short)(py + h);   v[1].z = 0;
+    sceGuDrawArray(GU_SPRITES,
+                   GU_TEXTURE_16BIT | GU_VERTEX_16BIT | GU_TRANSFORM_2D,
+                   2, 0, v);
+    sceGuColor(0xFFFFFFFF);
+    flat_state();
+}
+
 void gfx_texture_reflect(const struct gfx_texture *t, int x, int y, int w,
                          int h, int src_h, unsigned alpha) {
     if (!t || !t->pixels || h <= 0) return;

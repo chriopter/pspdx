@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 17 17">
+  <!-- A window with its title bar filled in: the smallest drawing that says
+       program and not device, and the filled bar is what carries it at
+       fifteen pixels, where an outlined one would be a grey line. -->
+  <rect x="2" y="3" width="13" height="11" rx="1.5" fill="none"
+        stroke="#ffffff" stroke-width="2"/>
+  <rect x="3" y="4" width="11" height="2" fill="#ffffff"/>
+</svg>

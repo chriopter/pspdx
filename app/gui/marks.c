@@ -1,23 +1,32 @@
 /*
  * Drawing a mark. Every glyph goes through the same three steps, so the set
  * reads as one family whatever it is spelling: a wide soft light behind it
- * when it is the one being looked at, a dark copy of itself one pixel down
- * and right, then the glyph in white.
+ * when it is the one being looked at, a blurred dark copy of itself one
+ * pixel down and right, then the glyph itself.
  *
- * The dark copy is the whole trick, and it is the system's own: the XMB ships
- * a blurred shadow texture beside every foreground glyph it has, because a
- * white shape on a photograph loses its edge wherever the photograph is pale.
- * A real blur costs a texture per glyph; the same bitmap offset by one at
- * alpha 150 costs nothing and does the same job at eleven pixels.
+ * The dark copy is the whole trick, and it is the system's own: the XMB
+ * ships a blurred shadow texture beside every foreground glyph it has --
+ * tex_cross is thirteen pixels and tex_cross_shadow twenty-one -- because a
+ * white shape on a photograph loses its edge wherever the photograph is
+ * pale. Ours are made the same way, in assets/marks, and cost one sprite.
  *
  * The highlight is the second thing taken from the originals: the lit state
  * is not a brighter glyph, it is the same glyph with more light behind it.
  * Brightening the strokes would make a selected mark read as a different,
  * bolder mark; putting the light behind leaves the shape alone.
+ *
+ * Both pictures live in one sheet, which is why a mark is two sprites and
+ * not two textures: the whole set binds once. The sheet arrives as coverage,
+ * one byte a pixel, and is opened out into RGBA at first use -- white where
+ * a glyph cell is, black where a shadow cell is -- because that is the only
+ * thing the alpha does not already say.
  */
 
+#include <malloc.h>
 #include <math.h>
 #include <string.h>
+
+#include <pspkernel.h>
 
 #include "gui/gfx.h"
 #include "gui/marks.h"
@@ -30,6 +39,11 @@
 typedef char mark_table_matches_enum[
     (int)(sizeof(mark_glyphs) / sizeof(mark_glyphs[0])) == MARK_COUNT ? 1 : -1];
 
+#define SHEET_BYTES ((size_t)MARK_SHEET_W * MARK_SHEET_H * 4)
+
+static struct gfx_texture g_sheet;
+static int g_opened;
+
 static const struct mark_glyph *glyph(enum mark m) {
     if (m < 0 || m >= MARK_COUNT) return &mark_glyphs[MARK_CROSS];
     return &mark_glyphs[m];
@@ -38,65 +52,71 @@ static const struct mark_glyph *glyph(enum mark m) {
 int mark_width(enum mark m) { return glyph(m)->w; }
 int mark_height(enum mark m) { return glyph(m)->h; }
 
-/* One pass over a bitmap, as few quads as it can be said in.
- *
- * gfx_rect is a quad and a quad breaks whatever glow batch is open, so a
- * glyph drawn a pixel at a time would cost two hundred draws and the shell
- * asks for fifteen of these a frame. Instead each run of equal alpha along a
- * row is one quad, grown downwards as far as the same run repeats. No glyph
- * in the set costs more than thirty-four quads that way, so the worst mark
- * on screen is sixty-eight draws with its shadow, and most are half that. */
-static void blit(const unsigned char *alpha, int w, int h, int x0, int y0,
-                 unsigned color, int scale) {
-    unsigned char done[MARK_MAX_W * MARK_MAX_H];
-    memset(done, 0, (size_t)(w * h));
+/* One cell of coverage into one colour. Everything outside a cell stays the
+   zero the buffer was cleared to, so the gutters never sample as anything. */
+static void open_cell(unsigned *px, int x0, int y0, int w, int h, unsigned rgb) {
     for (int y = 0; y < h; y++) {
-        for (int x = 0; x < w; x++) {
-            int at = y * w + x;
-            if (done[at] || !alpha[at]) continue;
-            unsigned char v = alpha[at];
-            int run = 1;
-            while (x + run < w && !done[at + run] && alpha[at + run] == v) run++;
-            int rows = 1;
-            while (y + rows < h) {
-                const unsigned char *a = alpha + (y + rows) * w + x;
-                const unsigned char *d = done + (y + rows) * w + x;
-                int k = 0;
-                while (k < run && a[k] == v && !d[k]) k++;
-                if (k < run) break;
-                rows++;
+        const unsigned char *a = mark_sheet + (y0 + y) * MARK_SHEET_W + x0;
+        unsigned *row = px + (y0 + y) * MARK_SHEET_W + x0;
+        for (int x = 0; x < w; x++)
+            row[x] = rgb | ((unsigned)a[x] << 24);
+    }
+}
+
+/* Built once, at the first mark of the run rather than at startup: the
+   entropy screen draws no marks and should not pay for them. */
+static const struct gfx_texture *sheet(void) {
+    if (!g_opened) {
+        g_opened = 1;
+        g_sheet.w = g_sheet.tw = MARK_SHEET_W;
+        g_sheet.h = g_sheet.th = MARK_SHEET_H;
+        g_sheet.opaque = 0;
+        g_sheet.pixels = memalign(16, SHEET_BYTES);
+        if (g_sheet.pixels) {
+            unsigned *px = g_sheet.pixels;
+            memset(px, 0, SHEET_BYTES);
+            for (int i = 0; i < MARK_COUNT; i++) {
+                const struct mark_glyph *g = &mark_glyphs[i];
+                open_cell(px, g->gx, g->gy, g->gw, g->gh, 0x00FFFFFFu);
+                open_cell(px, g->sx, g->sy, g->sw, g->sh, 0x00000000u);
             }
-            for (int ry = 0; ry < rows; ry++)
-                memset(done + (y + ry) * w + x, 1, (size_t)run);
-            int a = v * scale / 255;
-            if (a <= 0) continue;
-            gfx_rect(x0 + x, y0 + y, run, rows,
-                     (color & 0x00FFFFFFu) | ((unsigned)a << 24));
+            /* The GE reads system RAM behind the cache's back. */
+            sceKernelDcacheWritebackRange(g_sheet.pixels, SHEET_BYTES);
         }
     }
+    return g_sheet.pixels ? &g_sheet : NULL;
+}
+
+/* Whole pixels: a cell landing on a half pixel would be resampled and every
+   two-pixel stroke would go soft. The cell is one pixel larger than the mark
+   on each side, which is where the anti-aliasing lives, so centring the cell
+   is what centres the mark. */
+static float top_left(float centre, int size) {
+    return (float)(int)(centre - size / 2.0f + 0.5f);
 }
 
 void mark_draw(enum mark m, float cx, float cy, unsigned color, int state,
                unsigned tint, float t) {
     const struct mark_glyph *g = glyph(m);
-    int w = g->w, h = g->h;
-    /* Centred on whole pixels: a bitmap landing on a half pixel would be
-       resampled by the GE and every two-pixel stroke would go soft. */
-    int x0 = (int)(cx - w / 2.0f + 0.5f);
-    int y0 = (int)(cy - h / 2.0f + 0.5f);
     int scale = (int)(color >> 24);
     if (scale <= 0) return;
+    const struct gfx_texture *sh = sheet();
+    if (!sh) return;
 
     if (state == MARK_LIT) {
-        /* Three times the glyph across, so the light is a halo around it and
+        /* Three times the mark across, so the light is a halo around it and
            not a lamp inside it, and breathing just enough to be noticed only
            when the mark is looked at. */
         float pulse = 0.88f + 0.12f * sinf(t * 2.2f);
         int a = (int)(110.0f * pulse * scale / 255.0f);
-        gfx_glow(cx, cy, w * 3.0f, h * 3.0f,
+        gfx_glow(cx, cy, g->w * 3.0f, g->h * 3.0f,
                  (tint & 0x00FFFFFFu) | ((unsigned)a << 24));
     }
     if (state != MARK_DIM)
-        blit(g->alpha, w, h, x0 + 1, y0 + 1, 0, 150 * scale / 255);
-    blit(g->alpha, w, h, x0, y0, color, scale);
+        gfx_texture_draw_part(sh, g->sx, g->sy, g->sw, g->sh,
+                              top_left(cx, g->sw) + 1.0f,
+                              top_left(cy, g->sh) + 1.0f,
+                              RGBA(0, 0, 0, 190 * scale / 255));
+    gfx_texture_draw_part(sh, g->gx, g->gy, g->gw, g->gh,
+                          top_left(cx, g->gw), top_left(cy, g->gh), color);
 }

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="19" height="9" viewBox="0 0 19 9">
+  <!-- The other pill: the same button with nothing in it, which is how the
+       pair tells itself apart at seven pixels tall. -->
+  <rect x="1.75" y="1.75" width="15.5" height="5.5" rx="2.75" fill="none"
+        stroke="#ffffff" stroke-width="1.5"/>
+</svg>

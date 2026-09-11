@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 13 13">
+  <!-- Set aside for later: a basket, which is a trapezium and a handle and
+       nothing else once it is eleven pixels tall. -->
+  <g fill="none" stroke="#ffffff" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M4.5 5.6 V4.2 A2.0 2.0 0 0 1 8.5 4.2 V5.6" stroke-width="1.5"/>
+    <path d="M2 5.5 H11 L9.8 11 H3.2 Z" stroke-width="1.8"/>
+  </g>
+</svg>

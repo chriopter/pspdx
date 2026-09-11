@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="11" height="15" viewBox="0 0 11 15">
+  <!-- The Memory Stick: taller than it is wide, one corner taken off wide
+       enough to be seen at this size, and the label patch near the foot
+       that says which way up it goes. -->
+  <path d="M2 2.5 H6.4 L9 5.1 V12.5 H2 Z" fill="none" stroke="#ffffff"
+        stroke-width="1.7" stroke-linejoin="round"/>
+  <rect x="3.4" y="9.2" width="4.2" height="1.8" rx="0.5" fill="#ffffff"/>
+</svg>

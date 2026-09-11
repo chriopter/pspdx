@@ -127,6 +127,14 @@ struct gfx_texture {
 void gfx_texture_draw(const struct gfx_texture *t, int x, int y, int w, int h,
                      unsigned tint);
 
+/* One cell out of a sheet, at its own size, on whole pixels: sx, sy, w, h
+   are texels and x, y are where the top left of them lands. tint modulates
+   colour and alpha together, so a white cell comes out in the caller's
+   colour and a black one is a shadow the caller can fade. This is how the
+   marks are drawn -- two sprites out of one bound texture. */
+void gfx_texture_draw_part(const struct gfx_texture *t, int sx, int sy,
+                           int w, int h, float x, float y, unsigned tint);
+
 /* The same image upside down under y, fading from alpha at the top edge to
    nothing over h pixels: a reflection in a dark floor. */
 void gfx_texture_reflect(const struct gfx_texture *t, int x, int y, int w,

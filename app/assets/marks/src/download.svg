@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 13 13">
+  <!-- An arrow onto a floor: the floor is what makes it land somewhere
+       rather than just point down. -->
+  <g fill="none" stroke="#ffffff" stroke-width="2.1" stroke-linecap="round"
+     stroke-linejoin="round">
+    <path d="M6.5 2.3 V7.4"/>
+    <path d="M3.5 5.6 L6.5 8.8 L9.5 5.6"/>
+    <path d="M2.6 11.2 H10.4"/>
+  </g>
+</svg>

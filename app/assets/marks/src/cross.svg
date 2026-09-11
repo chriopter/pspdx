@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 13 13">
+  <!-- Face button: an 11 px shape inside a 13 px cell, the proportion the
+       XMB's own tex_cross uses. Two strokes of two, round terminals. -->
+  <g fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round">
+    <path d="M2.2 2.2 L10.8 10.8"/>
+    <path d="M10.8 2.2 L2.2 10.8"/>
+  </g>
+</svg>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 17 17">
+  <!-- A plug, not a jigsaw piece: a puzzle piece at fifteen pixels is a
+       blob with a bump, and the thing being named is something that goes
+       into something else. -->
+  <g fill="#ffffff">
+    <rect x="5" y="2" width="2" height="4" rx="0.5"/>
+    <rect x="10" y="2" width="2" height="4" rx="0.5"/>
+    <rect x="3.5" y="5" width="10" height="6" rx="1.6"/>
+  </g>
+  <path d="M8.5 11 V14.6" fill="none" stroke="#ffffff" stroke-width="2"
+        stroke-linecap="round"/>
+</svg>

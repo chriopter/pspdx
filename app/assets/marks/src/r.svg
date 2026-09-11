@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="15" height="11" viewBox="0 0 15 11">
+  <!-- The R has a counter and the L has none, so the R is drawn a touch
+       wider and its bowl kept shallow: at five pixels tall the hole is the
+       whole letter, and a hole under a pixel across is a grey patch. -->
+  <rect x="1.75" y="1.75" width="11.5" height="7.5" rx="2.2" fill="none"
+        stroke="#ffffff" stroke-width="1.5"/>
+  <path fill="#ffffff" fill-rule="evenodd"
+        d="M5.2 3 H8.1 A1.65 1.65 0 0 1 8.1 6.3 H7.6 L9.8 8 H7.9 L6.7 6.3
+           V8 H5.2 Z
+           M6.7 4.3 H8.0 A0.85 0.85 0 0 1 8.0 6.0 H6.7 Z"/>
+</svg>

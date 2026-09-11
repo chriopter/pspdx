@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 13 13">
+  <!-- Sitting a little low in the cell, as a triangle must to look centred:
+       the apex carries no weight and the base carries all of it. The base
+       is the full width of the cell, as the XMB's own triangle is. -->
+  <path d="M6.5 2.4 L11.3 10.6 L1.7 10.6 Z" fill="none" stroke="#ffffff"
+        stroke-width="2" stroke-linejoin="round"/>
+</svg>

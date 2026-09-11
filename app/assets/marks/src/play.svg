@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="11" height="13" viewBox="0 0 11 13">
+  <!-- Solid, with the corners taken off by a round join rather than left as
+       points: a point one pixel wide is a point that flickers. -->
+  <path d="M2.6 2.7 L8.6 6.5 L2.6 10.3 Z" fill="#ffffff" stroke="#ffffff"
+        stroke-width="1.1" stroke-linejoin="round"/>
+</svg>

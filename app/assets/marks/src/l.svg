@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="15" height="11" viewBox="0 0 15 11">
+  <!-- The shoulder button, with its letter as a path: no font is embedded
+       and none is wanted for two letters. The box is drawn with a stroke of
+       one and a half so the letter inside gets five pixels rather than four,
+       which is the difference between a letter and a smudge. -->
+  <rect x="1.75" y="1.75" width="11.5" height="7.5" rx="2.2" fill="none"
+        stroke="#ffffff" stroke-width="1.5"/>
+  <path d="M5.6 3 H7.1 V6.5 H9.4 V8 H5.6 Z" fill="#ffffff"/>
+</svg>

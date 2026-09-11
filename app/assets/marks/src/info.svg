@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 13 13">
+  <!-- A lower-case i with a round tittle, so it cannot be read as an l. -->
+  <circle cx="6.5" cy="2.6" r="1.15" fill="#ffffff"/>
+  <path d="M6.5 5.6 V10.8" fill="none" stroke="#ffffff" stroke-width="2.3"
+        stroke-linecap="round"/>
+</svg>

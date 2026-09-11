@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 13 13">
+  <!-- Quit: a roof over a box. The roof overhangs the walls, which is the
+       only detail that makes it a house rather than an arrow on a bin. -->
+  <g fill="none" stroke="#ffffff" stroke-width="1.9" stroke-linecap="round"
+     stroke-linejoin="round">
+    <path d="M1.7 6.8 L6.5 2.3 L11.3 6.8"/>
+    <path d="M3.2 6.4 V11.3 H9.8 V6.4"/>
+  </g>
+</svg>

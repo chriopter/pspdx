@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 13 13">
+  <!-- Installed. The short arm is a third of the long one, which is what
+       keeps a check mark from reading as a lightning bolt. -->
+  <path d="M2.3 6.9 L5.2 9.9 L10.8 3.3" fill="none" stroke="#ffffff"
+        stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

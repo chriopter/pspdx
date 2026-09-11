@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="17" height="17" viewBox="0 0 17 17">
+  <!-- Everything: four tiles, filled rather than outlined, because four
+       outlines at this size is four smudges. -->
+  <g fill="#ffffff">
+    <rect x="1.7" y="1.7" width="6.4" height="6.4" rx="1.5"/>
+    <rect x="9.3" y="1.7" width="6.4" height="6.4" rx="1.5"/>
+    <rect x="1.7" y="9.3" width="6.4" height="6.4" rx="1.5"/>
+    <rect x="9.3" y="9.3" width="6.4" height="6.4" rx="1.5"/>
+  </g>
+</svg>

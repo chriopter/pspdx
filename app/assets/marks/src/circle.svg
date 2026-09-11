@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 13 13">
+  <!-- Eleven across the outside, seven across the inside: both edges land
+       on a pixel boundary, which is what keeps the ring from going grey. -->
+  <circle cx="6.5" cy="6.5" r="4.5" fill="none" stroke="#ffffff" stroke-width="2"/>
+</svg>
