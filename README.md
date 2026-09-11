@@ -319,3 +319,5 @@ that works on a real PSP, and on a host whose desktop is locked.
 - **Real hardware.** It has only ever run in PPSSPP.
 - **Nothing is signed**, so the index is trusted completely. Fine while one
   person writes it; less fine now that a bot does.
+  - Support multiple server / Game server
+  - solution for branch support / release tag
