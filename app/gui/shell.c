@@ -21,6 +21,7 @@
 #include "gui/gfx.h"
 #include "gui/icons.h"
 #include "gui/lattice.h"
+#include "gui/marks.h"
 #include "gui/title.h"
 #include "gui/palette.h"
 #include "gui/preview.h"
@@ -330,88 +331,14 @@ void shell_shutdown(void) {
 
 /* ------------------------------------------------------------------ marks */
 
-/* The signs that are not letters. A ribbon is a band offset up and down from
-   its own points: it draws a slope well and a small closed shape not at all,
-   and the turning arrows drawn that way came out as a cluster of faint dots
-   on the PSP's real 480 by 272. So these are written out pixel by pixel
-   instead -- twelve rows of twelve characters, '#' where a pixel goes -- and
-   what is on screen is what is in the source. Twelve because a circle of two
-   arrows needs a two-pixel stroke, a head wider than that stroke, and a pixel
-   of daylight between a head and the tail it is chasing, and eleven does not
-   have room for all three. */
-#define GLYPH_W 12
-#define GLYPH_H 12
-
-/* The system's own sign for an update: two chunky arrows chasing each other
-   head to tail round a circle. Each is a two-pixel arc of most of a half
-   turn, ending in a solid head that flares to five pixels across its base and
-   comes back to two at the tip -- at this size a head one pixel wider than
-   its stroke is a bump and not an arrowhead. The gap before the other arrow's
-   tail is what keeps it from reading as a ring with two notches in it. The
-   figure is the same turned half round, which is what says the two arrows are
-   the same arrow twice rather than one broken one. */
-static const char *const GLYPH_UPDATE[GLYPH_H] = {
-    "............",
-    "...######...",
-    "..########..",
-    ".###....###.",
-    ".##....#####",
-    ".........##.",
-    ".##.........",
-    "#####....##.",
-    ".###....###.",
-    "..########..",
-    "...######...",
-    "............",
-};
-
-/* A basket: a handle, a rim the full width of the box, and a body that tapers
-   to its foot. Solid rather than woven -- at twelve pixels a weave is noise,
-   and what has to read is the silhouette. */
-static const char *const GLYPH_BASKET[GLYPH_H] = {
-    "............",
-    "....####....",
-    "...##..##...",
-    "...##..##...",
-    "############",
-    "############",
-    ".##########.",
-    "..########..",
-    "..########..",
-    "...######...",
-    "...######...",
-    "............",
-};
-
-static void draw_bitmap(const char *const *rows, float left, float top,
-                        unsigned color) {
-    int x = (int)(left + 0.5f), y = (int)(top + 0.5f);
-    for (int r = 0; r < GLYPH_H; r++)
-        for (int c = 0; rows[r][c]; c++)
-            if (rows[r][c] == '#') gfx_rect(x + c, y + r, 1, 1, color);
-}
+/* The signs that are not letters live in gui/marks.c, drawn from the PNG
+   set under assets/marks. What the shell decides here is only which sign,
+   where, in what colour, and how lit. */
 
 /* What the update sign is lit by: no spin -- a shape this small turning is a
    shape flickering -- but a slow swell of brightness, so a tab or a row with
    an update on it is alive without ever moving. */
 static float update_pulse(float t) { return 0.85f + 0.15f * sinf(t * 1.6f); }
-
-/* Every caller has a centre rather than a corner. */
-static void draw_glyph(const char *const *rows, float cx, float cy,
-                       unsigned color) {
-    draw_bitmap(rows, cx - GLYPH_W / 2.0f, cy - GLYPH_H / 2.0f, color);
-}
-
-/* A tick, the way a list is ticked: two strokes, the short one down to the
-   corner and the long one up from it. What an installed package gets --
-   eight pixels of hairline, which on this screen is a mark and not a
-   badge. */
-static void draw_tick(float cx, float cy, unsigned color) {
-    float x[3] = { cx - 4.0f, cx - 1.3f, cx + 4.0f };
-    float y[3] = { cy + 0.4f, cy + 3.1f, cy - 3.2f };
-    unsigned c[3] = { color, color, color };
-    gfx_ribbon(x, y, c, 3, 0.6f);
-}
 
 /* The same colour, quieter: a mark on a row the eye is not on should be
    read only when it is looked for. */
@@ -463,7 +390,8 @@ static const char *tab_count(int tab) {
 
 static float tab_width(int tab) {
     if (tab >= 0) return font_width(FONT_META, TAB_NAME[tab]);
-    return GLYPH_W + 4 + font_width(FONT_META, tab_count(tab));
+    return mark_width(tab == TAB_UPDATES ? MARK_UPDATE : MARK_BASKET) + 5
+         + font_width(FONT_META, tab_count(tab));
 }
 
 /* The tabs sit between the name and the count, spread across whatever room
@@ -489,17 +417,13 @@ static void draw_tabs(float left, float right, float t) {
         if (tab >= 0) {
             font_print(FONT_META, x, 21, on ? g_text : g_dim, TAB_NAME[tab]);
         } else {
-            int lit = on ? 255 : 150;
-            if (tab == TAB_UPDATES) {
-                float pulse = update_pulse(t);
-                gfx_glow(x + GLYPH_W / 2.0f, 16, 30, 30,
-                         RGBA(140, 255, 170, (int)((on ? 120 : 60) * pulse)));
-                draw_bitmap(GLYPH_UPDATE, x, 12,
-                            faded(UPDATE_RGB, (int)(lit * pulse)));
-            } else {
-                draw_bitmap(GLYPH_BASKET, x, 12, faded(on ? g_text : g_dim, lit));
-            }
-            font_print(FONT_META, x + GLYPH_W + 4, 21, on ? g_text : g_dim,
+            enum mark m = tab == TAB_UPDATES ? MARK_UPDATE : MARK_BASKET;
+            unsigned c = tab == TAB_UPDATES
+                ? faded(UPDATE_RGB, (int)((on ? 255 : 170) * update_pulse(t)))
+                : (on ? g_text : g_dim);
+            mark_draw(m, x + mark_width(m) / 2.0f, 16, c, on ? MARK_LIT : MARK_PLAIN,
+                      tab == TAB_UPDATES ? UPDATE_RGB : rgb_pack(g_tint, 255), t);
+            font_print(FONT_META, x + mark_width(m) + 5, 21, on ? g_text : g_dim,
                        tab_count(tab));
         }
         x += w + gap;
@@ -621,14 +545,13 @@ static const char *action_line(void) {
 static void draw_action_row(int y, int selected, float t) {
     int updates = shell_tab_kind() == SHELL_TAB_UPDATES;
     float gx = LIST_X + ICON_W / 2.0f, gy = y + ITEM_H / 2.0f;
-    if (updates) {
-        float pulse = update_pulse(t);
-        gfx_glow(gx, gy, 36, 36, RGBA(140, 255, 170, (int)((selected ? 150 : 70) * pulse)));
-        draw_glyph(GLYPH_UPDATE, gx, gy,
-                   faded(UPDATE_RGB, (int)((selected ? 255 : 153) * pulse)));
-    } else {
-        draw_glyph(GLYPH_BASKET, gx, gy, selected ? g_text : faded(g_dim, 170));
-    }
+    if (updates)
+        mark_draw(MARK_UPDATE, gx, gy,
+                  faded(UPDATE_RGB, (int)((selected ? 255 : 170) * update_pulse(t))),
+                  selected ? MARK_LIT : MARK_PLAIN, UPDATE_RGB, t);
+    else
+        mark_draw(MARK_BASKET, gx, gy, selected ? g_text : g_dim,
+                  selected ? MARK_LIT : MARK_PLAIN, rgb_pack(g_tint, 255), t);
     int w = LIST_X + LIST_W - NAME_X;
     font_print_clipped(FONT_BODY, NAME_X, y + 13, w, selected ? g_text : g_dim,
                        action_title());
@@ -698,20 +621,20 @@ static void draw_list(const struct catalog *catalog, int cursor, float t) {
         float mx = LIST_X + LIST_W - 8, my = y + ITEM_H / 2 - 1;
         int name_w = LIST_X + LIST_W - NAME_X;
         if (entry->state == APP_UPDATE) {
-            float pulse = update_pulse(t);
-            gfx_glow(mx, my, 34, 34,
-                     RGBA(140, 255, 170, (int)((selected ? 150 : 70) * pulse)));
-            draw_glyph(GLYPH_UPDATE, mx, my,
-                       faded(UPDATE_RGB, (int)((selected ? 255 : 153) * pulse)));
-            mx -= 17;
-            name_w -= 19;
+            mark_draw(MARK_UPDATE, mx, my,
+                      faded(UPDATE_RGB, (int)((selected ? 255 : 170) * update_pulse(t))),
+                      selected ? MARK_LIT : MARK_PLAIN, UPDATE_RGB, t);
+            mx -= 19;
+            name_w -= 21;
         } else if (entry->state != APP_NOT_INSTALLED) {
-            draw_tick(mx, my, selected ? g_accent : faded(g_dim, 153));
+            mark_draw(MARK_TICK, mx, my, selected ? g_accent : faded(g_dim, 170),
+                      selected ? MARK_PLAIN : MARK_DIM, 0, t);
             mx -= 17;
             name_w -= 19;
         }
         if (shell_basket_has(index)) {
-            draw_glyph(GLYPH_BASKET, mx, my, faded(g_dim, selected ? 190 : 120));
+            mark_draw(MARK_BASKET, mx, my, faded(g_dim, selected ? 220 : 150),
+                      selected ? MARK_PLAIN : MARK_DIM, 0, t);
             name_w -= 17;
         }
 
@@ -897,81 +820,45 @@ static void draw_band(int y, int h) {
     band_edge(y + h);
 }
 
-/* Straight lines a pixel wide, stepped along whichever axis is the longer:
-   what the room's other strokes are drawn with offsets only in y, which turns
-   a diagonal into a parallelogram and a ring into a spiral. The face buttons
-   are nine pixels across and the honest way at that size is to place the
-   pixels. */
-static void stroke(float x0, float y0, float x1, float y1, unsigned color) {
-    float dx = x1 - x0, dy = y1 - y0;
-    float span = (dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy)
-               ? (dx < 0 ? -dx : dx) : (dy < 0 ? -dy : dy);
-    int steps = (int)(span + 0.5f);
-    for (int i = 0; i <= steps; i++) {
-        float f = steps ? (float)i / steps : 0.0f;
-        gfx_rect((int)(x0 + dx * f + 0.5f), (int)(y0 + dy * f + 0.5f), 1, 1, color);
-    }
-}
-
-/* The face buttons, drawn rather than written: the system font has no glyph
-   for them, and spelling TRIANGLE out is longer than the word it would be
-   labelling. A ribbon is a band offset up and down from its own points, so it
-   draws a slope well and a vertical line not at all -- which is why these are
-   placed pixel by pixel instead, all four in the same nine-pixel box with the
-   same one-pixel line, so no one of them reads as bolder than the rest. */
-enum mark { MARK_CROSS, MARK_CIRCLE, MARK_SQUARE, MARK_TRIANGLE };
-
-#define MARK_W 11
-#define MARK_R 4.0f
-
-static void draw_mark(enum mark mark, float cx, float cy, unsigned color) {
-    const float r = MARK_R;
-    if (mark == MARK_CROSS) {
-        stroke(cx - r + 1, cy - r + 1, cx + r - 1, cy + r - 1, color);
-        stroke(cx - r + 1, cy + r - 1, cx + r - 1, cy - r + 1, color);
-    } else if (mark == MARK_TRIANGLE) {
-        stroke(cx, cy - r, cx + r, cy + r - 1, color);
-        stroke(cx + r, cy + r - 1, cx - r, cy + r - 1, color);
-        stroke(cx - r, cy + r - 1, cx, cy - r, color);
-    } else if (mark == MARK_SQUARE) {
-        int x = (int)(cx - r + 1), y = (int)(cy - r + 1), n = (int)(2 * r - 1);
-        gfx_rect(x, y, n, 1, color);
-        gfx_rect(x, y + n - 1, n, 1, color);
-        gfx_rect(x, y, 1, n, color);
-        gfx_rect(x + n - 1, y, 1, n, color);
-    } else {
-        /* Round, and round the whole way: a point per pixel of circumference,
-           which at this radius is a closed ring of even weight. */
-        for (int i = 0; i < 26; i++) {
-            float a = i * (6.2831853f / 26);
-            gfx_rect((int)(cx + cosf(a) * r + 0.5f),
-                     (int)(cy + sinf(a) * r + 0.5f), 1, 1, color);
-        }
-    }
-}
-
 /* One button and the word for what it does, the mark sitting on the text's
    own line. Returns where the next one may start; a row that has to be
    centred is measured with the same arithmetic first. */
-static float hint_width(const char *text) {
-    return MARK_W + 4 + font_width(FONT_META, text);
+#define HINT_GAP 5              /* between a mark and its word */
+#define HINT_SPACE 16           /* between one hint and the next */
+
+static float hint_width(enum mark m, const char *text) {
+    return mark_width(m) + HINT_GAP + font_width(FONT_META, text);
 }
 
-static float draw_hint(float x, float base, enum mark mark, const char *text,
+/* The mark a shade brighter than the word: the button is what the eye
+   looks for, the word is what it reads once it has found it. */
+static float draw_hint(float x, float base, enum mark m, const char *text,
                        unsigned color) {
-    draw_mark(mark, x + MARK_W / 2.0f, base - 4, color);
-    return font_print(FONT_META, x + MARK_W + 4, base, color, text) + 16;
+    unsigned bright = faded(rgb_pack(rgb_mix(RGB_WHITE, g_tint, 0.1f), 255),
+                            (int)(((color >> 24) & 0xFF) * 0.9f + 25));
+    mark_draw(m, x + mark_width(m) / 2.0f, base - 4, bright, MARK_PLAIN, 0, 0);
+    return font_print(FONT_META, x + mark_width(m) + HINT_GAP, base, color, text)
+         + HINT_SPACE;
+}
+
+/* Two marks for one word: the shoulders. */
+static float draw_hint2(float x, float base, enum mark a, enum mark b,
+                        const char *text, unsigned color) {
+    unsigned bright = faded(rgb_pack(rgb_mix(RGB_WHITE, g_tint, 0.1f), 255), 230);
+    mark_draw(a, x + mark_width(a) / 2.0f, base - 4, bright, MARK_PLAIN, 0, 0);
+    x += mark_width(a) + 3;
+    mark_draw(b, x + mark_width(b) / 2.0f, base - 4, bright, MARK_PLAIN, 0, 0);
+    return font_print(FONT_META, x + mark_width(b) + HINT_GAP, base, color, text)
+         + HINT_SPACE;
 }
 
 /* The row of buttons a band carries at its foot, centred and both the same
    weight: which one is taken is decided by the button pressed, not by a
    cursor sitting on one of them. */
 static void draw_answers(float base, const char *yes, const char *no) {
-    float x = SCR_W / 2 - (hint_width(yes) + 30 + hint_width(no)) / 2;
-    draw_mark(MARK_CROSS, x + MARK_W / 2.0f, base - 4, g_dim);
-    x = font_print(FONT_META, x + MARK_W + 4, base, g_text, yes) + 30;
-    draw_mark(MARK_CIRCLE, x + MARK_W / 2.0f, base - 4, g_dim);
-    font_print(FONT_META, x + MARK_W + 4, base, g_text, no);
+    float x = SCR_W / 2 - (hint_width(MARK_CROSS, yes) + 30 + hint_width(MARK_CIRCLE, no)) / 2;
+    x = draw_hint(x, base, MARK_CROSS, yes, g_text) - HINT_SPACE + 30;
+    draw_hint(x, base, MARK_CIRCLE, no, g_text);
 }
 
 /* ------------------------------------------------------------------- ask */
@@ -1199,11 +1086,12 @@ static void draw_info(void) {
             gfx_glow(SCR_W / 2, y + 5, 320, 9,
                      rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.7f), 140));
         }
-        float w = hint_width(INFO_ACTION[i]);
+        float w = hint_width(MARK_CROSS, INFO_ACTION[i]);
         float x = SCR_W / 2 - w / 2;
-        if (on) draw_mark(MARK_CROSS, x + MARK_W / 2.0f, y - 4, g_accent);
-        font_print(FONT_META, x + MARK_W + 4, y, on ? g_accent : g_dim,
-                   INFO_ACTION[i]);
+        if (on) mark_draw(MARK_CROSS, x + mark_width(MARK_CROSS) / 2.0f, y - 4,
+                          g_accent, MARK_PLAIN, 0, 0);
+        font_print(FONT_META, x + mark_width(MARK_CROSS) + HINT_GAP, y,
+                   on ? g_accent : g_dim, INFO_ACTION[i]);
     }
 }
 
@@ -1219,8 +1107,8 @@ static void draw_footer(void) {
     /* A band carries its own buttons, so the strip under it stays quiet. */
     if (g_ask_title[0] || g_menu_count || g_installing) return;
     if (g_info) {
-        font_print(FONT_META, LIST_X, FOOTER_Y + 15, g_dim,
-                   "SELECT or O close");
+        float x = draw_hint(LIST_X, FOOTER_Y + 15, MARK_SELECT, "close", g_dim);
+        draw_hint(x, FOOTER_Y + 15, MARK_CIRCLE, "close", g_dim);
         return;
     }
     /* What is being waited for -- access point, dns, tls handshake -- goes
@@ -1246,7 +1134,7 @@ static void draw_footer(void) {
         x = draw_hint(LIST_X, FOOTER_Y + 15, MARK_CROSS,
                       installed ? "options" : "install", g_dim);
         if (installed) x = draw_hint(x, FOOTER_Y + 15, MARK_SQUARE, "remove", g_dim);
-        if (installed) x = font_print(FONT_META, x, FOOTER_Y + 15, g_dim, "START run") + 14;
+        if (installed) x = draw_hint(x, FOOTER_Y + 15, MARK_START, "run", g_dim);
         /* Triangle sets a package aside for later, and in the basket it is
            the same key that takes it back out again. */
         if (entry)
@@ -1254,9 +1142,9 @@ static void draw_footer(void) {
                           shell_tab_kind() == SHELL_TAB_BASKET ? "take out"
                                                                : "basket", g_dim);
     }
-    font_print(FONT_META, x, FOOTER_Y + 15, g_dim,
-               g_tabs > 1 ? "L R category   SELECT info   HOME quit"
-                          : "SELECT info   HOME quit");
+    if (g_tabs > 1) x = draw_hint2(x, FOOTER_Y + 15, MARK_L, MARK_R, "category", g_dim);
+    x = draw_hint(x, FOOTER_Y + 15, MARK_SELECT, "info", g_dim);
+    draw_hint(x, FOOTER_Y + 15, MARK_HOME, "quit", g_dim);
 }
 
 /* ------------------------------------------------------------- water light */
