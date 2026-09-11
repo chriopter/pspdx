@@ -7,6 +7,9 @@
 #   dev/start --reset    also forget the seed: the sweep runs, as on a new PSP
 #   dev/start --no-build
 #   dev/start --quiet    no speakers: the emulator gets no audio socket
+#   dev/start --owner X  whose instance this is (default: the shell's user).
+#                        Only an instance with the same owner is replaced;
+#                        one somebody else opened is left alone.
 #   dev/start --slow     the network held to a PSP-1004's 180 KB/s (802.11b)
 #   dev/start --mock     a made-up catalog of thirty served from the host
 #
@@ -34,12 +37,15 @@ RESET=0
 BUILD=1
 AUDIO=""
 SLOW=0
+OWNER="${PSPDX_OWNER:-$USER}"
 MOCK=0
-for arg in "$@"; do
+while [ $# -gt 0 ]; do
+	arg="$1"
 	case "$arg" in
 		--reset) RESET=1 ;;
 		--no-build) BUILD=0 ;;
 		--quiet) AUDIO="--nosocket=pulseaudio" ;;
+		--owner) OWNER="$2"; shift ;;
 		--slow) SLOW=1 ;;
 		--mock) MOCK=1 ;;
 		*) echo "unknown option $arg" >&2; exit 2 ;;
@@ -113,8 +119,18 @@ if [ "$MOCK" = 1 ]; then
 	echo "mock catalog on $LOCALCAT_URL (systemctl --user stop pspdx-mock-server)"
 fi
 
-systemctl --user stop pspdx-ppsspp 2>/dev/null || true
-pkill -x PPSSPPSDL 2>/dev/null || true
+# Only this owner's instance makes way. The emulator carries its owner in
+# its environment, so an instance somebody else opened by hand -- the user
+# looking at the desk while an agent tests -- is not theirs to end and is
+# left running; the unit name carries the owner too, so two can coexist.
+UNIT="pspdx-ppsspp"
+[ "$OWNER" != "$USER" ] && UNIT="pspdx-ppsspp-$OWNER"
+systemctl --user stop "$UNIT" 2>/dev/null || true
+for pid in $(pgrep -x PPSSPPSDL 2>/dev/null); do
+	if tr '\0' '\n' <"/proc/$pid/environ" 2>/dev/null | grep -qx "PSPDX_OWNER=$OWNER"; then
+		kill "$pid" 2>/dev/null || true
+	fi
+done
 sleep 1
 # Native: the emulator renders the PSP's own 480x272 and only the window
 # scales it, so what is on screen is what a PSP shows, pixel for pixel.
@@ -122,12 +138,12 @@ sleep 1
 # comes after the old instance is gone.
 INI="$MS/PSP/SYSTEM/ppsspp.ini"
 [ -f "$INI" ] && sed -i 's/^InternalResolution = .*/InternalResolution = 1/' "$INI"
-systemd-run --user --collect --quiet --unit=pspdx-ppsspp \
+systemd-run --user --collect --quiet --unit="$UNIT" \
   --setenv=SDL_VIDEODRIVER=wayland --setenv=WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}" \
-  flatpak run --socket=wayland --share=network $AUDIO --filesystem="$MS" \
+  flatpak run --socket=wayland --share=network $AUDIO --env=PSPDX_OWNER="$OWNER" --filesystem="$MS" \
   org.ppsspp.PPSSPP --fullscreen=0 "$MS/PSP/GAME/pspdx/EBOOT.PBP"
 sleep 3
 # Where it opens is Hyprland's business: a window rule in
 # ~/.config/hypr/hyprland.lua sends the emulator to workspace 2 without
 # focus, so the desk it was started from keeps what was being worked on.
-echo "PPSSPP is up (workspace 2 by window rule). Stop it with: systemctl --user stop pspdx-ppsspp"
+echo "PPSSPP is up (workspace 2 by window rule). Stop it with: systemctl --user stop $UNIT"
