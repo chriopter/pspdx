@@ -50,6 +50,18 @@ for clip in "$HERE"/../pspdx-catalog/apps/*/video.mp4 "$HERE"/catalog/apps/*/vid
 done
 
 rm -f "$MS/PSPDX.REPLAY" "$MS/PSPDX.KEYS" "$MS/PSPDX.INSTALL" "$MS/PSPDX.SLOW"
+# Tux Racer is always behind: its record is set to revision 1 when it is
+# installed, so the catalog's release counts as newer and the list has one
+# row with the update arrows on it to look at.
+TUX="$MS/PSP/PSPDX/db/io.github.chriopter.extremetuxracer.json"
+[ -f "$TUX" ] && python3 - "$TUX" <<'PY'
+import json, sys
+p = sys.argv[1]
+r = json.load(open(p))
+r["rev"] = 1
+r["version"] = "0.0.1"
+open(p, "w").write(json.dumps(r, separators=(",", ":")) + "\n")
+PY
 # The host's network is ten times a PSP's; with the file there the client
 # holds every fetch to what the 1004's radio and stack actually deliver.
 [ "$SLOW" = 1 ] && printf '180' >"$MS/PSPDX.SLOW"
