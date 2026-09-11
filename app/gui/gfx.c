@@ -31,12 +31,12 @@
    of them together, so the coarse levels come out genuinely flatter -- which
    is what water does as it goes away, and why the far rows neither shimmer
    nor show the tile. */
-#define RIPPLE_SIZE 128
-#define RIPPLE_FRAMES 8
+#define RIPPLE_SIZE 256
+#define RIPPLE_FRAMES 4         /* crossfaded, so few are needed */
 /* Four levels, down to 16x16: the GE reads a texture in 16-byte units,
    so a T8 level narrower than 16 texels has a stride it cannot address. */
 #define RIPPLE_LEVELS 4
-#define RIPPLE_BYTES (21760)    /* 128^2 + 64^2 + 32^2 + 16^2 */
+#define RIPPLE_BYTES (87040)    /* 256^2 + 128^2 + 64^2 + 32^2 */
 
 static unsigned int __attribute__((aligned(16))) g_list[64 * 1024];
 static unsigned g_frames;
@@ -132,14 +132,21 @@ static unsigned char normal_index(float nx, float ny) {
    of a sum is two products of the ends, which is what keeps this to a few
    thousand sines instead of a million. */
 static void ripple_height(float *h, int frame) {
+    /* Fourteen on a tile twice the size it was: the two longest span the
+       whole tile and vary it slowly, so its return is twice as far off and
+       no two returns look alike; the two shortest are the chop the bigger
+       tile would otherwise have lost. Every wave is a pass over the tile
+       for every step, and that is what the boot pays for. */
     static const struct { int px, py, turns; } WAVE[] = {
-        {  0,  1,  1 }, {  1,  3, -1 }, { -1,  4,  1 }, {  2,  5,  2 },
-        { -2,  7, -2 }, {  1,  9,  1 }, {  3, 11,  3 }, { -3, 13, -1 },
+        {  0,  1,  1 }, {  1,  1, -1 }, { -1,  2,  1 }, {  1,  3, -1 },
+        {  2,  3,  2 }, { -2,  5, -2 }, {  3,  5,  1 }, {  1,  7,  3 },
+        { -3,  8, -1 }, {  2, 11,  2 }, { -1, 13,  1 }, {  4, 13, -3 },
+        { -2, 17,  2 }, {  3, 23, -1 },
     };
     for (int i = 0; i < RIPPLE_SIZE * RIPPLE_SIZE; i++) h[i] = 0.0f;
     for (unsigned w = 0; w < sizeof(WAVE) / sizeof(*WAVE); w++) {
         int px = WAVE[w].px, py = WAVE[w].py;
-        float amp = 1.0f / powf((float)(px * px + py * py), 0.7f);
+        float amp = 1.0f / powf((float)(px * px + py * py), 0.4f);
         float phase = 6.2831853f * WAVE[w].turns * frame / RIPPLE_FRAMES;
         float sx[RIPPLE_SIZE], cx[RIPPLE_SIZE], sy[RIPPLE_SIZE], cy[RIPPLE_SIZE];
         for (int x = 0; x < RIPPLE_SIZE; x++) {
@@ -157,7 +164,7 @@ static void ripple_height(float *h, int frame) {
 }
 
 /* How far the steepest of those slopes is allowed to lean. */
-#define RIPPLE_BUMP 1.7f
+#define RIPPLE_BUMP 1.1f
 
 static void ripple_mip(const unsigned char *src, int n, unsigned char *dst) {
     for (int y = 0; y < n / 2; y++) {
@@ -174,6 +181,7 @@ static void ripple_mip(const unsigned char *src, int n, unsigned char *dst) {
 }
 
 static void make_ripple(void) {
+    unsigned t0 = now_us();
     g_ripple = memalign(16, RIPPLE_FRAMES * RIPPLE_BYTES);
     if (!g_ripple) return;
     ripple_normals();
@@ -200,6 +208,8 @@ static void make_ripple(void) {
         }
     }
     sceKernelDcacheWritebackRange(g_ripple, RIPPLE_FRAMES * RIPPLE_BYTES);
+    logline("ripple: %d steps of %dx%d in %u ms", RIPPLE_FRAMES, RIPPLE_SIZE, RIPPLE_SIZE,
+            (now_us() - t0) / 1000);
 }
 
 void gfx_init(void) {

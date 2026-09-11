@@ -7,12 +7,12 @@
    nineteen columns in front of the viewer twelve more far out to either
    side, which only come into view where the rows have narrowed enough. The
    nineteen are the field the sweep fills; the twelve are open sea. */
-#define NX_INNER 19
+#define NX_INNER 27
 #define NX_OUTER 16
 #define NX (NX_INNER + NX_OUTER)
 #define J0 (NX_OUTER / 2)       /* first inner column */
 #define J1 (J0 + NX_INNER - 1)  /* last inner column */
-#define NZ 22                   /* lines into the distance */
+#define NZ 30                   /* lines into the distance */
 /* The first rows are under the bottom edge of the screen, so the water runs
    off it rather than stopping on it; ROW0 is where the screen starts, and
    the sweep's field and the light both measure depth from there. */
@@ -28,8 +28,8 @@
    capped in pixels, so a tall swell does not climb over the footer. */
 #define EYE_Y (150.0f / GFX_FOCAL)
 #define H_SCALE (52.0f / GFX_FOCAL)
-#define TILES 3.2f
-#define RIPPLE_TEXELS 128.0f    /* one tile, as gfx builds it */
+#define TILES 1.6f
+#define RIPPLE_TEXELS 256.0f    /* one tile, as gfx builds it */
 #define DY_CAP 42.0f
 /* Past this much width per unit of depth a row is far off screen, and its
    corner can sit there rather than thousands of pixels out. */
@@ -39,15 +39,15 @@
    under a half or the surface explodes; it also sets the speed, and a long
    ocean swell is slow. The damping is what stops a ring from ringing for
    ever. */
-#define WAVE_C 0.06f
+#define WAVE_C 0.09f
 #define WAVE_DAMP 0.995f
 #define WAVE_MAX 2.5f
 
 /* What the source covers in cells, and how many frames of standing over a
    cell it takes to fill it. Sized so a sweep of the field at stick speed
    leaves no dry cells behind between passes. */
-#define POUR_RX 1.8f
-#define POUR_RZ 1.7f
+#define POUR_RX 2.5f
+#define POUR_RZ 2.3f
 #define POUR_RATE 0.34f
 #define POUR_DENT 0.16f
 
@@ -236,7 +236,7 @@ static void dent(float jf, float rf, float depth, float radius) {
 void lattice_touch(float x) {
     float jf = J0 + x * (NX_INNER - 1) + (frand() - 0.5f) * 3.0f;
     float rf = ROW0 + (0.12f + frand() * 0.5f) * (NZ - 1 - ROW0);
-    dent(jf, rf, 1.5f + frand() * 1.1f, 1.6f + frand() * 1.3f);
+    dent(jf, rf, 1.5f + frand() * 1.1f, 2.2f + frand() * 1.8f);
 }
 
 void lattice_stir(float x, float y) {
@@ -253,7 +253,7 @@ void lattice_stir(float x, float y) {
     /* A light press each frame rather than a drop: the wave equation adds
        them up into a wake, and the cap on the height keeps a stick held
        against its stop from digging a hole. */
-    dent(jf, rf, 0.18f + 0.45f * push, 1.4f + 0.9f * push);
+    dent(jf, rf, 0.18f + 0.45f * push, 2.0f + 1.2f * push);
 }
 
 /* Velocity from the curvature, height from the velocity: the plain damped
@@ -298,7 +298,7 @@ float lattice_pour(float fx, float fz, int pouring) {
                 g_wet[i][j] = w > 1.0f ? 1.0f : w;
             }
         }
-        dent(jf, rf, POUR_DENT, 2.0f);
+        dent(jf, rf, POUR_DENT, 2.8f);
     }
     /* Past the sides of the field, and under the bottom edge of the screen,
        the sea simply carries on. */
@@ -328,7 +328,7 @@ static void swell(float t) {
     float sa1[NZ], ca1[NZ], sa2[NZ], ca2[NZ];
     float sb1[NX], cb1[NX], sb2[NX], cb2[NX];
     for (int i = 0; i < NZ; i++) {
-        float a1 = i * 0.55f - t * 0.80f, a2 = i * 0.95f + t * 0.55f;
+        float a1 = i * (0.55f * 21.0f / (NZ - 1)) - t * 0.80f, a2 = i * (0.95f * 21.0f / (NZ - 1)) + t * 0.55f;
         sa1[i] = fsin(a1); ca1[i] = fcos(a1);
         sa2[i] = fsin(a2); ca2[i] = fcos(a2);
     }

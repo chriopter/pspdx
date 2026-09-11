@@ -73,5 +73,7 @@ systemd-run --user --collect --quiet --unit=pspdx-ppsspp \
   flatpak run --socket=wayland --share=network $AUDIO --filesystem="$MS" \
   org.ppsspp.PPSSPP --fullscreen=0 "$MS/PSP/GAME/pspdx/EBOOT.PBP"
 sleep 3
-WS="$(hyprctl clients -j 2>/dev/null | python3 -c "import sys,json; print(*(c['workspace']['name'] for c in json.load(sys.stdin) if 'ppsspp' in c['class'].lower()))" 2>/dev/null || true)"
-echo "PPSSPP is up${WS:+ on workspace $WS}. Stop it with: systemctl --user stop pspdx-ppsspp"
+# Where it opens is Hyprland's business: a window rule in
+# ~/.config/hypr/hyprland.lua sends the emulator to workspace 2 without
+# focus, so the desk it was started from keeps what was being worked on.
+echo "PPSSPP is up (workspace 2 by window rule). Stop it with: systemctl --user stop pspdx-ppsspp"
