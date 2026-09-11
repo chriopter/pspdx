@@ -82,6 +82,13 @@ rm -f "$MS/PSPDX.LOG" "$MS/PSPDX.BMP" "$MS/PSPDX1.BMP" "$MS/PSPDX.BENCH" "$MS/PS
 # that, so a film takes as long to arrive here as it does on the hardware.
 [ -n "$SLOW" ] && printf '%s' "$SLOW" >"$MS/PSPDX.SLOW"
 
+# Native: the emulator renders the PSP's own 480x272 and only the window
+# scales it, so what is on screen is what a PSP shows, pixel for pixel.
+# The ini is rewritten by a running emulator on exit; a rig run that
+# overlaps one loses this, which is harmless for a rig.
+INI="$MS/PSP/SYSTEM/ppsspp.ini"
+[ -f "$INI" ] && sed -i 's/^InternalResolution = .*/InternalResolution = 1/' "$INI"
+
 # In its own session, so that the kill below reaches the emulator inside
 # the flatpak sandbox and not only the launcher: an instance that survives
 # keeps writing the same files as the next run, and two runs then share one

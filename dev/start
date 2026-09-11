@@ -62,6 +62,12 @@ fi
 systemctl --user stop pspdx-ppsspp 2>/dev/null || true
 pkill -x PPSSPPSDL 2>/dev/null || true
 sleep 1
+# Native: the emulator renders the PSP's own 480x272 and only the window
+# scales it, so what is on screen is what a PSP shows, pixel for pixel.
+# The ini is rewritten by a running emulator on exit, which is why this
+# comes after the old instance is gone.
+INI="$MS/PSP/SYSTEM/ppsspp.ini"
+[ -f "$INI" ] && sed -i 's/^InternalResolution = .*/InternalResolution = 1/' "$INI"
 systemd-run --user --collect --quiet --unit=pspdx-ppsspp \
   --setenv=SDL_VIDEODRIVER=wayland --setenv=WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}" \
   flatpak run --socket=wayland --share=network $AUDIO --filesystem="$MS" \
