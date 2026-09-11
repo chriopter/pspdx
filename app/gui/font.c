@@ -25,7 +25,7 @@ static intraFont *g_font;
 /* Sized for a 4.3-inch panel held at arm's length: the body is what the
    system shell uses for its menus, the rest steps from there. */
 static const struct { float size; unsigned shadow; } STYLES[] = {
-    [FONT_DISPLAY] = { 1.9f, 0x00000000 },
+    [FONT_DISPLAY] = { 1.35f, 0x00000000 },
     [FONT_H1]   = { 0.92f, 0xA0000000 },
     [FONT_BODY] = { 0.70f, 0x80000000 },
     [FONT_META] = { 0.56f, 0x70000000 },

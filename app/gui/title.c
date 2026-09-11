@@ -28,7 +28,7 @@ static void bake(const char *text, struct rgb tint) {
     float x = (BAKE_W - g_width) / 2, y = 46;
     unsigned face = rgb_pack(rgb_mix(RGB_WHITE, tint, 0.18f), 255);
     unsigned dark = rgb_pack(rgb_mix(tint, RGB_WHITE, 0.1f), 255);
-    font_print(FONT_DISPLAY, x, y + 2, dark, text);
+    font_print(FONT_DISPLAY, x, y + 1, dark, text);
     font_print(FONT_DISPLAY, x, y, face, text);
     gfx_bake_end(&g_tex);
     /* The GE leaves alpha at zero in what it blended, so the letters' own
