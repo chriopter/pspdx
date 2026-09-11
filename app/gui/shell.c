@@ -512,8 +512,6 @@ static void draw_chrome(const struct catalog *catalog, float t) {
     unsigned clear = rgb_pack(g_tint, 0);
     gfx_hgrad(0, HEADER_H, SCR_W / 2, 1, clear, bright);
     gfx_hgrad(SCR_W / 2, HEADER_H, SCR_W / 2, 1, bright, clear);
-    gfx_hgrad(0, FOOTER_Y, SCR_W / 2, 1, clear, rgb_pack(g_tint, 110));
-    gfx_hgrad(SCR_W / 2, FOOTER_Y, SCR_W / 2, 1, rgb_pack(g_tint, 110), clear);
 
     gfx_glow(LIST_X + 24, 18, 110, 56, rgb_pack(g_tint, 80));
     font_print(FONT_H1, LIST_X, 23, g_text, "PSPDX");
@@ -1212,8 +1210,12 @@ static void draw_info(void) {
 /* ---------------------------------------------------------------- footer */
 
 static void draw_footer(void) {
-    gfx_vgrad(0, FOOTER_Y + 1, SCR_W, SCR_H - FOOTER_Y - 1, RGBA(0, 0, 0, 110),
-              RGBA(0, 0, 0, 190));
+    /* No edge: the strip comes in as a shadow rising from the bottom, the
+       way the PSP's own bars sit on their backgrounds, and the water runs
+       on under it. */
+    gfx_vgrad(0, FOOTER_Y - 28, SCR_W, 28, RGBA(0, 0, 0, 0), RGBA(0, 0, 0, 120));
+    gfx_vgrad(0, FOOTER_Y, SCR_W, SCR_H - FOOTER_Y, RGBA(0, 0, 0, 120),
+              RGBA(0, 0, 0, 200));
     /* A band carries its own buttons, so the strip under it stays quiet. */
     if (g_ask_title[0] || g_menu_count || g_installing) return;
     if (g_info) {
