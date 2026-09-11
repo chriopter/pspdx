@@ -6,6 +6,7 @@
 #include <pspdisplay.h>
 #include <pspiofilemgr.h>
 #include <psppower.h>
+#include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -73,6 +74,58 @@ static void dump_diagnostics(void) {
     }
 }
 
+/* ------------------------------------------------------------------- self */
+
+/* ms0:/PSP/GAME/PSPDX/EBOOT.PBP -> PSPDX. FAT32 keeps no case worth trusting
+   and the path arrives from the loader rather than from this program, so the
+   marker is matched without it. Returns 0 when the path names no directory
+   under PSP/GAME. */
+static int dir_under_game(const char *path, char *out, size_t size) {
+    static const char mark[] = "PSP/GAME/";
+    for (const char *p = path; *p; p++) {
+        size_t i = 0;
+        while (mark[i] && toupper((unsigned char)p[i]) == mark[i]) i++;
+        if (mark[i]) continue;
+        const char *start = p + i;
+        const char *slash = strchr(start, '/');
+        if (!slash) return 0;
+        size_t n = (size_t)(slash - start);
+        if (n == 0 || n >= size) return 0;
+        memcpy(out, start, n);
+        out[n] = '\0';
+        return 1;
+    }
+    return 0;
+}
+
+/* PSPDX is an app in its own catalog, so the browser wants a record of it like
+   any other package -- and no install ever wrote one: somebody copied this
+   onto the stick. The first start writes it, out of where the loader started
+   it from and what the build calls itself, and from then on the client is a
+   row in its own list, installed and current rather than something to
+   download over itself.
+
+   The rev stays zero. A rev is the moment GitHub published a release and a
+   build cannot know its own; catalog_check_updates reads the zero and settles
+   it against the version string the first time it sees the catalog. */
+static void record_self(const char *path) {
+    struct installed self;
+    if (db_read(PSPDX_SELF_ID, &self) == 0) return;
+
+    memset(&self, 0, sizeof(self));
+    strncpy(self.id, PSPDX_SELF_ID, sizeof(self.id) - 1);
+    strncpy(self.version, PSPDX_VERSION, sizeof(self.version) - 1);
+    /* Started from somewhere this cannot read -- a shell, a host debugger --
+       leaves the name the release ships under, which is where it would be. */
+    if (!path || !dir_under_game(path, self.dir, sizeof(self.dir)))
+        snprintf(self.dir, sizeof(self.dir), "PSPDX");
+    if (db_write_record(&self) < 0) {
+        logline("self: no record written; PSPDX will list as not installed");
+        return;
+    }
+    logline("self: recorded PSPDX %s in PSP/GAME/%s", self.version, self.dir);
+}
+
 /* Until the catalog is here the browser has nothing to browse; it is on
    screen anyway, saying what it waits for. */
 static struct catalog empty;
@@ -136,9 +189,18 @@ static int install_app(int index, int screenshot, int at, int of) {
         entry->local_rev = report.rev;
         strncpy(entry->local_version, report.version, sizeof(entry->local_version) - 1);
         entry->local_version[sizeof(entry->local_version) - 1] = '\0';
-        snprintf(message, sizeof(message), "Installed %s %s: %d files, %luK, %us",
-                 entry->name, report.version, report.files,
-                 (unsigned long)(report.bytes / 1024), seconds);
+        /* The client can fetch itself, and just has: the EBOOT that is running
+           is the one in RAM, and the file it was loaded from has been renamed
+           aside and replaced underneath it. Nothing on screen is the new
+           version until the console loads it, so the band says which button
+           does that rather than reporting a file count nobody needs. */
+        if (strcmp(entry->id, PSPDX_SELF_ID) == 0)
+            snprintf(message, sizeof(message),
+                     "Updated PSPDX to %s: press START to restart", report.version);
+        else
+            snprintf(message, sizeof(message), "Installed %s %s: %d files, %luK, %us",
+                     entry->name, report.version, report.files,
+                     (unsigned long)(report.bytes / 1024), seconds);
     } else {
         snprintf(message, sizeof(message), "Install failed (%d): %s",
                  rc, log_at(log_count() - 1));
@@ -262,6 +324,15 @@ static void ask_install(int index) {
 static void ask_remove(int index) {
     const struct app_entry *entry = &catalog.apps[index];
     struct installed record;
+    /* The one package on the list that this program will not delete. The
+       directory it would delete is the one the running EBOOT came out of:
+       what is in RAM would go on running with nothing left to restart, and
+       the update that is the point of listing PSPDX at all would have
+       nowhere to land. */
+    if (strcmp(entry->id, PSPDX_SELF_ID) == 0) {
+        shell_status("PSPDX cannot remove itself");
+        return;
+    }
     if (db_read(entry->id, &record) < 0 || !record.dir[0]) {
         /* Without a record there is no directory to name, and nothing here
            guesses at one. */
@@ -380,7 +451,10 @@ static void menu_open(int index) {
     for (int i = 0; i < CHOICE_COUNT; i++) g_choice[i] = g_choice_text[i];
     g_choice_on[CHOICE_UPDATE] = update;
     g_choice_on[CHOICE_REINSTALL] = !update;
-    g_choice_on[CHOICE_DELETE] = 1;
+    /* Greyed rather than missing, for the same reason the other two are: the
+       row stays where it is and says that deleting is a thing that exists and
+       not a thing this package allows. */
+    g_choice_on[CHOICE_DELETE] = strcmp(entry->id, PSPDX_SELF_ID) != 0;
     g_menu_cursor = update ? CHOICE_UPDATE : CHOICE_REINSTALL;
     g_menu_of = index;
     g_menu_open = 1;
@@ -495,7 +569,10 @@ static unsigned keys_pressed(void) {
     return pressed;
 }
 
-int main(void) {
+/* argv[0] is the path the firmware loaded this from -- the main thread's argp,
+   which the loader fills with the EBOOT's own name. It is the only thing that
+   says which directory under PSP/GAME the client is sitting in. */
+int main(int argc, char *argv[]) {
     /* Full speed: the film decodes and the piano plays on the same CPU
        the interface draws with. The default is two thirds of it. */
     scePowerSetClockFrequency(333, 333, 166);
@@ -507,6 +584,9 @@ int main(void) {
     sceCtrlSetSamplingCycle(0);
     sceCtrlSetSamplingMode(PSP_CTRL_MODE_ANALOG);
     install_recover();
+    /* After the recovery, which is what settles what is actually under
+       PSP/GAME, and before the sync, which reads every record there is. */
+    record_self(argc > 0 ? argv[0] : 0);
     entropy_init();
     entropy_screen_prepare();
     int sweep = entropy_screen_is_replay() || !entropy_load();

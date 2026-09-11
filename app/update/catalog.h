@@ -7,6 +7,12 @@
 #define MAX_APPS 64
 #define MAX_SUMMARY 60
 
+/* PSPDX is an app in its own catalog, and a few things have to know which row
+   is the client itself: the one that cannot be removed while it is running,
+   and the one whose record was written by a first start rather than by an
+   install. The id is written once, here. */
+#define PSPDX_SELF_ID "io.github.chriopter.pspdx"
+
 enum app_state { APP_UNKNOWN, APP_NOT_INSTALLED, APP_CURRENT, APP_UPDATE };
 
 struct app_entry {

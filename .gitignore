@@ -6,6 +6,9 @@
 EBOOT.PBP
 PARAM.SFO
 target/
+# What dev/release packs and hands to GitHub, and the tree it packs from.
+pspdx.zip
+dist/
 
 # Locally built dependencies. wolfssl-psp/build.sh reproduces the prefix;
 # the prefix itself is 1.7 MB of static library and does not belong in git.

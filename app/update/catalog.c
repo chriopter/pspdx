@@ -150,6 +150,34 @@ int catalog_check_updates(struct catalog *catalog) {
         else if (manifest_fetch(entry->manifest, entry->id, &manifest) < 0) continue;
         entry->remote_rev = manifest.rev;
         strncpy(entry->remote_version, manifest.version, sizeof(entry->remote_version) - 1);
+        /* Every other record carries the rev of the release it came from,
+           because an install had the catalog in front of it. PSPDX's own was
+           written by its first start out of nothing but the build, and a rev
+           is the moment GitHub published the release -- which a build cannot
+           know. So that record holds rev 0 and the version string the build
+           was made from, and this once the comparison is made on the version
+           instead. The same version means the stick is running the published
+           release: the catalog's rev goes into the record, and from the next
+           run on it is an ordinary record compared like any other. A
+           different version is an update, whichever way the strings sort. */
+        if (strcmp(entry->id, PSPDX_SELF_ID) == 0 && entry->local_rev == 0) {
+            if (strcmp(entry->local_version, manifest.version) == 0) {
+                struct installed self;
+                if (db_read(entry->id, &self) == 0) {
+                    self.rev = manifest.rev;
+                    if (db_write_record(&self) == 0) entry->local_rev = manifest.rev;
+                }
+                entry->state = APP_CURRENT;
+                logline("self: %s is the published release, rev %u noted",
+                        entry->local_version, manifest.rev);
+            } else {
+                entry->state = APP_UPDATE;
+                updates++;
+                logline("self: %s installed, %s published",
+                        entry->local_version, manifest.version);
+            }
+            continue;
+        }
         if (manifest.rev > entry->local_rev) {
             entry->state = APP_UPDATE;
             updates++;

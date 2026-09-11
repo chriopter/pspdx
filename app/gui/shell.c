@@ -1041,6 +1041,11 @@ static void draw_info(void) {
     const struct https_info *tls = https_last();
     char value[96];
 
+    /* Which build this is, above the rest: the one fact the band states about
+       itself rather than about the run. */
+    fact(INFO_Y + 16, FACT_LABEL, FACT_VALUE, SCR_W - FACT_VALUE - 30,
+         "PSPDX", PSPDX_VERSION);
+
     url_host(catalog_url(), value, sizeof(value));
     fact(INFO_Y + 34, FACT_LABEL, FACT_VALUE, SCR_W - FACT_VALUE - 30,
          "Catalog", value);
@@ -1147,7 +1152,10 @@ static void draw_footer(void) {
     } else {
         x = draw_hint(LIST_X, FOOTER_Y + 15, MARK_CROSS,
                       installed ? "options" : "install", g_dim);
-        if (installed) x = draw_hint(x, FOOTER_Y + 15, MARK_SQUARE, "remove", g_dim);
+        /* Not on the client's own row: nothing here deletes the directory the
+           running EBOOT came out of, so the key is not offered either. */
+        if (installed && strcmp(entry->id, PSPDX_SELF_ID) != 0)
+            x = draw_hint(x, FOOTER_Y + 15, MARK_SQUARE, "remove", g_dim);
         if (installed) x = draw_hint(x, FOOTER_Y + 15, MARK_START, "run", g_dim);
         /* Triangle sets a package aside for later, and in the basket it is
            the same key that takes it back out again. */

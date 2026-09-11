@@ -1,0 +1,54 @@
+#!/bin/sh
+# Cuts a release of the client: builds it with the version written into it,
+# packs the EBOOT the way a stick wants to find it, and hands the archive to
+# GitHub, where the catalog's scanner goes looking.
+#
+#   dev/release 0.1.0 ["what changed"]
+#
+# The version is the tag without its "v", which is what the scanner records a
+# release's version as -- and what the client writes into its own record on a
+# first start. Those two strings are compared, and only compared, to decide
+# whether PSPDX is looking at itself or at an update, so a release built with
+# a different one would offer itself an update for ever. It is an argument
+# rather than something read out of git: the tag this creates does not exist
+# until this has created it.
+#
+# From master, and from a clean tree: the scanner takes the newest release of
+# the repository and hashes the bytes GitHub serves, so the release has to be
+# of what was merged and nothing else.
+set -e
+HERE="$(cd "$(dirname "$0")/.." && pwd)"
+APP="$HERE/app"
+
+VERSION="$1"
+[ -n "$VERSION" ] || { echo "usage: dev/release <version> [notes]" >&2; exit 2; }
+VERSION="${VERSION#v}"
+NOTES="${2:-PSPDX $VERSION}"
+
+cd "$HERE"
+[ "$(git rev-parse --abbrev-ref HEAD)" = "master" ] || {
+	echo "dev/release runs on master; this is $(git rev-parse --abbrev-ref HEAD)" >&2
+	exit 1
+}
+[ -z "$(git status --porcelain)" ] || { echo "the tree has uncommitted changes" >&2; exit 1; }
+COMMIT="$(git rev-parse HEAD)"
+
+# The Docker build mounts app/ alone and so sees no .git of its own: the
+# version goes in on the command line rather than out of git describe.
+(cd "$APP" && docker run --rm -v "$PWD:/src" -w /src pspdev/pspdev:latest \
+	make PSPDX_VERSION="$VERSION" 2>&1 | grep -E 'error|EBOOT\.PBP' || true)
+[ -f "$APP/EBOOT.PBP" ] || { echo "no EBOOT.PBP; the build failed" >&2; exit 1; }
+
+# The archive is the tree a PSP expects, so unpacking it onto a stick by hand
+# puts the client exactly where the client would have put it. The installer
+# reads the same layout from the other end: the directory of the shallowest
+# EBOOT.PBP is the package, and this one is PSPDX.
+rm -rf "$HERE/dist" "$HERE/pspdx.zip"
+mkdir -p "$HERE/dist/PSP/GAME/PSPDX"
+cp "$APP/EBOOT.PBP" "$HERE/dist/PSP/GAME/PSPDX/EBOOT.PBP"
+(cd "$HERE/dist" && zip -q -r "$HERE/pspdx.zip" PSP)
+rm -rf "$HERE/dist"
+
+gh release create "v$VERSION" "$HERE/pspdx.zip" -t "v$VERSION" -n "$NOTES" \
+	--target "$COMMIT"
+echo "v$VERSION is out; pspdx-catalog picks it up on its next scan"

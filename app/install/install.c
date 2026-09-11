@@ -402,6 +402,20 @@ static int db_write(const struct manifest *m, const char *dir) {
     return 0;
 }
 
+/* The same file from fields rather than from a manifest: PSPDX's own record,
+   which no install ever wrote. The manifest URL is left empty -- the catalog
+   carries the client's release like everyone else's, so nothing would ever
+   read it. */
+int db_write_record(const struct installed *record) {
+    struct manifest m;
+    if (!manifest_id_is_safe(record->id)) { logline("db: unusable id"); return -1; }
+    memset(&m, 0, sizeof(m));
+    snprintf(m.id, sizeof(m.id), "%s", record->id);
+    snprintf(m.version, sizeof(m.version), "%s", record->version);
+    m.rev = record->rev;
+    return db_write(&m, record->dir);
+}
+
 /* Reads what is installed for one id. Returns 0 if a record exists. */
 int db_read(const char *id, struct installed *out) {
     char path[256];

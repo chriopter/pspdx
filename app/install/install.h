@@ -39,6 +39,12 @@ struct installed {
 
 int db_read(const char *id, struct installed *out);
 
+/* A record for a package this client did not unpack. There is exactly one --
+   PSPDX's own, which is on the stick because somebody copied it there, and
+   which still needs a record to be an app like the others. Written the same
+   way an install writes one, through a rename, so it is never half a file. */
+int db_write_record(const struct installed *record);
+
 /* Removes PSP/GAME/<dir> and forgets the record, in that order: a directory
    left behind with no record would be offered as uninstalled and written over,
    while a record with no directory only costs one line in the database. The
