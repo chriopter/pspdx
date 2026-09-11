@@ -113,7 +113,7 @@ static int g_fade = 255;                /* black over everything at start */
 
 /* Install overlay, live only between shell_install_begin and _end. */
 static int g_installing;
-static char g_install_name[40];
+static char g_install_name[56];         /* a name, and room for "2 of 3: " */
 static char g_install_phase[16];
 static size_t g_install_done, g_install_total;
 static float g_bar;                     /* the drawn end, chasing the reported one */
@@ -150,54 +150,159 @@ static const char *const TAB_KEY[] = {
 };
 #define TAB_ALL 6
 
-static int g_tab[TAB_ALL];              /* which of the six have anything */
+/* Two tabs are not categories and are named by a sign rather than a word: the
+   updates waiting for the packages on the stick, and the basket this session
+   has filled. They are numbered below zero so that a tab is either an index
+   into TAB_NAME or one of these, with nothing to keep in step, and they stand
+   to the left of All because what is waiting to be done comes before what is
+   merely there to browse. */
+#define TAB_UPDATES (-2)
+#define TAB_BASKET  (-1)
+
+static int g_tab[TAB_ALL + 2];          /* which of them have anything */
 static int g_tabs;
 static int g_tab_at;                    /* index into g_tab, not into TAB_NAME */
 static const struct catalog *g_view_of;
 static unsigned char g_view[MAX_APPS];
-static int g_view_count;
+static int g_view_count;                /* packages; the action row is extra */
+static int g_view_action;               /* 1 when row 0 is the action row */
 
-static void build_view(void) {
-    g_view_count = 0;
-    if (!g_view_of || g_tabs <= 0) return;
-    const char *key = TAB_KEY[g_tab[g_tab_at]];
+/* The basket: catalog indices set aside this session, a bit each. */
+static unsigned char g_basket[(MAX_APPS + 7) / 8];
+static int g_basket_n;
+
+int shell_basket_has(int index) {
+    if (index < 0 || index >= MAX_APPS) return 0;
+    return (g_basket[index >> 3] >> (index & 7)) & 1;
+}
+
+int shell_basket_count(void) { return g_basket_n; }
+
+void shell_basket_toggle(int index) {
+    if (index < 0 || index >= MAX_APPS) return;
+    g_basket[index >> 3] ^= (unsigned char)(1u << (index & 7));
+    g_basket_n += shell_basket_has(index) ? 1 : -1;
+}
+
+void shell_basket_forget(int index) {
+    if (shell_basket_has(index)) shell_basket_toggle(index);
+}
+
+void shell_basket_clear(void) {
+    memset(g_basket, 0, sizeof(g_basket));
+    g_basket_n = 0;
+}
+
+/* How many packages on the stick have a newer one published. The number is
+   the updates tab's own label and the reason it exists at all, so it is asked
+   for rather than remembered. */
+static int updates_waiting(void) {
+    int n = 0;
+    if (!g_view_of) return 0;
     for (int i = 0; i < g_view_of->count; i++)
-        if (!key[0] || strcmp(g_view_of->apps[i].category, key) == 0)
-            g_view[g_view_count++] = (unsigned char)i;
-    /* The list and the card both start again from the top of what is now
-       shown, and the card is told to fetch afresh: the row a cursor names
-       is a different package than it was a moment ago. */
+        if (g_view_of->apps[i].state == APP_UPDATE) n++;
+    return n;
+}
+
+/* restart is for a view whose rows now stand for other packages than they
+   did: the list goes back to the top and the card is told to fetch afresh.
+   A view merely rebuilt under the same tab keeps where it was scrolled to. */
+static void build_view(int restart) {
+    int tab = g_tabs ? g_tab[g_tab_at] : 0;
+    g_view_count = 0;
+    g_view_action = 0;
+    if (!g_view_of || g_tabs <= 0) return;
+    for (int i = 0; i < g_view_of->count; i++) {
+        int take;
+        if (tab == TAB_UPDATES) take = g_view_of->apps[i].state == APP_UPDATE;
+        else if (tab == TAB_BASKET) take = shell_basket_has(i);
+        else take = !TAB_KEY[tab][0] ||
+                    strcmp(g_view_of->apps[i].category, TAB_KEY[tab]) == 0;
+        if (take) g_view[g_view_count++] = (unsigned char)i;
+    }
+    /* A tab that is a job rather than a category carries the job itself at
+       the top, above the packages it would be done to. */
+    g_view_action = tab < 0;
+    if (!restart) return;
     g_first = 0;
     g_last_cursor = -1;
 }
 
-void shell_view_rebuild(const struct catalog *catalog) {
-    int was = g_tabs ? g_tab[g_tab_at] : 0;
-    g_view_of = catalog;
+/* Which tabs have anything in them, in the order they are shown, and where
+   the one named by keep ended up. Returns 0 if keep did not survive. */
+static int collect_tabs(int keep) {
+    int found = 0;
     g_tabs = 0;
     g_tab_at = 0;
-    if (!catalog || catalog->count <= 0) { g_view_count = 0; return; }
+    if (!g_view_of || g_view_of->count <= 0) return 0;
+    if (updates_waiting() > 0) g_tab[g_tabs++] = TAB_UPDATES;
+    if (g_basket_n > 0) g_tab[g_tabs++] = TAB_BASKET;
     for (int t = 0; t < TAB_ALL; t++) {
         int has = !TAB_KEY[t][0];
-        for (int i = 0; !has && i < catalog->count; i++)
-            has = strcmp(catalog->apps[i].category, TAB_KEY[t]) == 0;
-        if (!has) continue;
-        if (t == was) g_tab_at = g_tabs;
-        g_tab[g_tabs++] = t;
+        for (int i = 0; !has && i < g_view_of->count; i++)
+            has = strcmp(g_view_of->apps[i].category, TAB_KEY[t]) == 0;
+        if (has) g_tab[g_tabs++] = t;
     }
-    build_view();
+    for (int i = 0; i < g_tabs; i++)
+        if (g_tab[i] == keep) { g_tab_at = i; found = 1; }
+    return found;
 }
 
-int shell_view_count(void) { return g_view_count; }
+void shell_view_rebuild(const struct catalog *catalog) {
+    int was = g_tabs ? g_tab[g_tab_at] : 0;
+    /* A fetch rewrites the array the basket's indices point into, and row
+       seventeen of the new catalog is not the package row seventeen of the
+       old one was. Nothing is carried across. */
+    shell_basket_clear();
+    g_view_of = catalog;
+    collect_tabs(was);
+    build_view(1);
+}
+
+int shell_tabs_refresh(void) {
+    int was = g_tabs ? g_tab[g_tab_at] : 0;
+    int kept = collect_tabs(was);
+    build_view(!kept);
+    return kept;
+}
+
+int shell_view_count(void) { return g_view_count + g_view_action; }
+
+int shell_view_action(int row) { return g_view_action && row == 0; }
 
 int shell_view_index(int row) {
+    if (shell_view_action(row)) return SHELL_ROW_ACTION;
+    row -= g_view_action;
     return row >= 0 && row < g_view_count ? g_view[row] : -1;
 }
 
 int shell_view_row(int index) {
     for (int row = 0; row < g_view_count; row++)
-        if (g_view[row] == index) return row;
+        if (g_view[row] == index) return row + g_view_action;
     return -1;
+}
+
+enum shell_tab_kind shell_tab_kind(void) {
+    int tab = g_tabs ? g_tab[g_tab_at] : 0;
+    return tab == TAB_UPDATES ? SHELL_TAB_UPDATES
+         : tab == TAB_BASKET ? SHELL_TAB_BASKET : SHELL_TAB_CATEGORY;
+}
+
+void shell_action_plan(struct shell_plan *plan) {
+    memset(plan, 0, sizeof(*plan));
+    if (!g_view_of || !g_view_action) return;
+    plan->updates = g_tab[g_tab_at] == TAB_UPDATES;
+    for (int row = 0; row < g_view_count; row++) {
+        const struct app_entry *entry = &g_view_of->apps[g_view[row]];
+        /* Without a release in the catalog the size is only known once a
+           manifest has been fetched, and a run of installs that cannot say
+           beforehand what it will download is not one to offer in a single
+           press. Those are counted and left out. */
+        if (!entry->has_release || !entry->release.size) { plan->skipped++; continue; }
+        plan->apps++;
+        plan->bytes += entry->release.size;
+        if (entry->state == APP_CURRENT) plan->again++;
+    }
 }
 
 int shell_tab_count(void) { return g_tabs; }
@@ -205,7 +310,7 @@ int shell_tab_count(void) { return g_tabs; }
 void shell_tab_move(int step) {
     if (g_tabs <= 1) return;
     g_tab_at = (g_tab_at + step + g_tabs) % g_tabs;
-    build_view();
+    build_view(1);
 }
 
 int shell_init(void) {
@@ -223,6 +328,120 @@ void shell_shutdown(void) {
     gfx_shutdown();
 }
 
+/* ------------------------------------------------------------------ marks */
+
+/* The signs that are not letters. A ribbon is a band offset up and down from
+   its own points: it draws a slope well and a small closed shape not at all,
+   and the turning arrows drawn that way came out as a cluster of faint dots
+   on the PSP's real 480 by 272. So these are written out pixel by pixel
+   instead -- twelve rows of twelve characters, '#' where a pixel goes -- and
+   what is on screen is what is in the source. Twelve because a circle of two
+   arrows needs a two-pixel stroke, a head wider than that stroke, and a pixel
+   of daylight between a head and the tail it is chasing, and eleven does not
+   have room for all three. */
+#define GLYPH_W 12
+#define GLYPH_H 12
+
+/* The system's own sign for an update: two chunky arrows chasing each other
+   head to tail round a circle. Each is a two-pixel arc of most of a half
+   turn, ending in a solid head that flares to five pixels across its base and
+   comes back to two at the tip -- at this size a head one pixel wider than
+   its stroke is a bump and not an arrowhead. The gap before the other arrow's
+   tail is what keeps it from reading as a ring with two notches in it. The
+   figure is the same turned half round, which is what says the two arrows are
+   the same arrow twice rather than one broken one. */
+static const char *const GLYPH_UPDATE[GLYPH_H] = {
+    "............",
+    "...######...",
+    "..########..",
+    ".###....###.",
+    ".##....#####",
+    ".........##.",
+    ".##.........",
+    "#####....##.",
+    ".###....###.",
+    "..########..",
+    "...######...",
+    "............",
+};
+
+/* A basket: a handle, a rim the full width of the box, and a body that tapers
+   to its foot. Solid rather than woven -- at twelve pixels a weave is noise,
+   and what has to read is the silhouette. */
+static const char *const GLYPH_BASKET[GLYPH_H] = {
+    "............",
+    "....####....",
+    "...##..##...",
+    "...##..##...",
+    "############",
+    "############",
+    ".##########.",
+    "..########..",
+    "..########..",
+    "...######...",
+    "...######...",
+    "............",
+};
+
+static void draw_bitmap(const char *const *rows, float left, float top,
+                        unsigned color) {
+    int x = (int)(left + 0.5f), y = (int)(top + 0.5f);
+    for (int r = 0; r < GLYPH_H; r++)
+        for (int c = 0; rows[r][c]; c++)
+            if (rows[r][c] == '#') gfx_rect(x + c, y + r, 1, 1, color);
+}
+
+/* What the update sign is lit by: no spin -- a shape this small turning is a
+   shape flickering -- but a slow swell of brightness, so a tab or a row with
+   an update on it is alive without ever moving. */
+static float update_pulse(float t) { return 0.85f + 0.15f * sinf(t * 1.6f); }
+
+/* Every caller has a centre rather than a corner. */
+static void draw_glyph(const char *const *rows, float cx, float cy,
+                       unsigned color) {
+    draw_bitmap(rows, cx - GLYPH_W / 2.0f, cy - GLYPH_H / 2.0f, color);
+}
+
+/* A tick, the way a list is ticked: two strokes, the short one down to the
+   corner and the long one up from it. What an installed package gets --
+   eight pixels of hairline, which on this screen is a mark and not a
+   badge. */
+static void draw_tick(float cx, float cy, unsigned color) {
+    float x[3] = { cx - 4.0f, cx - 1.3f, cx + 4.0f };
+    float y[3] = { cy + 0.4f, cy + 3.1f, cy - 3.2f };
+    unsigned c[3] = { color, color, color };
+    gfx_ribbon(x, y, c, 3, 0.6f);
+}
+
+/* The same colour, quieter: a mark on a row the eye is not on should be
+   read only when it is looked for. */
+static unsigned faded(unsigned color, int alpha) {
+    return (color & 0x00FFFFFFu) | ((unsigned)alpha << 24);
+}
+
+/* The green-white an update is said in, wherever it is said. */
+#define UPDATE_RGB RGB(170, 255, 190)
+
+/* ---------------------------------------------------------------- sizes */
+
+/* Megabytes to a tenth: whole megabytes call everything under one of them
+   nothing, and a count of bytes is not a size anybody reads. */
+static void size_mb(unsigned long long bytes, char *out, size_t size) {
+    snprintf(out, size, "%lu.%lu MB", (unsigned long)(bytes >> 20),
+             (unsigned long)((bytes * 10 >> 20) % 10));
+}
+
+/* What the wait will be. A PSP-1004's 802.11b radio and TCP stack were
+   measured at 180 KB/s, which is the only honest number to quote here --
+   the emulator's host link would promise a minute the hardware cannot keep. */
+#define PSP_KB_PER_S 180
+
+static void download_time(unsigned long long bytes, char *out, size_t size) {
+    unsigned secs = (unsigned)(bytes / (PSP_KB_PER_S * 1024));
+    if (secs < 90) snprintf(out, size, "%u s", secs);
+    else snprintf(out, size, "%u min", (secs + 30) / 60);
+}
+
 /* ------------------------------------------------------------------ chrome */
 
 /* Under a block of text the floor is dimmed, but with a soft spot and not
@@ -231,32 +450,63 @@ static void draw_shade(int cx, int cy, int w, int h) {
     gfx_shade(cx, cy, w * 1.6f, h * 1.8f, 170);
 }
 
+/* A tab that is a job rather than a category is a sign and a number -- the
+   turning arrows and how many wait, the basket and what is in it -- because
+   the sign is the same one the rows below it carry and a word would not be.
+   The number is built into a static, so it is read before the next call. */
+static const char *tab_count(int tab) {
+    static char text[8];
+    snprintf(text, sizeof(text), "%d",
+             tab == TAB_UPDATES ? updates_waiting() : g_basket_n);
+    return text;
+}
+
+static float tab_width(int tab) {
+    if (tab >= 0) return font_width(FONT_META, TAB_NAME[tab]);
+    return GLYPH_W + 4 + font_width(FONT_META, tab_count(tab));
+}
+
 /* The tabs sit between the name and the count, spread across whatever room
    the two of them leave. The active one is lit rather than boxed: a word in
    the text colour with the room's own light welling up under it. */
-static void draw_tabs(float left, float right) {
+static void draw_tabs(float left, float right, float t) {
     if (g_tabs <= 1) return;
     float words = 0;
-    for (int i = 0; i < g_tabs; i++) words += font_width(FONT_META, TAB_NAME[g_tab[i]]);
+    for (int i = 0; i < g_tabs; i++) words += tab_width(g_tab[i]);
     float gap = (right - left - words) / (g_tabs - 1);
     if (gap > 22) gap = 22;
     if (gap < 7) gap = 7;
     float x = left + (right - left - words - gap * (g_tabs - 1)) / 2;
     if (x < left) x = left;
     for (int i = 0; i < g_tabs; i++) {
-        const char *name = TAB_NAME[g_tab[i]];
-        float w = font_width(FONT_META, name);
-        if (i == g_tab_at) {
+        int tab = g_tab[i], on = i == g_tab_at;
+        float w = tab_width(tab);
+        if (on) {
             gfx_glow(x + w / 2, 17, w + 30, 30, rgb_pack(g_tint, 110));
             gfx_glow(x + w / 2, 24, w + 8, 7,
                      rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.6f), 120));
         }
-        font_print(FONT_META, x, 21, i == g_tab_at ? g_text : g_dim, name);
+        if (tab >= 0) {
+            font_print(FONT_META, x, 21, on ? g_text : g_dim, TAB_NAME[tab]);
+        } else {
+            int lit = on ? 255 : 150;
+            if (tab == TAB_UPDATES) {
+                float pulse = update_pulse(t);
+                gfx_glow(x + GLYPH_W / 2.0f, 16, 30, 30,
+                         RGBA(140, 255, 170, (int)((on ? 120 : 60) * pulse)));
+                draw_bitmap(GLYPH_UPDATE, x, 12,
+                            faded(UPDATE_RGB, (int)(lit * pulse)));
+            } else {
+                draw_bitmap(GLYPH_BASKET, x, 12, faded(on ? g_text : g_dim, lit));
+            }
+            font_print(FONT_META, x + GLYPH_W + 4, 21, on ? g_text : g_dim,
+                       tab_count(tab));
+        }
         x += w + gap;
     }
 }
 
-static void draw_chrome(const struct catalog *catalog) {
+static void draw_chrome(const struct catalog *catalog, float t) {
     gfx_vgrad(0, 0, SCR_W, HEADER_H, RGBA(255, 255, 255, 14), RGBA(255, 255, 255, 0));
     unsigned bright = rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.5f), 150);
     unsigned clear = rgb_pack(g_tint, 0);
@@ -269,30 +519,42 @@ static void draw_chrome(const struct catalog *catalog) {
     font_print(FONT_H1, LIST_X, 23, g_text, "PSPDX");
 
     /* The count is the count of what is shown: the whole catalog under All,
-       the tab's own word under any other. It changes when the catalog or
-       the tab does, which is not every frame. */
+       the tab's own word under a category, and under the two tabs that are a
+       job rather than a category, the job -- so the number beside the sign in
+       the tab is said again in words at the other end of the header. It
+       changes when the catalog, the basket or the tab does, which is not
+       every frame. */
     static char right[64];
-    static int said_total = -1, said_updates = -1, said_tab = -1;
+    static int said_total = -1, said_updates = -1, said_tab = -1, said_basket = -1;
     int tab = g_tabs ? g_tab[g_tab_at] : 0;
-    int shown = tab ? g_view_count : catalog->total;
+    int shown = tab != 0 ? g_view_count : catalog->total;
     int updates = 0;
     for (int row = 0; row < g_view_count; row++)
         if (catalog->apps[g_view[row]].state == APP_UPDATE) updates++;
-    if (shown != said_total || updates != said_updates || tab != said_tab) {
+    if (shown != said_total || updates != said_updates || tab != said_tab ||
+        g_basket_n != said_basket) {
         said_total = shown;
         said_updates = updates;
         said_tab = tab;
-        const char *what = tab ? TAB_KEY[tab] : "apps";
-        if (updates)
-            snprintf(right, sizeof(right), "%d %s  %d update%s", shown, what,
-                     updates, updates == 1 ? "" : "s");
-        else
-            snprintf(right, sizeof(right), "%d %s", shown, what);
+        said_basket = g_basket_n;
+        if (tab == TAB_UPDATES)
+            snprintf(right, sizeof(right), "%d update%s", shown,
+                     shown == 1 ? "" : "s");
+        else if (tab == TAB_BASKET)
+            snprintf(right, sizeof(right), "%d in the basket", shown);
+        else {
+            const char *what = tab ? TAB_KEY[tab] : "apps";
+            if (updates)
+                snprintf(right, sizeof(right), "%d %s  %d update%s", shown, what,
+                         updates, updates == 1 ? "" : "s");
+            else
+                snprintf(right, sizeof(right), "%d %s", shown, what);
+        }
     }
     if (catalog->count > 0) {
         float x = SCR_W - LIST_X - font_width(FONT_META, right);
         font_print(FONT_META, x, 21, g_dim, right);
-        draw_tabs(LIST_X + font_width(FONT_H1, "PSPDX") + 22, x - 16);
+        draw_tabs(LIST_X + font_width(FONT_H1, "PSPDX") + 22, x - 16, t);
     }
 }
 
@@ -330,51 +592,53 @@ static const char *state_word(const struct app_entry *entry, unsigned *color) {
     }
 }
 
-/* The same colour, quieter: a mark on a row the eye is not on should be
-   read only when it is looked for. */
-static unsigned faded(unsigned color, int alpha) {
-    return (color & 0x00FFFFFFu) | ((unsigned)alpha << 24);
+/* The two words the action row is headed with, and the sentence under them.
+   Both are wanted in the list and again in the panel, so they are made in one
+   place. */
+static const char *action_title(void) {
+    return shell_tab_kind() == SHELL_TAB_UPDATES ? "Update all" : "Download all";
 }
 
-/* A tick, the way a list is ticked: two strokes, the short one down to the
-   corner and the long one up from it. What an installed package gets --
-   eight pixels of hairline, which on this screen is a mark and not a
-   badge. */
-static void draw_tick(float cx, float cy, unsigned color) {
-    float x[3] = { cx - 4.0f, cx - 1.3f, cx + 4.0f };
-    float y[3] = { cy + 0.4f, cy + 3.1f, cy - 3.2f };
-    unsigned c[3] = { color, color, color };
-    gfx_ribbon(x, y, c, 3, 0.6f);
-}
-
-/* The system's own sign for an update: two arrows chasing each other
-   round a circle. Each is an arc of a little under a half turn with a
-   head on its leading end. */
-static void draw_update_arrows(float cx, float cy, unsigned color, float t) {
-    const float r = 4.0f;
-    float spin = t * 1.2f;
-    for (int arrow = 0; arrow < 2; arrow++) {
-        float x[8], y[8];
-        unsigned c[8];
-        float a0 = spin + arrow * 3.1416f;
-        for (int i = 0; i < 6; i++) {
-            float a = a0 + i * (2.4f / 5);
-            x[i] = cx + cosf(a) * r;
-            y[i] = cy + sinf(a) * r;
-            c[i] = color;
-        }
-        gfx_ribbon(x, y, c, 6, 0.7f);
-        /* The head: a short stroke to either side of the arc's end, laid
-           back along it. */
-        float a = a0 + 2.4f, tx = -sinf(a), ty = cosf(a);
-        float ex = x[5], ey = y[5];
-        float hx[3] = { ex - tx * 2.3f - cosf(a) * 1.9f, ex, ex - tx * 2.3f + cosf(a) * 1.9f };
-        float hy[3] = { ey - ty * 2.3f - sinf(a) * 1.9f, ey, ey - ty * 2.3f + sinf(a) * 1.9f };
-        gfx_ribbon(hx, hy, c, 3, 0.7f);
+/* "3 apps, 61.5 MB" -- or, when nothing in the tab can be fetched without a
+   manifest first, what is in the way instead. */
+static const char *action_line(void) {
+    static char line[48];
+    struct shell_plan plan;
+    char size[24];
+    shell_action_plan(&plan);
+    if (plan.apps <= 0)
+        snprintf(line, sizeof(line), "nothing here has a release");
+    else {
+        size_mb(plan.bytes, size, sizeof(size));
+        snprintf(line, sizeof(line), "%d app%s, %s", plan.apps,
+                 plan.apps == 1 ? "" : "s", size);
     }
+    return line;
+}
+
+/* The row the tab itself sits on. Two lines rather than one: at this width
+   the heading and the tally do not fit on a line together in the list's own
+   face, and stacked they read as a heading with its tally under it, which is
+   what they are. Where a package would have its icon, the tab's own sign. */
+static void draw_action_row(int y, int selected, float t) {
+    int updates = shell_tab_kind() == SHELL_TAB_UPDATES;
+    float gx = LIST_X + ICON_W / 2.0f, gy = y + ITEM_H / 2.0f;
+    if (updates) {
+        float pulse = update_pulse(t);
+        gfx_glow(gx, gy, 36, 36, RGBA(140, 255, 170, (int)((selected ? 150 : 70) * pulse)));
+        draw_glyph(GLYPH_UPDATE, gx, gy,
+                   faded(UPDATE_RGB, (int)((selected ? 255 : 153) * pulse)));
+    } else {
+        draw_glyph(GLYPH_BASKET, gx, gy, selected ? g_text : faded(g_dim, 170));
+    }
+    int w = LIST_X + LIST_W - NAME_X;
+    font_print_clipped(FONT_BODY, NAME_X, y + 13, w, selected ? g_text : g_dim,
+                       action_title());
+    font_print_clipped(FONT_META, NAME_X, y + 25, w, g_dim, action_line());
 }
 
 static void draw_list(const struct catalog *catalog, int cursor, float t) {
+    int count = shell_view_count();
     if (cursor < g_first) g_first = cursor;
     if (cursor >= g_first + VISIBLE) g_first = cursor - VISIBLE + 1;
     if (g_first < 0) g_first = 0;
@@ -385,7 +649,7 @@ static void draw_list(const struct catalog *catalog, int cursor, float t) {
     float target = LIST_Y + (cursor - g_first) * ITEM_H;
     g_sel_y += (target - g_sel_y) * 0.25f;
 
-    int rows = g_view_count < VISIBLE ? g_view_count : VISIBLE;
+    int rows = count < VISIBLE ? count : VISIBLE;
     draw_shade(LIST_X + LIST_W / 2, LIST_Y + rows * ITEM_H / 2, LIST_W, rows * ITEM_H);
 
     /* The selected row glows: a breathing light behind it and a thin
@@ -400,21 +664,27 @@ static void draw_list(const struct catalog *catalog, int cursor, float t) {
              rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.7f), 160));
 
     /* The icons module counts in catalog entries, so the rows on screen are
-       handed over as the entries they stand for. */
+       handed over as the entries they stand for -- and the action row stands
+       for none, so it asks for nothing. */
     int wanted[VISIBLE], want_count = 0;
-    for (int i = g_first; i < g_view_count && i < g_first + VISIBLE; i++)
-        wanted[want_count++] = g_view[i];
+    for (int i = g_first; i < count && i < g_first + VISIBLE; i++) {
+        int index = shell_view_index(i);
+        if (index >= 0) wanted[want_count++] = index;
+    }
     icons_bind(catalog);
     if (icons_want(wanted, want_count)) preview_poke();
 
-    for (int i = g_first; i < g_view_count && i < g_first + VISIBLE; i++) {
-        const struct app_entry *entry = &catalog->apps[g_view[i]];
+    for (int i = g_first; i < count && i < g_first + VISIBLE; i++) {
         int y = LIST_Y + (i - g_first) * ITEM_H;
         int selected = i == cursor;
+        int index = shell_view_index(i);
+        if (index == SHELL_ROW_ACTION) { draw_action_row(y, selected, t); continue; }
+        if (index < 0) continue;
+        const struct app_entry *entry = &catalog->apps[index];
 
         /* The bundle's own icon, dimmed with the name; a dark plate where
            it has not arrived, so the column reads as a column. */
-        const struct gfx_texture *icon = icons_get(g_view[i]);
+        const struct gfx_texture *icon = icons_get(index);
         int iy = y + (ITEM_H - ICON_H) / 2;
         if (icon)
             gfx_texture_draw(icon, LIST_X, iy, ICON_W, ICON_H,
@@ -422,34 +692,100 @@ static void draw_list(const struct catalog *catalog, int cursor, float t) {
         else
             gfx_rect(LIST_X, iy, ICON_W, ICON_H, RGBA(255, 255, 255, selected ? 24 : 12));
 
-        /* A mark, not a word, at the end of the row: the line ticked off
-           when the package is on the stick, the system's turning arrows
-           when a newer one waits, nothing for the rest. */
+        /* Marks, not words, at the end of the row, read from the outside in:
+           where the package stands -- the line ticked off when it is on the
+           stick, the system's turning arrows when a newer one waits, nothing
+           for the rest -- and then, inside that, the basket if this session
+           has set the package aside. */
         float mx = LIST_X + LIST_W - 8, my = y + ITEM_H / 2 - 1;
         int name_w = LIST_X + LIST_W - NAME_X;
         if (entry->state == APP_UPDATE) {
-            gfx_glow(mx, my, 26, 26, RGBA(140, 255, 170, selected ? 130 : 60));
-            draw_update_arrows(mx, my, faded(RGB(170, 255, 190), selected ? 255 : 153), t);
-            name_w -= 18;
+            float pulse = update_pulse(t);
+            gfx_glow(mx, my, 34, 34,
+                     RGBA(140, 255, 170, (int)((selected ? 150 : 70) * pulse)));
+            draw_glyph(GLYPH_UPDATE, mx, my,
+                       faded(UPDATE_RGB, (int)((selected ? 255 : 153) * pulse)));
+            mx -= 17;
+            name_w -= 19;
         } else if (entry->state != APP_NOT_INSTALLED) {
             draw_tick(mx, my, selected ? g_accent : faded(g_dim, 153));
-            name_w -= 18;
+            mx -= 17;
+            name_w -= 19;
+        }
+        if (shell_basket_has(index)) {
+            draw_glyph(GLYPH_BASKET, mx, my, faded(g_dim, selected ? 190 : 120));
+            name_w -= 17;
         }
 
         font_print_clipped(FONT_BODY, NAME_X, y + 21, name_w,
                            selected ? g_text : g_dim, entry->name);
     }
 
-    if (g_view_count > VISIBLE) {
+    if (count > VISIBLE) {
         int track = FOOTER_Y - 6 - LIST_Y;
-        int knob = track * VISIBLE / g_view_count;
-        int at = track * g_first / g_view_count;
+        int knob = track * VISIBLE / count;
+        int at = track * g_first / count;
         gfx_rect(LIST_X + LIST_W + 10, LIST_Y, 2, track, RGBA(255, 255, 255, 24));
         gfx_rect(LIST_X + LIST_W + 10, LIST_Y + at, 2, knob, g_accent);
     }
 }
 
 /* ------------------------------------------------------------------ panel */
+
+/* The card's half of the screen when the cursor is on the action row. There
+   is no picture: a row that stands for several packages has no one screenshot
+   to show, and a card left holding the last package's would be a lie about
+   what X is going to fetch. What the space is worth instead is the bill --
+   every package that would come down, what each weighs, the total, and how
+   long that is over a PSP's own radio. */
+static void draw_action_panel(const struct catalog *catalog, float t) {
+    struct shell_plan plan;
+    char value[48], size[24];
+    int y = SHOT_Y + 14;
+
+    shell_action_plan(&plan);
+    draw_shade(PANEL_X + SHOT_W / 2, y + 70, SHOT_W, 170);
+    gfx_glow(PANEL_X + SHOT_W / 2, y + 60, SHOT_W + 90, 200,
+             rgb_pack(g_tint, (int)(70 * update_pulse(t))));
+
+    font_print(FONT_H1, PANEL_X, y, g_text, action_title());
+    if (plan.apps > 0) {
+        size_mb(plan.bytes, size, sizeof(size));
+        download_time(plan.bytes, value, sizeof(value));
+        font_printf(FONT_META, PANEL_X, y + 20, g_dim, "%s to download, about %s",
+                    size, value);
+    } else {
+        font_print(FONT_META, PANEL_X, y + 20, g_dim,
+                   "nothing here can be fetched without a manifest first");
+    }
+    /* One line a package, in the order they would be fetched, for as many as
+       the panel holds; the rest are counted rather than named. */
+    int line = 0, room = (FOOTER_Y - 20 - (y + 40)) / 14;
+    for (int row = 0; row < shell_view_count(); row++) {
+        int index = shell_view_index(row);
+        if (index < 0) continue;
+        const struct app_entry *entry = &catalog->apps[index];
+        if (!entry->has_release || !entry->release.size) continue;
+        if (line >= room) {
+            font_printf(FONT_META, PANEL_X, y + 40 + line * 14, g_dim,
+                        "and %d more", plan.apps - line);
+            line++;
+            break;
+        }
+        size_mb(entry->release.size, size, sizeof(size));
+        float sw = font_width(FONT_META, size);
+        font_print_clipped(FONT_META, PANEL_X, y + 40 + line * 14,
+                           SHOT_W - sw - 10,
+                           entry->state == APP_UPDATE ? UPDATE_RGB : g_text,
+                           entry->name);
+        font_print(FONT_META, PANEL_X + SHOT_W - sw, y + 40 + line * 14,
+                   g_dim, size);
+        line++;
+    }
+    if (plan.skipped)
+        font_printf(FONT_META, PANEL_X, y + 46 + line * 14, g_dim,
+                    "%d without a release, left out", plan.skipped);
+}
 
 static void draw_panel(const struct app_entry *entry, float t) {
     /* The card stands still: a picture that drifts is a picture that is
@@ -894,12 +1230,28 @@ static void draw_footer(void) {
     }
     /* The keys, and only the keys that do anything: the triggers are worth
        naming once there is a second tab to reach with them. */
-    int installed = g_catalog && shell_view_count() > 0 &&
-                    g_catalog->apps[shell_view_index(g_cursor)].state != APP_NOT_INSTALLED;
-    float x = draw_hint(LIST_X, FOOTER_Y + 15, MARK_CROSS,
-                        installed ? "options" : "install", g_dim);
-    if (installed) x = draw_hint(x, FOOTER_Y + 15, MARK_SQUARE, "remove", g_dim);
-    if (installed) x = font_print(FONT_META, x, FOOTER_Y + 15, g_dim, "START run") + 14;
+    int index = g_catalog && shell_view_count() > 0 ? shell_view_index(g_cursor) : -1;
+    const struct app_entry *entry = index >= 0 ? &g_catalog->apps[index] : 0;
+    int installed = entry && entry->state != APP_NOT_INSTALLED;
+    float x;
+    if (index == SHELL_ROW_ACTION) {
+        /* On the action row there is one thing X does and nothing else,
+           so nothing else is named. */
+        x = draw_hint(LIST_X, FOOTER_Y + 15, MARK_CROSS,
+                      shell_tab_kind() == SHELL_TAB_UPDATES ? "update all"
+                                                            : "download all", g_dim);
+    } else {
+        x = draw_hint(LIST_X, FOOTER_Y + 15, MARK_CROSS,
+                      installed ? "options" : "install", g_dim);
+        if (installed) x = draw_hint(x, FOOTER_Y + 15, MARK_SQUARE, "remove", g_dim);
+        if (installed) x = font_print(FONT_META, x, FOOTER_Y + 15, g_dim, "START run") + 14;
+        /* Triangle sets a package aside for later, and in the basket it is
+           the same key that takes it back out again. */
+        if (entry)
+            x = draw_hint(x, FOOTER_Y + 15, MARK_TRIANGLE,
+                          shell_tab_kind() == SHELL_TAB_BASKET ? "remove"
+                                                               : "basket", g_dim);
+    }
     font_print(FONT_META, x, FOOTER_Y + 15, g_dim,
                g_tabs > 1 ? "L R category   SELECT info   HOME quit"
                           : "SELECT info   HOME quit");
@@ -969,10 +1321,13 @@ void shell_draw(const struct catalog *catalog, int cursor) {
     lattice_draw(t, g_tint);
     draw_water_light(t);
     unsigned t1 = now_us();
-    draw_chrome(catalog);
-    if (catalog->count > 0 && g_view_count > 0) {
+    draw_chrome(catalog, t);
+    if (catalog->count > 0 && shell_view_count() > 0) {
+        int rows = shell_view_count();
+        int index = shell_view_index(cursor < rows ? cursor : 0);
         draw_list(catalog, cursor, t);
-        draw_panel(&catalog->apps[g_view[cursor < g_view_count ? cursor : 0]], t);
+        if (index == SHELL_ROW_ACTION) draw_action_panel(catalog, t);
+        else if (index >= 0) draw_panel(&catalog->apps[index], t);
     } else if (g_status[0]) {
         /* Nothing to browse yet: the word stands in the room, lit from
            behind; what it is waiting for is said in the strip below. */
@@ -1019,14 +1374,22 @@ int shell_settled(void) {
 
 void shell_shot_sync(const struct catalog *catalog, int cursor) {
     int index = shell_view_index(cursor);
-    if (catalog->count <= 0 || index < 0) return;
-    const struct app_entry *entry = &catalog->apps[index];
+    if (catalog->count <= 0 || index == -1) return;
+    /* The action row is a row with no package behind it, and the card is
+       told to show nothing rather than left holding whatever the cursor
+       passed on its way here. */
+    const struct app_entry *entry = index >= 0 ? &catalog->apps[index] : 0;
 
-    if (cursor != g_last_cursor) {
+    /* A row number is not enough to say the selection changed: removing an
+       entry from the basket slides the rows up under a cursor that has not
+       moved, and the row then stands for another package. */
+    static const struct app_entry *g_shown;
+    if (cursor != g_last_cursor || entry != g_shown) {
         /* The first selection is the app starting up, not the user
            scrolling past: nothing to wait for. */
         int first = g_last_cursor < 0;
         g_last_cursor = cursor;
+        g_shown = entry;
         g_status[0] = '\0';
         lattice_touch((LIST_X + LIST_W / 2) / (float)SCR_W);
         preview_show(entry, first);
@@ -1075,10 +1438,17 @@ void shell_info(int open, int action) {
 
 /* ---------------------------------------------------------------- install */
 
-void shell_install_begin(const char *name) {
+void shell_install_begin(const char *name, int at, int of) {
     g_installing = 1;
     g_status[0] = '\0';
-    snprintf(g_install_name, sizeof(g_install_name), "%s", name ? name : "");
+    /* One band for both: a lone install is its name, and one of a run says
+       where in the run it is first, so the line changes as the run goes and
+       the name it changes to is the one being fetched. */
+    if (of > 1)
+        snprintf(g_install_name, sizeof(g_install_name), "%d of %d: %s", at, of,
+                 name ? name : "");
+    else
+        snprintf(g_install_name, sizeof(g_install_name), "%s", name ? name : "");
     g_install_phase[0] = '\0';
     g_install_done = g_install_total = 0;
     g_install_drawn_ms = 0;

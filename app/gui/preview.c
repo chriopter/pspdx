@@ -50,6 +50,7 @@ static struct request g_want;
 static unsigned g_shown_gen;            /* gen of what the pictures belong to */
 static unsigned g_shown_ms;
 static int g_immediate;
+static int g_nothing;                   /* the selection has no picture at all */
 
 /* Two still slots: the thread fills the one not on screen, then the
    pointer moves. The GE may still be reading the old one this frame; it
@@ -258,10 +259,17 @@ void preview_resume(void) {
 }
 
 void preview_show(const struct app_entry *entry, int immediately) {
-    if (strcmp(g_want.id, entry->id) == 0) return;
-    snprintf(g_want.id, sizeof(g_want.id), "%s", entry->id);
-    snprintf(g_want.shot_url, sizeof(g_want.shot_url), "%s", entry->screenshot);
-    snprintf(g_want.video_url, sizeof(g_want.video_url), "%s", entry->video);
+    /* A row that is not a package -- the basket's own Download all, which
+       stands for several of them -- has no picture to fetch. The card empties
+       and the thread is asked for nothing at all: an id of no characters is
+       not a shorter request, it is a request for the wrong thing. */
+    if (strcmp(g_want.id, entry ? entry->id : "") == 0) return;
+    snprintf(g_want.id, sizeof(g_want.id), "%s", entry ? entry->id : "");
+    snprintf(g_want.shot_url, sizeof(g_want.shot_url), "%s",
+             entry ? entry->screenshot : "");
+    snprintf(g_want.video_url, sizeof(g_want.video_url), "%s",
+             entry ? entry->video : "");
+    g_nothing = !entry;
     /* Nothing of the last entry stays on the card: the pictures may still
        exist, they are just not drawn until the thread has this one. */
     g_still_pub = 0;
@@ -276,6 +284,7 @@ void preview_show(const struct app_entry *entry, int immediately) {
 }
 
 int preview_tick(void) {
+    if (g_nothing) return 0;
     /* The request goes out once the cursor has rested; the thread does
        the rest and this only picks up what it has finished. */
     if (g_shown_gen == 0) {
@@ -318,6 +327,7 @@ int preview_playing(void) {
 }
 
 enum preview_state preview_state(void) {
+    if (g_nothing) return PREVIEW_MISSING;
     if (g_still_state == STILL_READY || g_film_state == FILM_PLAYING) return PREVIEW_SHOWING;
     if (g_still_state == STILL_FAILED) return PREVIEW_MISSING;
     if (g_shown_gen != 0) return PREVIEW_LOADING;
@@ -325,6 +335,8 @@ enum preview_state preview_state(void) {
 }
 
 int preview_settled(void) {
+    /* Nothing asked for is nothing to wait for. */
+    if (g_nothing) return 1;
     if (g_shown_gen == 0 || g_done_gen != g_shown_gen) return 0;
     int still = g_still_state == STILL_FAILED ||
                 (g_still_state == STILL_READY && g_still_alpha > 0.98f);

@@ -97,15 +97,18 @@ static void screenshot_settled(int cursor, const char *path) {
 /* index is a catalog index; the row of the shell's view it sits on -- the
    catalog filtered to the active tab -- is what the frames drawn around
    the install show, and the entry is on the active tab, since that is
-   where it was chosen. */
-static int install_app(int index, int screenshot) {
+   where it was chosen.
+
+   at and of place this install in a run of them, for the band to say; both
+   zero for an install that is only itself. */
+static int install_app(int index, int screenshot, int at, int of) {
     if (index < 0 || index >= catalog.count) return -1;
     int row = shell_view_row(index);
     if (row < 0) row = 0;
     struct app_entry *entry = &catalog.apps[index];
     struct install_report report;
 
-    shell_install_begin(entry->name);
+    shell_install_begin(entry->name, at, of);
     cues_post(CUE_OPEN, 0);
     /* The installer and the media thread share one HTTPS stack and one
        asset buffer; only one of them talks to the network at a time. */
@@ -169,6 +172,20 @@ static void uninstall_app(int index) {
     cues_post(rc == 0 ? CUE_DONE : CUE_FAIL, 0);
 }
 
+/* After anything that changes what is in the tabs rather than what is in the
+   catalog -- an install that was the last update waiting, a basket filled or
+   emptied. The cursor stays on the package it was on for as long as that
+   package is still shown; a tab that has gone out from under it puts it back
+   on All at the top, which is the only row that is certainly there. */
+static void view_settled(int *cursor) {
+    int at = shell_view_index(*cursor);
+    if (!shell_tabs_refresh()) { *cursor = 0; return; }
+    int row = at >= 0 ? shell_view_row(at) : -1;
+    int count = shell_view_count();
+    if (row >= 0) *cursor = row;
+    else if (*cursor >= count) *cursor = count > 0 ? count - 1 : 0;
+}
+
 /* Hands the PSP over to the package the cursor is on. Nothing comes back from
    this call, so everything the session was holding has to be on the stick
    before it: the pool above all, which otherwise only reaches the seed file
@@ -215,7 +232,7 @@ static void launch_app(int index) {
    draws the question and the footer that answers it; the answer arrives
    through the pad, which is read down in the loop, so the two halves meet
    in these two variables and nowhere else. */
-enum question { ASK_NOTHING, ASK_INSTALL, ASK_REMOVE };
+enum question { ASK_NOTHING, ASK_INSTALL, ASK_REMOVE, ASK_ALL };
 static enum question g_question;
 static int g_question_of;
 
@@ -259,9 +276,75 @@ static void ask_remove(int index) {
     g_question_of = index;
 }
 
+/* The action row's question, over the whole tab rather than one package. The
+   shell has already worked out what would be fetched -- the rows are its
+   business, not this loop's -- so all that happens here is putting the tally
+   into words. */
+static void ask_all(void) {
+    struct shell_plan plan;
+    shell_action_plan(&plan);
+    if (plan.apps <= 0) {
+        shell_status("nothing here has a release to fetch");
+        return;
+    }
+    char title[64], line[96], size[24];
+    unsigned long long bytes = plan.bytes;
+    snprintf(size, sizeof(size), "%lu.%lu MB",
+             (unsigned long)(bytes >> 20), (unsigned long)((bytes * 10 >> 20) % 10));
+    snprintf(title, sizeof(title), "%s %d app%s?",
+             plan.updates ? "Update" : "Install", plan.apps,
+             plan.apps == 1 ? "" : "s");
+    int n = snprintf(line, sizeof(line), "%s to download", size);
+    /* A package already on the stick and already current can be put in the
+       basket, and fetching it again is a reinstall rather than nothing: that
+       is worth one clause here rather than a surprise afterwards. */
+    if (plan.again > 0 && n < (int)sizeof(line))
+        n += snprintf(line + n, sizeof(line) - n, ", %d a reinstall", plan.again);
+    if (plan.skipped > 0 && n < (int)sizeof(line))
+        snprintf(line + n, sizeof(line) - n, ", %d without a release skipped",
+                 plan.skipped);
+    shell_ask(title, line);
+    g_question = ASK_ALL;
+    g_question_of = -1;
+}
+
 static void ask_forget(void) {
     g_question = ASK_NOTHING;
     shell_ask(NULL, NULL);
+}
+
+/* The action row taken: everything the tab holds, one after another, in the
+   order it is listed. The rows are read into a list before the first fetch --
+   an install moves the entry's state, and on the updates tab that takes the
+   row out from under a loop still walking the view. A failure is said and the
+   rest still go: one package the server has lost is not a reason to leave the
+   others unfetched. The basket keeps what did not arrive and lets go of what
+   did. */
+static void install_all(void) {
+    int list[MAX_APPS], n = 0;
+    for (int row = 0; row < shell_view_count() && n < MAX_APPS; row++) {
+        int at = shell_view_index(row);
+        if (at < 0) continue;
+        const struct app_entry *entry = &catalog.apps[at];
+        if (!entry->has_release || !entry->release.size) continue;
+        list[n] = at;
+        n++;
+    }
+    int done = 0;
+    for (int i = 0; i < n; i++) {
+        if (install_app(list[i], 0, i + 1, n) == 0) {
+            shell_basket_forget(list[i]);
+            done++;
+        }
+        dump_diagnostics();
+    }
+    char message[96];
+    snprintf(message, sizeof(message), "%d of %d installed", done, n);
+    logline("%s", message);
+    shell_status(message);
+    /* One note for the run being over. Each install that failed sounded its
+       own at the time it did, so this is not saying they all worked. */
+    cues_post(CUE_DONE, 0);
 }
 
 /* ------------------------------------------------------------------- menu */
@@ -555,8 +638,9 @@ int main(void) {
                 if (automatic >= 0) {
                     cursor = shell_view_row(automatic);
                     if (cursor < 0) cursor = 0;
-                    install_app(automatic, 1);
+                    install_app(automatic, 1, 0, 0);
                     dump_diagnostics();
+                    view_settled(&cursor);
                 }
                 keys_load();
                 g_keys_since = now_ms();
@@ -618,9 +702,13 @@ int main(void) {
                 enum question asked = g_question;
                 int index = g_question_of;
                 ask_forget();
-                if (asked == ASK_INSTALL) install_app(index, 0);
+                if (asked == ASK_INSTALL) install_app(index, 0, 0, 0);
+                else if (asked == ASK_ALL) install_all();
                 else uninstall_app(index);
                 dump_diagnostics();
+                /* What was just done can have emptied a tab. */
+                view_settled(&cursor);
+                count = shell_view_count();
             } else if (pressed & PSP_CTRL_CIRCLE) {
                 ask_forget();
                 shell_status("");
@@ -635,7 +723,12 @@ int main(void) {
                 /* Deleting is the one of the three that cannot be undone by
                    pressing the same button again, so it is asked about. */
                 if (chosen == CHOICE_DELETE) ask_remove(index);
-                else { install_app(index, 0); dump_diagnostics(); }
+                else {
+                    install_app(index, 0, 0, 0);
+                    dump_diagnostics();
+                    view_settled(&cursor);
+                    count = shell_view_count();
+                }
             }
         } else if (info) {
             if (pressed & PSP_CTRL_DOWN)
@@ -680,11 +773,23 @@ int main(void) {
             shell_info(info = 1, action);
         } else if (count > 0) {
             int at = shell_view_index(cursor);
-            if ((pressed & PSP_CTRL_CROSS) && at >= 0) {
-                if (catalog.apps[at].state == APP_NOT_INSTALLED)
+            if (pressed & PSP_CTRL_CROSS) {
+                if (at == SHELL_ROW_ACTION) ask_all();
+                else if (at >= 0 && catalog.apps[at].state == APP_NOT_INSTALLED)
                     ask_install(at);
-                else
+                else if (at >= 0)
                     menu_open(at);
+            }
+            /* Triangle sets a package aside for later and takes it out
+               again -- including from the basket tab, where the row the
+               cursor is on is one that was set aside. The basket appearing
+               or emptying is a tab appearing or going, so the tabs are
+               worked out again before the next frame draws them. */
+            if ((pressed & PSP_CTRL_TRIANGLE) && at >= 0) {
+                shell_basket_toggle(at);
+                cues_post(CUE_MOVE, cursor);
+                view_settled(&cursor);
+                count = shell_view_count();
             }
             if ((pressed & PSP_CTRL_SQUARE) && at >= 0 &&
                 catalog.apps[at].state != APP_NOT_INSTALLED)
