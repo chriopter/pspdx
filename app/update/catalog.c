@@ -161,7 +161,14 @@ int catalog_check_updates(struct catalog *catalog) {
            run on it is an ordinary record compared like any other. A
            different version is an update, whichever way the strings sort. */
         if (strcmp(entry->id, PSPDX_SELF_ID) == 0 && entry->local_rev == 0) {
-            if (strcmp(entry->local_version, manifest.version) == 0) {
+            /* A build made past the tag -- "0.1.0-5-gabc", as git describes
+               it -- is the release and then some, not an older one: it
+               counts as current, or every desk build would offer itself
+               the release it was built after. */
+            size_t n = strlen(manifest.version);
+            int same = strncmp(entry->local_version, manifest.version, n) == 0 &&
+                       (entry->local_version[n] == '\0' || entry->local_version[n] == '-');
+            if (same) {
                 struct installed self;
                 if (db_read(entry->id, &self) == 0) {
                     self.rev = manifest.rev;
