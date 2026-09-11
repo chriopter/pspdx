@@ -8,9 +8,13 @@
 
 #define RATE 44100
 
-/* Half a thousand frames: twelve milliseconds of sound a chunk, rendered
-   in two or three, so the thread is off the CPU nine parts in ten and no
-   one burst of the interface's own work is long enough to starve it.
+/* A thousand frames: twenty-three milliseconds of sound a chunk, rendered
+   in four or five, so the thread is off the CPU four parts in five. It sat
+   at half that until the performance runs showed the interface, held at
+   full scroll with the water and a film, keeping this thread waiting for
+   eight of a twelve-millisecond chunk; a chunk twice as long has twice
+   the slack, and nobody hears twenty-three milliseconds of latency on a
+   tune.
 
    The thread sits one step under the interface on purpose. pspaudiolib puts
    its thread far above everything, and then a chunk being rendered as the
@@ -18,7 +22,7 @@
    buffers swap late, the top of the picture tears. Under the interface it
    can hold back nothing; the interface sleeps most of every frame, and
    that is when the sound is made. */
-#define CHUNK 512
+#define CHUNK 1024
 #define AUDIO_PRIORITY 0x21
 #define AUDIO_STACK (16 * 1024)
 
