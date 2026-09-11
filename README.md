@@ -84,6 +84,19 @@ path over again — download, checksum, unpack into staging, rename — with
 the previous copy stepping aside as `<dir>.old` until the new one is in
 place, then gone.
 
+PSPDX is an entry like any other and updates itself the same way. Its first
+start writes its own record from nothing but the build: the directory it was
+started from and the version the build was made with, with rev 0, since a rev
+is the moment GitHub published a release and a build cannot know its own. The
+first catalog it sees settles that: the same version (or a build past that
+tag, as `git describe` names it) means the stick is running the release, and
+the catalog's rev goes into the record; a different one is an update, taken
+through the ordinary path — the running EBOOT is in RAM, the directory under
+it is replaced, and the band says to press START to restart. It refuses to
+remove itself. The version comes from `git describe --tags` at build time;
+`dev/release 0.1.0` builds with it set, packs the EBOOT and publishes the
+release the scanner then lists.
+
 </details>
 
 <details>
@@ -297,6 +310,8 @@ sh app/run-ppsspp.sh                          # 25 seconds, straight to the cata
 sh app/run-ppsspp.sh 30 --sweep               # replay the recorded sweep first
 sh app/run-ppsspp.sh 30 --keys keys.txt       # scripted input, see PSPDX.KEYS below
 sh app/tools/localcat/run 60 --keys keys.txt  # the same against forty apps served from the host
+python3 app/tools/soak/run.py --runs 100      # a hundred customers, the stick checked against a model
+python3 app/tools/soak/run.py --perf 20       # twenty runs of held keys, stick and film, every late frame named
 ```
 
 A rig run gets no speakers: the emulator is started without its audio
@@ -362,6 +377,11 @@ that works on a real PSP, and on a host whose desktop is locked.
 
 ## Open
 
+- **A picture once cached is kept for good.** `PSP/PSPDX/cache/<id>.png` is
+  read before the URL, so a changed icon or clip never reaches a stick that
+  has the old one. The fix is a name that changes with the bytes -- the
+  catalog serving `icons/<id>-<sha>.png` and the client caching by the URL's
+  basename -- and it is not done yet.
 - **Real hardware.** It has only ever run in PPSSPP.
 - **Nothing is signed**, so the index is trusted completely. Fine while one
   person writes it; less fine now that a bot does.
