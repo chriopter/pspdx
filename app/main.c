@@ -110,7 +110,18 @@ static int dir_under_game(const char *path, char *out, size_t size) {
    it against the version string the first time it sees the catalog. */
 static void record_self(const char *path) {
     struct installed self;
-    if (db_read(PSPDX_SELF_ID, &self) == 0) return;
+    if (db_read(PSPDX_SELF_ID, &self) == 0) {
+        /* A record the catalog has not settled yet is provisional: a
+           newer build started over it -- a desk, a stick moved between
+           machines -- is what is installed now, and says so. Once the rev
+           is set the catalog owns the comparison and this stays out. */
+        if (self.rev != 0 || strcmp(self.version, PSPDX_VERSION) == 0) return;
+        strncpy(self.version, PSPDX_VERSION, sizeof(self.version) - 1);
+        self.version[sizeof(self.version) - 1] = '\0';
+        if (db_write_record(&self) == 0)
+            logline("self: record now says %s", self.version);
+        return;
+    }
 
     memset(&self, 0, sizeof(self));
     strncpy(self.id, PSPDX_SELF_ID, sizeof(self.id) - 1);
