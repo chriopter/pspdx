@@ -98,11 +98,16 @@ static void load_film(const struct request *req, unsigned gen) {
         g_film_state = FILM_FAILED;
         return;
     }
-    if (g_track.width != FILM_W || g_track.height != FILM_H) {
-        logline("film: %dx%d, wanted %dx%d", g_track.width, g_track.height, FILM_W, FILM_H);
+    /* Up to the screen's own size; the catalog's clips are half that, and
+       the card scales whatever comes. The wrapper holds it to multiples of
+       sixteen, which is what the decoder's header can say. */
+    if (g_track.width > FILM_W || g_track.height > FILM_H) {
+        logline("film: %dx%d, at most %dx%d", g_track.width, g_track.height, FILM_W, FILM_H);
         g_film_state = FILM_FAILED;
         return;
     }
+    g_film.w = g_track.width;
+    g_film.h = g_track.height;
     size_t cap = psmf_capacity(len);
     unsigned char *psmf = malloc(cap);
     if (!psmf) { logline("film: no room for %lu", (unsigned long)cap); g_film_state = FILM_FAILED; return; }
