@@ -51,6 +51,14 @@
 #define POUR_RATE 0.34f
 #define POUR_DENT 0.16f
 
+/* The colour front. It runs in the same cells the ring does and at the same
+   speed -- sqrt(WAVE_C), 0.3 of a cell a frame -- so the edge of the colour
+   sits on the ring that carried it out, and the corners of what is on screen
+   have turned in about a second and a half. Its edge is soft over a tenth of
+   the field's width, which is three of the inner columns. */
+#define FRONT_C 0.30f
+#define FRONT_W 3.0f
+
 /* What water is where no light reaches it. */
 static const struct rgb DEEP = { 3, 8, 24 };
 
@@ -122,6 +130,134 @@ static unsigned g_fill[NZ][NX];         /* what the swell does to its colour */
 
 /* The sweep's source: where it is over the field, and whether to draw it. */
 static struct { float fx, fz; int on; } g_source;
+
+/* ------------------------------------------------------------- the colour */
+
+/* The room's colour used to be one number for the whole surface: the palette
+   was built out of it, so every one of its 256 entries was already tinted
+   and every texel on the water turned at the same moment. The colour lives
+   in the crossings now. Each one carries its own, the palette is built from
+   the brightest colour in play, and a vertex hands the GE its own colour as
+   a fraction of that one -- texel times vertex is what the GE draws, so the
+   fraction puts the colour back. While one colour is on the water every
+   fraction is 1 and the frame is exactly the frame that was drawn before.
+   Two colours mean a front between them, and the front is nothing more than
+   which colour a crossing is holding. */
+static struct rgb g_vt[NZ][NX];         /* what each crossing is holding */
+static struct rgb g_ref = { 255, 255, 255 };    /* what the palette is built on */
+
+/* The front: where it started, how far it has got, and what it is bringing. */
+static struct rgb g_bring;
+static float g_front_r, g_front_end, g_front_j, g_front_i;
+static int g_front_on;
+
+/* Where the last drop fell, which is where the next front starts. Until one
+   has, the middle of the field. */
+static float g_touch_j = J0 + 0.5f * (NX_INNER - 1);
+static float g_touch_i = ROW0 + 0.35f * (NZ - 1 - ROW0);
+
+/* The eased colour as it came in last frame, and how far it moved getting
+   there: a colour on its way to a new one moves less every frame, so a step
+   bigger than the last is a new one having been picked. */
+static struct rgb g_seen;
+static float g_seen_step;
+static int g_seen_ok;
+static int g_told;                      /* lattice_tint() does the telling */
+
+static void front_start(struct rgb target) {
+    g_front_on = 1;
+    g_front_r = 0.0f;
+    g_front_j = g_touch_j;
+    g_front_i = g_touch_i;
+    g_bring = target;
+    /* Done when the furthest corner of the field is inside it. */
+    float dj = g_front_j > (NX - 1) * 0.5f ? g_front_j : (NX - 1) - g_front_j;
+    float di = g_front_i > (NZ - 1) * 0.5f ? g_front_i : (NZ - 1) - g_front_i;
+    g_front_end = sqrtf(dj * dj + di * di) + FRONT_W;
+}
+
+void lattice_tint(struct rgb target) {
+    /* Told again what it is already bringing, a front would start over at the
+       drop every frame and never leave it, so only a colour that is news
+       here starts one. Saying it once per selection is all it wants. */
+    g_told = 1;
+    if (target.r == g_bring.r && target.g == g_bring.g && target.b == g_bring.b)
+        return;
+    front_start(target);
+}
+
+/* Smooth at both ends, so the edge of the front has no line in it. */
+static float ease(float c) {
+    if (c <= 0.0f) return 0.0f;
+    if (c >= 1.0f) return 1.0f;
+    return c * c * (3.0f - 2.0f * c);
+}
+
+/* Carry the front one frame outward. A crossing it has passed holds the new
+   colour, one it has not holds whatever it held before -- the colour from
+   before this front, or a half-crossed mix a front that never finished left
+   there. In the edge itself a crossing is moved the rest of the way from
+   where the edge had it last frame to where the edge has it now, which is
+   how a front started over a half-turned field needs no memory of the one
+   before it. */
+static void spread(struct rgb tint) {
+    float rp = g_front_r;
+    if (g_front_on) {
+        g_front_r += FRONT_C;
+        if (g_front_r >= g_front_end) g_front_on = 0;
+    }
+    if (!g_front_on) {
+        /* One colour, and it is the one the room is easing to. */
+        for (int i = 0; i < NZ; i++)
+            for (int j = 0; j < NX; j++) g_vt[i][j] = tint;
+        g_ref = tint;
+        return;
+    }
+    /* Nobody told us the colour the room is heading for, so the front takes
+       it as it arrives: the easing is all but over in half a second and the
+       front takes three times that, so what it carries is the new colour. */
+    if (!g_told) g_bring = tint;
+    if (g_bring.r > g_ref.r) g_ref.r = g_bring.r;
+    if (g_bring.g > g_ref.g) g_ref.g = g_bring.g;
+    if (g_bring.b > g_ref.b) g_ref.b = g_bring.b;
+
+    float r = g_front_r, rr = r * r;
+    float in = r - FRONT_W;
+    float inn = in > 0.0f ? in * in : -1.0f;
+    for (int i = 0; i < NZ; i++) {
+        float di = i - g_front_i, dii = di * di;
+        if (dii >= rr) continue;
+        float span = sqrtf(rr - dii);
+        int j0 = (int)(g_front_j - span), j1 = (int)(g_front_j + span) + 1;
+        if (j0 < 0) j0 = 0;
+        if (j1 > NX - 1) j1 = NX - 1;
+        for (int j = j0; j <= j1; j++) {
+            float dj = j - g_front_j;
+            float d2 = dii + dj * dj;
+            if (d2 >= rr) continue;
+            if (d2 <= inn) { g_vt[i][j] = g_bring; continue; }
+            float d = sqrtf(d2);
+            float c = ease((r - d) * (1.0f / FRONT_W));
+            float cp = ease((rp - d) * (1.0f / FRONT_W));
+            float a = c >= 1.0f ? 1.0f : (c - cp) / (1.0f - cp);
+            if (a <= 0.0f) continue;
+            g_vt[i][j] = rgb_mix(g_vt[i][j], g_bring, a);
+        }
+    }
+}
+
+/* The colour arrives eased, a frame at a time, and never says where it is
+   going. Until somebody says, the surface watches it: a step bigger than the
+   step before it is a new colour having been picked, because easing toward
+   one colour only ever slows down. */
+static void watch(struct rgb tint) {
+    float step = fabsf(tint.r - g_seen.r) + fabsf(tint.g - g_seen.g)
+               + fabsf(tint.b - g_seen.b);
+    if (!g_seen_ok) { g_seen_ok = 1; step = 0.0f; }
+    else if (step > g_seen_step * 1.3f + 4.0f) front_start(tint);
+    g_seen_step = step;
+    g_seen = tint;
+}
 
 /* Motes in the air over the horizon, rising slowly through the sky and
    never in front of the water: something drifting across the surface
@@ -240,6 +376,10 @@ void lattice_touch(float x) {
     float jf = J0 + x * (NX_INNER - 1) + (frand() - 0.5f) * 3.0f;
     float rf = ROW0 + (0.12f + frand() * 0.5f) * (NZ - 1 - ROW0);
     dent(jf, rf, 1.5f + frand() * 1.1f, 2.2f + frand() * 1.8f);
+    /* The room's next colour spreads from where the drop fell, so the front
+       and the ring leave together. */
+    g_touch_j = jf;
+    g_touch_i = rf;
 }
 
 void lattice_stir(float x, float y) {
@@ -362,6 +502,15 @@ static void swell(float t) {
 static void project_all(float t, float swayx, float lightx) {
     float lx = 0.50f * fsin(t * 0.19f);
     float lz = -0.28f + 0.26f * fsin(t * 0.12f + 1.0f);
+    /* A crossing's colour as a fraction of the one the palette was built
+       from, times the light it stands in. Where the whole surface is the
+       one colour the fraction is 1 and this is the plain grey level the
+       palette used to be read through -- a thousandth over 255, so that a
+       crossing holding exactly that colour comes out at the full level and
+       not a rounding under it. */
+    float sr = 255.001f / (g_ref.r > 1.0f ? g_ref.r : 1.0f);
+    float sg = 255.001f / (g_ref.g > 1.0f ? g_ref.g : 1.0f);
+    float sb = 255.001f / (g_ref.b > 1.0f ? g_ref.b : 1.0f);
 
     for (int i = 0; i < NZ; i++) {
         float z = g_row[i].z, xlim = XLIM * z;
@@ -417,9 +566,15 @@ static void project_all(float t, float swayx, float lightx) {
             float level = 0.14f + 1.25f * s + 0.45f * fexp(dr * dr)
                         + 0.90f * g_spec[i][j];
             if (level > 1.0f) level = 1.0f;
-            int lit = (int)(level * 255.0f);
+            struct rgb vt = g_vt[i][j];
+            int lr = (int)(level * vt.r * sr);
+            int lg = (int)(level * vt.g * sg);
+            int lb = (int)(level * vt.b * sb);
+            if (lr > 255) lr = 255;
+            if (lg > 255) lg = 255;
+            if (lb > 255) lb = 255;
             int alpha = (int)(w * 200.0f * (0.35f + 0.65f * g_row[i].near) * g_row[i].thin);
-            g_fill[i][j] = RGBA(lit, lit, lit, alpha);
+            g_fill[i][j] = RGBA(lr, lg, lb, alpha);
         }
     }
 
@@ -507,6 +662,10 @@ void lattice_draw(float t, struct rgb tint) {
 
     step_water();
     swell(t);
+    /* The colour before the light: the palette below and every crossing's
+       own share of it are both built out of what the front has done. */
+    if (!g_told) watch(tint);
+    spread(tint);
 
     gfx_batch_begin();
 
@@ -531,11 +690,15 @@ void lattice_draw(float t, struct rgb tint) {
              rgb_pack(rgb_mix(tint, RGB_WHITE, 0.6f), 120));
 
     /* What the water is made of, for the palette: its own dark, the sky it
-       mirrors, and what a facet turned square into the light sends back. */
+       mirrors, and what a facet turned square into the light sends back.
+       Built from the brightest colour on the surface rather than from the
+       room's: a crossing holding a dimmer one gets there by handing the GE
+       its own share of it, and while there is only one colour on the water
+       the two are the same colour and this is what it always was. */
     gfx_water_light(0.42f * fsin(t * 0.13f), 0.86f, 0.30f,
-                    rgb_pack(rgb_mix(tint, DEEP, 0.86f), 0),
-                    rgb_pack(rgb_mix(tint, DEEP, 0.38f), 0),
-                    rgb_pack(rgb_mix(rgb_mix(tint, RGB_WHITE, 0.9f), DEEP, 0.62f), 0));
+                    rgb_pack(rgb_mix(g_ref, DEEP, 0.86f), 0),
+                    rgb_pack(rgb_mix(g_ref, DEEP, 0.38f), 0),
+                    rgb_pack(rgb_mix(rgb_mix(g_ref, RGB_WHITE, 0.9f), DEEP, 0.62f), 0));
     project_all(t, sway, lightx);
     /* Seven steps a second through the ripple's baked frames, each one
        crossfaded into the next so nothing jumps. */

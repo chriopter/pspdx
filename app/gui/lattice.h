@@ -26,6 +26,18 @@ void lattice_stir(float x, float y);
 
 void lattice_draw(float t, struct rgb tint);
 
+/* The colour the room is heading for. Call it from shell_draw where draw_lot
+   picks the target for a new selection, with the colour it drew: the water
+   then turns from the last touch point outward, a front running with the
+   ring, old colour outside it and new in, the far corners about a second and
+   a half later. It is only ever told because lattice_draw is handed the
+   eased colour, which says nothing about where it is going; left uncalled,
+   the surface watches that colour instead and starts a front of its own the
+   frame it jumps, and carries the colour in as it arrives: the same front in
+   the same place at the same speed, only its first few frames are faint,
+   since what it is carrying then is still most of the way the old colour. */
+void lattice_tint(struct rgb target);
+
 /* The sweep. dry() empties the field. pour() puts the source at (fx, fz) --
    across, and into the distance, both 0..1 -- and while it is pouring wets
    what is under it and dents the surface; it returns how much of the field
