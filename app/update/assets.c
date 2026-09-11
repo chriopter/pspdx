@@ -62,14 +62,14 @@ static size_t read_file(const char *path) {
     return n > 0 ? (size_t)n : 0;
 }
 
-/* By the served name first; then by id, which is what a planted file and a
-   stick from before the names carried hashes are called. */
+/* By the served name when there is one, and only that: a file the id
+   names is what a stick kept before the names carried hashes, and reading
+   it back would be keeping the stale picture this is here to replace.
+   Without a URL the id is all there is, and that is where the rig plants
+   a clip. */
 static size_t cache_read(enum asset_kind kind, const char *id, const char *url) {
     char path[256];
     cache_path(kind, id, url, path, sizeof(path));
-    size_t n = read_file(path);
-    if (n) return n;
-    cache_path(kind, id, 0, path, sizeof(path));
     return read_file(path);
 }
 

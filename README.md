@@ -369,7 +369,7 @@ that works on a real PSP, and on a host whose desktop is locked.
 | `PSPDX2.BMP` | the screen after an install |
 | `PSPDX.KEYS` | scripted input, one `<ms> <key>` per line from the moment the catalog is up: `up`, `down`, `cross`, `select`, or `shot` |
 | `PSPDX.INSTALL` | a manifest URL here installs that app unattended, for testing |
-| `PSP/PSPDX/cache/<id>.png`, `.mp4` | a picture once fetched, so it costs one handshake per install, not per run; what is here is shown even if the catalog does not link it -- the rig plants the repo's clips this way before a deploy |
+| `PSP/PSPDX/cache/<served name>` | a picture once fetched, so it costs one handshake per stick, not per run. The catalog serves every asset under `<id>-<sha8>.<ext>`, a name that carries the bytes, so a changed picture arrives under a new name and the old file is simply never asked for again. An entry that links nothing is looked up as `<id>.<ext>`, which is where the rig plants a clip |
 | `PSP/PSPDX/font/ltn8.pgf` | never written by the client: where it looks for the system font when `flash0:` has none |
 | `PSP/PSPDX/db/<id>.json` | what was installed: rev, directory, manifest URL |
 
@@ -377,11 +377,6 @@ that works on a real PSP, and on a host whose desktop is locked.
 
 ## Open
 
-- **A picture once cached is kept for good.** `PSP/PSPDX/cache/<id>.png` is
-  read before the URL, so a changed icon or clip never reaches a stick that
-  has the old one. The fix is a name that changes with the bytes -- the
-  catalog serving `icons/<id>-<sha>.png` and the client caching by the URL's
-  basename -- and it is not done yet.
 - **Real hardware.** It has only ever run in PPSSPP.
 - **Nothing is signed**, so the index is trusted completely. Fine while one
   person writes it; less fine now that a bot does.
