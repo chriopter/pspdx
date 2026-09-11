@@ -23,8 +23,7 @@ PSPDX_VERSION ?= $(PSPDX_DESCRIBE:v%=%)
 # includes it; build.mak on its own only looks at the .c.
 # EXTRA_CFLAGS is for a test build: tools/localcat points the client at a
 # catalog on the host and trusts the host's throwaway CA through it.
-CFLAGS = -O2 -G0 -Wall -I. -I$(WOLFSSL_PREFIX)/include -MMD -MP \
-         -DPSPDX_VERSION=\"$(PSPDX_VERSION)\" $(EXTRA_CFLAGS)
+CFLAGS = -O2 -G0 -Wall -I. -I$(WOLFSSL_PREFIX)/include -MMD -MP $(EXTRA_CFLAGS)
 ASFLAGS = $(CFLAGS)
 
 LIBDIR = $(WOLFSSL_PREFIX)/lib
@@ -46,3 +45,13 @@ include $(PSPSDK)/lib/build.mak
 
 # After build.mak, so its all: stays the default goal.
 -include $(OBJS:.o=.d)
+
+# The version reaches the code through a generated header rather than a -D:
+# a define changes nothing make can see, so a new version never recompiled
+# the files that carried the old one. The header is rewritten only when the
+# string differs, and the .d files make what includes it follow.
+util/version.h: FORCE
+	@printf '#define PSPDX_VERSION "%s"\n' '$(PSPDX_VERSION)' > $@.tmp; \
+	if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv $@.tmp $@; echo "version $(PSPDX_VERSION)"; fi
+FORCE:
+$(OBJS): | util/version.h

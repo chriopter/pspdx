@@ -5,6 +5,9 @@
    Everything that prints a version or writes one down takes it from here, so
    the band, the log and the record on the stick cannot disagree. A build from
    outside a checkout has no answer and says so. */
+/* Written by the Makefile from git describe, or "dev" where there is no
+   git to ask. */
+#include "util/version.h"
 #ifndef PSPDX_VERSION
 #define PSPDX_VERSION "dev"
 #endif

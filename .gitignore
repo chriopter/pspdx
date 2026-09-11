@@ -28,3 +28,4 @@ shot-updates.png
 
 # Python caches from app/tools
 __pycache__/
+app/util/version.h
