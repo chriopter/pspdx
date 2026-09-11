@@ -27,13 +27,34 @@ static int sink(void *ctx, const void *data, size_t len) {
     return 0;
 }
 
-static void cache_path(enum asset_kind kind, const char *id, char *out, size_t size) {
+/* The cache is keyed by the name the catalog serves the file under. The
+   catalog puts a hash of the bytes into that name, so a changed picture
+   arrives under a new name and the old one is simply never asked for
+   again; keyed by id, a stick kept the first icon it ever saw for good.
+   Without a URL -- the rig planting a clip, an entry that links nothing --
+   the id names the file, which is also where older sticks kept theirs. */
+static void cache_path(enum asset_kind kind, const char *id, const char *url,
+                       char *out, size_t size) {
+    const char *base = url && url[0] ? strrchr(url, '/') : 0;
+    if (base && base[1]) {
+        base++;
+        /* A name is a name: only what a file on the stick may be called. */
+        char safe[96];
+        size_t n = 0;
+        for (const char *p = base; *p && n + 1 < sizeof(safe); p++) {
+            char c = *p;
+            int ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                     (c >= '0' && c <= '9') || c == '.' || c == '-' || c == '_';
+            safe[n++] = ok ? c : '_';
+        }
+        safe[n] = '\0';
+        snprintf(out, size, CACHE_DIR "/%s", safe);
+        return;
+    }
     snprintf(out, size, CACHE_DIR "/%s.%s", id, EXT[kind]);
 }
 
-static size_t cache_read(enum asset_kind kind, const char *id) {
-    char path[256];
-    cache_path(kind, id, path, sizeof(path));
+static size_t read_file(const char *path) {
     int fd = sceIoOpen(path, PSP_O_RDONLY, 0777);
     if (fd < 0) return 0;
     int n = sceIoRead(fd, g_buf, sizeof(g_buf));
@@ -41,14 +62,25 @@ static size_t cache_read(enum asset_kind kind, const char *id) {
     return n > 0 ? (size_t)n : 0;
 }
 
-static void cache_write(enum asset_kind kind, const char *id) {
+/* By the served name first; then by id, which is what a planted file and a
+   stick from before the names carried hashes are called. */
+static size_t cache_read(enum asset_kind kind, const char *id, const char *url) {
+    char path[256];
+    cache_path(kind, id, url, path, sizeof(path));
+    size_t n = read_file(path);
+    if (n) return n;
+    cache_path(kind, id, 0, path, sizeof(path));
+    return read_file(path);
+}
+
+static void cache_write(enum asset_kind kind, const char *id, const char *url) {
     /* The parents belong to the installer and usually exist already; making
        them again is cheaper than asking. */
     sceIoMkdir("ms0:/PSP", 0777);
     sceIoMkdir("ms0:/PSP/PSPDX", 0777);
     sceIoMkdir(CACHE_DIR, 0777);
     char path[256];
-    cache_path(kind, id, path, sizeof(path));
+    cache_path(kind, id, url, path, sizeof(path));
     int fd = sceIoOpen(path, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_TRUNC, 0777);
     if (fd < 0) return;
     sceIoWrite(fd, g_buf, (SceSize)g_len);
@@ -59,7 +91,7 @@ const void *asset_fetch(enum asset_kind kind, const char *id, const char *url,
                         size_t *len) {
     if (!id) return 0;
 
-    g_len = cache_read(kind, id);
+    g_len = cache_read(kind, id, url);
     if (g_len) {
         if (kind != ASSET_ICON)
             logline("%s: %lu bytes cached, %s", EXT[kind], (unsigned long)g_len, id);
@@ -75,7 +107,7 @@ const void *asset_fetch(enum asset_kind kind, const char *id, const char *url,
         logline("%s: rc=%d status=%ld, %s", EXT[kind], rc, result.status, id);
         return 0;
     }
-    cache_write(kind, id);
+    cache_write(kind, id, url);
     logline("%s: %lu bytes fetched, %s", EXT[kind], (unsigned long)g_len, id);
     *len = g_len;
     return g_buf;
