@@ -116,6 +116,7 @@ static int g_installing;
 static char g_install_name[40];
 static char g_install_phase[16];
 static size_t g_install_done, g_install_total;
+static float g_bar;                     /* the drawn end, chasing the reported one */
 static unsigned g_install_drawn_ms;
 static char g_status[96];
 /* What stands over the browser, if anything: a question, a short menu with a
@@ -127,7 +128,11 @@ static char g_ask_title[64], g_ask_line[96];
 static char g_menu_title[48], g_menu_item[MENU_MAX][32];
 static unsigned char g_menu_on[MENU_MAX];
 static int g_menu_count, g_menu_cursor;
-static int g_info;
+#define INFO_ACTIONS 2
+static int g_info, g_info_action;
+/* The share of a frame that goes into drawing it, eased over about a second
+   so the number on screen does not flicker. */
+static float g_load;
 static char g_word[24] = "Connecting";
 static const struct catalog *g_catalog;
 static int g_cursor;
@@ -456,9 +461,11 @@ static void draw_panel(const struct app_entry *entry, float t) {
     card.yaw = 0.0f;
     card.pitch = 0.0f;
     card.reflect_h = REFLECT_H + 6;
-    /* One sweep of light every twelve seconds, taking two of them. */
-    float cycle = fmodf(t, 12.0f);
-    card.gloss = cycle < 2.0f ? cycle / 2.0f : -1.0f;
+    /* No sweep across the glass: a highlight travelling over a picture reads
+       as a smear on the screen rather than as light in the room. The light
+       that used to cross the card crosses the water now, where it has a
+       surface to lie on. */
+    card.gloss = -1.0f;
 
     /* Backlit: the light sits behind the picture and leaks out around it. */
     gfx_glow(card.cx, card.cy, SHOT_W + 130, SHOT_H + 120, rgb_pack(g_tint, 100));
@@ -555,40 +562,55 @@ static void draw_band(int y, int h) {
     band_edge(y + h);
 }
 
+/* Straight lines a pixel wide, stepped along whichever axis is the longer:
+   what the room's other strokes are drawn with offsets only in y, which turns
+   a diagonal into a parallelogram and a ring into a spiral. The face buttons
+   are nine pixels across and the honest way at that size is to place the
+   pixels. */
+static void stroke(float x0, float y0, float x1, float y1, unsigned color) {
+    float dx = x1 - x0, dy = y1 - y0;
+    float span = (dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy)
+               ? (dx < 0 ? -dx : dx) : (dy < 0 ? -dy : dy);
+    int steps = (int)(span + 0.5f);
+    for (int i = 0; i <= steps; i++) {
+        float f = steps ? (float)i / steps : 0.0f;
+        gfx_rect((int)(x0 + dx * f + 0.5f), (int)(y0 + dy * f + 0.5f), 1, 1, color);
+    }
+}
+
 /* The face buttons, drawn rather than written: the system font has no glyph
    for them, and spelling TRIANGLE out is longer than the word it would be
    labelling. A ribbon is a band offset up and down from its own points, so it
-   draws a slope well and a vertical line not at all -- which is why the square
-   is four thin rectangles and the ring is a circle of single pixels. */
+   draws a slope well and a vertical line not at all -- which is why these are
+   placed pixel by pixel instead, all four in the same nine-pixel box with the
+   same one-pixel line, so no one of them reads as bolder than the rest. */
 enum mark { MARK_CROSS, MARK_CIRCLE, MARK_SQUARE, MARK_TRIANGLE };
 
 #define MARK_W 11
+#define MARK_R 4.0f
 
 static void draw_mark(enum mark mark, float cx, float cy, unsigned color) {
-    int x = (int)cx, y = (int)cy;
-    unsigned c[13];
-    for (int i = 0; i < 13; i++) c[i] = color;
+    const float r = MARK_R;
     if (mark == MARK_CROSS) {
-        float ax[2] = { cx - 3.5f, cx + 3.5f }, ay[2] = { cy - 3.5f, cy + 3.5f };
-        float bx[2] = { cx - 3.5f, cx + 3.5f }, by[2] = { cy + 3.5f, cy - 3.5f };
-        gfx_ribbon(ax, ay, c, 2, 1.0f);
-        gfx_ribbon(bx, by, c, 2, 1.0f);
+        stroke(cx - r + 1, cy - r + 1, cx + r - 1, cy + r - 1, color);
+        stroke(cx - r + 1, cy + r - 1, cx + r - 1, cy - r + 1, color);
     } else if (mark == MARK_TRIANGLE) {
-        float tx[4] = { cx, cx + 4.5f, cx - 4.5f, cx };
-        float ty[4] = { cy - 4.0f, cy + 3.5f, cy + 3.5f, cy - 4.0f };
-        gfx_ribbon(tx, ty, c, 4, 1.0f);
+        stroke(cx, cy - r, cx + r, cy + r - 1, color);
+        stroke(cx + r, cy + r - 1, cx - r, cy + r - 1, color);
+        stroke(cx - r, cy + r - 1, cx, cy - r, color);
     } else if (mark == MARK_SQUARE) {
-        gfx_rect(x - 4, y - 4, 9, 1, color);
-        gfx_rect(x - 4, y + 4, 9, 1, color);
-        gfx_rect(x - 4, y - 4, 1, 9, color);
-        gfx_rect(x + 4, y - 4, 1, 9, color);
+        int x = (int)(cx - r + 1), y = (int)(cy - r + 1), n = (int)(2 * r - 1);
+        gfx_rect(x, y, n, 1, color);
+        gfx_rect(x, y + n - 1, n, 1, color);
+        gfx_rect(x, y, 1, n, color);
+        gfx_rect(x + n - 1, y, 1, n, color);
     } else {
-        /* The ring as sixteen points on a circle: at this size a ribbon
-           round it reads as a swirl, a row of pixels reads as a ring. */
-        for (int i = 0; i < 16; i++) {
-            float a = i * (6.2831853f / 16);
-            gfx_rect((int)(cx + cosf(a) * 4.0f + 0.5f), (int)(cy + sinf(a) * 4.0f + 0.5f),
-                     1, 1, color);
+        /* Round, and round the whole way: a point per pixel of circumference,
+           which at this radius is a closed ring of even weight. */
+        for (int i = 0; i < 26; i++) {
+            float a = i * (6.2831853f / 26);
+            gfx_rect((int)(cx + cosf(a) * r + 0.5f),
+                     (int)(cy + sinf(a) * r + 0.5f), 1, 1, color);
         }
     }
 }
@@ -672,7 +694,14 @@ static void draw_install(void) {
        kind of thing as the band's own edges. */
     gfx_rect(bar_x, bar_y, bar_w, 3, RGBA(255, 255, 255, 28));
     if (g_install_total) {
-        int filled = (int)((unsigned long long)g_install_done * bar_w / g_install_total);
+        /* Progress arrives in whatever lumps the network hands over, and a
+           bar that steps by those lumps reads as a stall between them. The
+           drawn end chases the reported one instead, a third of the way per
+           frame, so it is always moving and never ahead. */
+        float target = (float)g_install_done / g_install_total;
+        g_bar += (target - g_bar) * 0.34f;
+        if (target >= 1.0f && g_bar > 0.995f) g_bar = 1.0f;
+        int filled = (int)(bar_w * g_bar + 0.5f);
         gfx_hgrad(bar_x, bar_y, filled, 3, rgb_pack(g_tint, 255), g_accent);
         gfx_glow(bar_x + filled, bar_y + 1, 44, 22, rgb_pack(RGB_WHITE, 150));
         char pct[8];
@@ -690,16 +719,19 @@ static void draw_install(void) {
 
 /* -------------------------------------------------------------- info band */
 
-/* Labels end and values begin at the same two places all the way down, so the
-   rows read as a column of facts and not as six sentences. */
-#define INFO_LABEL_END 224
-#define INFO_VALUE_X 244
+/* Labels end and values begin at the same places all the way down, so the
+   rows read as a column of facts and not as a page of sentences. The two
+   that need the room -- where the catalog is and what was negotiated with it
+   -- have the band to themselves; the short ones pair up. */
+#define FACT_LABEL 150
+#define FACT_VALUE 166
+#define FACT_LABEL2 330
+#define FACT_VALUE2 346
 
-static void info_row(int y, const char *label, const char *value) {
-    font_print(FONT_META, INFO_LABEL_END - font_width(FONT_META, label), y,
-               g_dim, label);
-    font_print_clipped(FONT_META, INFO_VALUE_X, y, SCR_W - INFO_VALUE_X - 30,
-                       g_text, value);
+static void fact(int y, float label_end, float value_x, float clip,
+                 const char *label, const char *value) {
+    font_print(FONT_META, label_end - font_width(FONT_META, label), y, g_dim, label);
+    font_print_clipped(FONT_META, value_x, y, clip, g_text, value);
 }
 
 /* wolfSSL names a suite the way its own tables do -- TLS13-CHACHA20-POLY1305-
@@ -727,6 +759,46 @@ static void url_host(const char *url, char *out, size_t size) {
     out[n] = '\0';
 }
 
+/* What is left on the stick. The driver counts in clusters and answers
+   through a pointer handed to it in a struct, which is the one call in this
+   file that looks like firmware because it is. Asked once when the band
+   opens: a FAT32 free count walks the allocation table. */
+static char g_storage[24] = "?";
+static float g_storage_used = -1.0f;    /* below zero while the stick is unread */
+
+static void size_words(unsigned long long bytes, char *out, size_t size) {
+    if (bytes >= 1024ull * 1024 * 1024)
+        snprintf(out, size, "%lu.%lu GB", (unsigned long)(bytes >> 30),
+                 (unsigned long)((bytes * 10 >> 30) % 10));
+    else
+        snprintf(out, size, "%lu MB", (unsigned long)(bytes >> 20));
+}
+
+static void read_storage(void) {
+    struct ms_info {
+        unsigned max_clusters, free_clusters, max_sectors, sector_size, sector_count;
+    } info;
+    struct { struct ms_info *at; } command = { &info };
+    memset(&info, 0, sizeof(info));
+    g_storage_used = -1.0f;
+    if (sceIoDevctl("ms0:", 0x02425818, &command, sizeof(command), NULL, 0) < 0) {
+        snprintf(g_storage, sizeof(g_storage), "unknown");
+        return;
+    }
+    unsigned long long unit = (unsigned long long)info.sector_count * info.sector_size;
+    unsigned long long left = info.free_clusters * unit;
+    unsigned long long all = info.max_clusters * unit;
+    size_words(left, g_storage, sizeof(g_storage));
+    if (all) g_storage_used = 1.0f - (float)((double)left / (double)all);
+}
+
+/* The two things the band does rather than says. Which one X takes is the
+   cursor's, and the cursor is the main loop's. */
+static const char *const INFO_ACTION[INFO_ACTIONS] = {
+    "Fetch the catalog again",
+    "Discard entropy and sweep again",
+};
+
 static void draw_info(void) {
     draw_band(INFO_Y, INFO_H);
 
@@ -734,7 +806,8 @@ static void draw_info(void) {
     char value[96];
 
     url_host(catalog_url(), value, sizeof(value));
-    info_row(INFO_Y + 34, "Catalog", value);
+    fact(INFO_Y + 34, FACT_LABEL, FACT_VALUE, SCR_W - FACT_VALUE - 30,
+         "Catalog", value);
 
     if (tls->cipher[0]) {
         char cipher[48];
@@ -743,33 +816,58 @@ static void draw_info(void) {
     } else {
         snprintf(value, sizeof(value), "not connected");
     }
-    info_row(INFO_Y + 56, "Connection", value);
+    fact(INFO_Y + 56, FACT_LABEL, FACT_VALUE, SCR_W - FACT_VALUE - 30,
+         "Connection", value);
 
     snprintf(value, sizeof(value), "%u ms", tls->handshake_ms);
-    info_row(INFO_Y + 78, "Handshake", value);
+    fact(INFO_Y + 82, FACT_LABEL, FACT_VALUE, 140, "Handshake", value);
 
     snprintf(value, sizeof(value), "%d bits", entropy_bits());
-    info_row(INFO_Y + 100, "Entropy", value);
+    fact(INFO_Y + 104, FACT_LABEL, FACT_VALUE, 140, "Entropy", value);
+
+    /* Not a scheduler's number -- the PSP has none to ask. The share of each
+       frame that goes into drawing it; the rest is the wait for vblank, which
+       is the only idle this client has. */
+    snprintf(value, sizeof(value), "%d%% of each frame", (int)(g_load * 100.0f + 0.5f));
+    fact(INFO_Y + 126, FACT_LABEL, FACT_VALUE, 140, "Drawing", value);
 
     int installed = 0;
     if (g_catalog)
         for (int i = 0; i < g_catalog->count; i++)
             if (g_catalog->apps[i].state != APP_NOT_INSTALLED) installed++;
     snprintf(value, sizeof(value), "%d", installed);
-    info_row(INFO_Y + 122, "Installed", value);
+    fact(INFO_Y + 82, FACT_LABEL2, FACT_VALUE2, 110, "Installed", value);
 
     snprintf(value, sizeof(value), "%u KB",
              (unsigned)sceKernelTotalFreeMemSize() / 1024);
-    info_row(INFO_Y + 144, "Free", value);
+    fact(INFO_Y + 104, FACT_LABEL2, FACT_VALUE2, 110, "Memory free", value);
 
-    /* The one thing the panel does rather than says, held off from the facts
-       above it by a line of the same kind as the band's own. */
-    band_rule(INFO_Y + 158, 160, 120);
-    const char *action = "Discard entropy and sweep again";
-    float x = SCR_W / 2 - hint_width(action) / 2;
-    float base = INFO_Y + INFO_H - 14;
-    draw_mark(MARK_CROSS, x + MARK_W / 2.0f, base - 4, g_accent);
-    font_print(FONT_META, x + MARK_W + 4, base, g_accent, action);
+    /* Room on the stick is the one fact here that is a proportion, so it is
+       drawn as one: the line fills as the stick does, and what is left of it
+       is what a package has to fit into. */
+    fact(INFO_Y + 126, FACT_LABEL2, FACT_VALUE2, 110, "Stick free", g_storage);
+    if (g_storage_used >= 0.0f) {
+        int x = FACT_VALUE2, w = SCR_W - FACT_VALUE2 - 30, y = INFO_Y + 134;
+        int used = (int)(w * g_storage_used + 0.5f);
+        gfx_rect(x, y, w, 3, RGBA(255, 255, 255, 28));
+        if (used > 0) gfx_hgrad(x, y, used, 3, rgb_pack(g_tint, 255), g_accent);
+    }
+
+    band_rule(INFO_Y + 142, 160, 120);
+    for (int i = 0; i < INFO_ACTIONS; i++) {
+        int y = INFO_Y + 164 + i * 22;
+        int on = i == g_info_action;
+        if (on) {
+            gfx_glow(SCR_W / 2, y - 5, 380, 32, rgb_pack(g_tint, 110));
+            gfx_glow(SCR_W / 2, y + 5, 320, 9,
+                     rgb_pack(rgb_mix(g_tint, RGB_WHITE, 0.7f), 140));
+        }
+        float w = hint_width(INFO_ACTION[i]);
+        float x = SCR_W / 2 - w / 2;
+        if (on) draw_mark(MARK_CROSS, x + MARK_W / 2.0f, y - 4, g_accent);
+        font_print(FONT_META, x + MARK_W + 4, y, on ? g_accent : g_dim,
+                   INFO_ACTION[i]);
+    }
 }
 
 /* ---------------------------------------------------------------- footer */
@@ -781,7 +879,7 @@ static void draw_footer(void) {
     if (g_ask_title[0] || g_menu_count || g_installing) return;
     if (g_info) {
         font_print(FONT_META, LIST_X, FOOTER_Y + 15, g_dim,
-                   "START or O close");
+                   "SELECT or O close");
         return;
     }
     if (g_catalog && g_catalog->count <= 0 && g_status[0]) return;   /* said in the middle */
@@ -797,9 +895,35 @@ static void draw_footer(void) {
     float x = draw_hint(LIST_X, FOOTER_Y + 15, MARK_CROSS,
                         installed ? "options" : "install", g_dim);
     if (installed) x = draw_hint(x, FOOTER_Y + 15, MARK_SQUARE, "remove", g_dim);
+    if (installed) x = font_print(FONT_META, x, FOOTER_Y + 15, g_dim, "START run") + 14;
     font_print(FONT_META, x, FOOTER_Y + 15, g_dim,
-               g_tabs > 1 ? "L R category   SELECT refresh   START info   HOME quit"
-                          : "SELECT refresh   START info   HOME quit");
+               g_tabs > 1 ? "L R category   SELECT info   HOME quit"
+                          : "SELECT info   HOME quit");
+}
+
+/* ------------------------------------------------------------- water light */
+
+/* A light that crosses the water instead of the picture: one pass every
+   twelve seconds, lying on the surface at a fixed depth, so perspective gives
+   it its shape -- wide, flat, and the same height above the horizon all the
+   way across. It is placed the way everything else that stands on the water
+   is placed, by projecting a point of the world, and it fades in and out at
+   the two ends rather than sliding off an edge. */
+#define LIGHT_Z 2.2f
+#define LIGHT_EYE_Y (150.0f / GFX_FOCAL)     /* the lattice's own eye height */
+
+static void draw_water_light(float t) {
+    float cycle = fmodf(t, 12.0f) / 12.0f;
+    /* Far enough past both walls that the fade, not the edge, ends the pass. */
+    float wx = (cycle * 2.0f - 1.0f) * (SCR_W * 0.62f * LIGHT_Z / GFX_FOCAL);
+    float sx, sy;
+    gfx_water_project(wx, -LIGHT_EYE_Y, LIGHT_Z, &sx, &sy);
+    float scale = GFX_FOCAL / LIGHT_Z;
+    float fade = sinf(cycle * 3.1415927f);
+    fade *= fade;
+    struct rgb lit = rgb_mix(g_tint, RGB_WHITE, 0.62f);
+    gfx_glow(sx, sy, scale * 0.95f, scale * 0.30f, rgb_pack(lit, (int)(95 * fade)));
+    gfx_glow(sx, sy, scale * 0.40f, scale * 0.11f, rgb_pack(RGB_WHITE, (int)(70 * fade)));
 }
 
 /* ------------------------------------------------------------------ frame */
@@ -839,6 +963,7 @@ void shell_draw(const struct catalog *catalog, int cursor) {
     gfx_vgrad(0, 0, SCR_W, SCR_H, rgb_pack(rgb_mix(NIGHT_TOP, g_tint, 0.05f), 255),
               rgb_pack(rgb_mix(NIGHT_BOTTOM, g_tint, 0.18f), 255));
     lattice_draw(t, g_tint);
+    draw_water_light(t);
     unsigned t1 = now_us();
     draw_chrome(catalog);
     if (catalog->count > 0 && g_view_count > 0) {
@@ -867,6 +992,12 @@ void shell_draw(const struct catalog *catalog, int cursor) {
     unsigned t2 = now_us();
     gfx_frame_end();
     unsigned t3 = now_us();
+    /* Drawing against the whole frame, which is this one's start to the
+       next one's: what is not drawing is the vblank wait inside frame_end. */
+    static unsigned began;
+    if (began && t0 - began > 1000 && t0 - began < 200000)
+        g_load += ((float)(t2 - t0) / (t0 - began) - g_load) * 0.05f;
+    began = t0;
     if (t3 - t0 > g_worst_total) {
         g_worst_total = t3 - t0;
         g_worst_back = t1 - t0;
@@ -934,8 +1065,10 @@ void shell_menu(const char *title, const char *const *items,
     g_status[0] = '\0';
 }
 
-void shell_info(int open) {
+void shell_info(int open, int action) {
+    if (open && !g_info) read_storage();
     g_info = open;
+    g_info_action = action;
 }
 
 /* ---------------------------------------------------------------- install */
@@ -947,6 +1080,7 @@ void shell_install_begin(const char *name) {
     g_install_phase[0] = '\0';
     g_install_done = g_install_total = 0;
     g_install_drawn_ms = 0;
+    g_bar = 0.0f;
 }
 
 void shell_install_phase(void *ctx, const char *phase) {
@@ -954,6 +1088,7 @@ void shell_install_phase(void *ctx, const char *phase) {
     snprintf(g_install_phase, sizeof(g_install_phase), "%s", phase ? phase : "");
     g_install_done = g_install_total = 0;
     g_install_drawn_ms = 0;
+    g_bar = 0.0f;
     if (g_catalog) shell_draw(g_catalog, g_cursor);
 }
 
@@ -961,9 +1096,11 @@ void shell_install_progress(void *ctx, size_t done, size_t total) {
     (void)ctx;
     g_install_done = done;
     g_install_total = total;
-    /* Every frame costs a vblank wait, which would throttle the download
-       itself; four a second is enough to look alive. */
-    if (done != total && !expired(g_install_drawn_ms, 250)) return;
+    /* Every frame costs a vblank wait on the thread doing the downloading,
+       so this cannot run at sixty; at twelve a second the eased end of the
+       bar moves the way the system's own does, and the wait overlaps the
+       pacing a real radio imposes anyway. */
+    if (done != total && !expired(g_install_drawn_ms, 80)) return;
     g_install_drawn_ms = now_ms();
     if (g_catalog) shell_draw(g_catalog, g_cursor);
 }

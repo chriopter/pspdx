@@ -2,11 +2,15 @@
 # Runs EBOOT.PBP under the PPSSPP flatpak, without needing a visible desktop,
 # and leaves PSPDX.LOG and PSPDX.BMP (as shot.png) next to this script.
 #
-#   sh app/run-ppsspp.sh [seconds] [--sweep] [--keys FILE]     default 25
+#   sh app/run-ppsspp.sh [seconds] [--sweep] [--keys FILE] [--slow [KB/s]]
 #
 # --keys FILE scripts input: one "<ms> <key>" per line, counted from the
-# moment the catalog is up; keys are up, down, cross, select and shot, the
-# last of which leaves a settled screenshot as shot1.png next to shot.png.
+# moment the catalog is up; keys are up, down, cross, circle, square,
+# triangle, start, select and shot, the last of which leaves a settled
+# screenshot as shot1.png next to shot.png.
+#
+# --slow [KB/s] paces the client's network down to a PSP-1004's, 180 KB/s by
+# default, which is what its 802.11b radio and TCP stack were measured at.
 #
 # By default the emulator's stick gets a fixed test seed, so the client does
 # what it does on a PSP after its first run: load the seed, skip the sweep,
@@ -26,10 +30,12 @@ MS="$HOME/.var/app/org.ppsspp.PPSSPP/config/ppsspp"
 SECS=25
 SWEEP=0
 KEYS=""
+SLOW=""
 while [ $# -gt 0 ]; do
 	case "$1" in
 		--sweep) SWEEP=1 ;;
 		--keys) KEYS="$2"; shift ;;
+		--slow) SLOW="${2:-180}"; case "$SLOW" in ''|*[!0-9]*) SLOW=180 ;; *) shift ;; esac ;;
 		*) SECS="$1" ;;
 	esac
 	shift
@@ -68,8 +74,13 @@ else
 	# hide a bug in that.
 	[ -f "$MS/PSPDX.SEED" ] || printf 'PSPDX-TEST-SEED-0000' >"$MS/PSPDX.SEED"
 fi
-rm -f "$MS/PSPDX.LOG" "$MS/PSPDX.BMP" "$MS/PSPDX1.BMP" "$MS/PSPDX.BENCH" "$MS/PSPDX.KEYS"
+rm -f "$MS/PSPDX.LOG" "$MS/PSPDX.BMP" "$MS/PSPDX1.BMP" "$MS/PSPDX.BENCH" "$MS/PSPDX.KEYS" \
+      "$MS/PSPDX.SLOW"
 [ -n "$KEYS" ] && cp "$KEYS" "$MS/PSPDX.KEYS"
+# The emulator borrows the host's network; a PSP-1004 has 802.11b and its own
+# TCP stack, which together managed about 180 KB/s. --slow holds the client to
+# that, so a film takes as long to arrive here as it does on the hardware.
+[ -n "$SLOW" ] && printf '%s' "$SLOW" >"$MS/PSPDX.SLOW"
 
 # In its own session, so that the kill below reaches the emulator inside
 # the flatpak sandbox and not only the launcher: an instance that survives

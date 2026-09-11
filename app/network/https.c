@@ -186,6 +186,47 @@ static void stir_power(unsigned connect_ms) {
     entropy_stir(&p, sizeof(p));
 }
 
+/* ---------------------------------------------------------------- pacing */
+
+/* The test rig only. An emulator borrows the host's network, which is an
+   order of magnitude past what a PSP-1004's 802.11b radio and its own TCP
+   stack ever managed -- a download that takes half a minute on the hardware
+   is over before the progress bar has moved. ms0:/PSPDX.SLOW holds a rate in
+   kilobytes a second, or nothing for the measured rate of a 1004, and the
+   receive path is held to it. A PSP nobody has put that file on reads
+   nothing here and is paced by its radio, as it should be.
+
+   The clamp is on arriving bytes rather than on the socket, so it shapes
+   every fetch the client makes: catalog, icons, films and packages alike. */
+#define PSP_1004_KBPS 180
+
+static unsigned g_paced_kbps;           /* 0 until asked, then 0 = no limit */
+static unsigned g_pace_since, g_pace_bytes;
+
+static void pace_begin(void) {
+    if (!g_paced_kbps) {
+        char text[16];
+        int fd = sceIoOpen("ms0:/PSPDX.SLOW", PSP_O_RDONLY, 0777);
+        if (fd < 0) { g_paced_kbps = ~0u; return; }
+        int n = sceIoRead(fd, text, sizeof(text) - 1);
+        sceIoClose(fd);
+        text[n > 0 ? n : 0] = '\0';
+        unsigned rate = (unsigned)atoi(text);
+        g_paced_kbps = rate ? rate : PSP_1004_KBPS;
+        logline("network paced to %u KB/s, as a PSP-1004", g_paced_kbps);
+    }
+    g_pace_since = now_ms();
+    g_pace_bytes = 0;
+}
+
+static void pace(int n) {
+    if (g_paced_kbps == ~0u || n <= 0) return;
+    g_pace_bytes += (unsigned)n;
+    unsigned due = g_pace_bytes / g_paced_kbps;          /* ms the radio needs */
+    unsigned spent = now_ms() - g_pace_since;
+    if (due > spent) sceKernelDelayThread((due - spent) * 1000);
+}
+
 /* ------------------------------------------------------------------- tls */
 
 static int io_recv(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
@@ -195,6 +236,7 @@ static int io_recv(WOLFSSL *ssl, char *buf, int sz, void *ctx) {
 
     int n = psp_recv(fd, buf, sz);
     if (n > 0) {
+        pace(n);
         /* When a packet lands is decided by the radio, the access point's
            scheduling and the path across the internet, none of which this
            device has a say in. wait_socket polls on a fixed sleep, which
@@ -452,6 +494,7 @@ static int one_request(const struct url *u, https_sink sink, void *sink_ctx,
         logline("x25519 key share unavailable");
 
     phase("tls handshake");
+    pace_begin();                    /* the radio's budget starts with the session */
     start = now_ms();
     while ((rc = wolfSSL_connect(ssl)) != WOLFSSL_SUCCESS) {
         int e = wolfSSL_get_error(ssl, rc);

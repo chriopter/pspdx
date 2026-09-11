@@ -76,10 +76,12 @@ void shell_menu(const char *title, const char *const *items,
                 const unsigned char *takeable, int count, int cursor);
 
 /* The info band over the dimmed browser: what this session is connected to
-   and what it is standing on. Drawn while open, and nothing more -- the
-   button that closes it and the action row's button are read in the main
-   loop. */
-void shell_info(int open);
+   and what it is standing on, and at its foot the two things that can be
+   done about either. action is which of them the cursor is on. Drawn while
+   open, and nothing more -- what moves that cursor and what takes the row
+   under it is read in the main loop. */
+#define SHELL_INFO_ACTIONS 2
+void shell_info(int open, int action);
 
 /* Install progress, drawn over the browser. The two middle ones match the
    callback types install() expects. */

@@ -169,6 +169,46 @@ static void uninstall_app(int index) {
     cues_post(rc == 0 ? CUE_DONE : CUE_FAIL, 0);
 }
 
+/* Hands the PSP over to the package the cursor is on. Nothing comes back from
+   this call, so everything the session was holding has to be on the stick
+   before it: the pool above all, which otherwise only reaches the seed file
+   when the user quits through HOME. */
+static void launch_app(int index) {
+    const struct app_entry *entry = &catalog.apps[index];
+    struct installed record;
+    char path[160];
+
+    if (db_read(entry->id, &record) < 0 || !record.dir[0]) {
+        shell_status("no record of where that was installed");
+        return;
+    }
+    snprintf(path, sizeof(path), "ms0:/PSP/GAME/%s/EBOOT.PBP", record.dir);
+    int fd = sceIoOpen(path, PSP_O_RDONLY, 0777);
+    if (fd < 0) {
+        shell_status("that package has no EBOOT to start");
+        logline("launch: %s is not there", path);
+        return;
+    }
+    sceIoClose(fd);
+
+    cues_post(CUE_OPEN, 0);
+    logline("launching %s", path);
+    entropy_save(entropy_screen_is_replay());
+    audio_stop();
+    log_dump();
+
+    struct SceKernelLoadExecParam param;
+    memset(&param, 0, sizeof(param));
+    param.size = sizeof(param);
+    param.args = strlen(path) + 1;
+    param.argp = path;
+    param.key = "game";
+    int rc = sceKernelLoadExec(path, &param);
+    /* Only reached when the firmware refused it. */
+    logline("launch: refused %08x", rc);
+    shell_status("the system would not start that package");
+}
+
 /* --------------------------------------------------------------- questions */
 
 /* Nothing that writes to the stick starts on one press any more. The shell
@@ -423,7 +463,7 @@ int main(void) {
     int refreshing = 0;                 /* SELECT, with the list already up */
     char keep[96] = "";                 /* the entry to come back to after one */
     int automatic = -1;
-    int info = 0;                       /* the info panel, over the dimmed list */
+    int info = 0, action = 0;           /* the info band and the row X takes */
     unsigned shell_since = now_ms();
     int shot_connecting = 0;
     unsigned dumped_ms = now_ms();
@@ -540,7 +580,8 @@ int main(void) {
         lattice_stir((pad.Lx - 128) / 127.0f, (pad.Ly - 128) / 127.0f);
         unsigned pressed = pad.Buttons & ~last_buttons;
         last_buttons = pad.Buttons;
-        pressed |= repeat(pad.Buttons & (PSP_CTRL_UP | PSP_CTRL_DOWN));
+        pressed |= repeat(pad.Buttons & (PSP_CTRL_UP | PSP_CTRL_DOWN |
+                                         PSP_CTRL_LTRIGGER | PSP_CTRL_RTRIGGER));
         if (synced) pressed |= keys_pressed();
         /* Everything below counts in rows of the shell's view -- the
            catalog filtered to the active tab -- and there are none of those
@@ -595,19 +636,46 @@ int main(void) {
                 else { install_app(index, 0); dump_diagnostics(); }
             }
         } else if (info) {
-            if (pressed & (PSP_CTRL_START | PSP_CTRL_CIRCLE))
-                shell_info(info = 0);
+            if (pressed & PSP_CTRL_DOWN)
+                shell_info(1, action = (action + 1) % SHELL_INFO_ACTIONS);
+            if (pressed & PSP_CTRL_UP)
+                shell_info(1, action = (action + SHELL_INFO_ACTIONS - 1) %
+                                       SHELL_INFO_ACTIONS);
+            if (pressed & (PSP_CTRL_SELECT | PSP_CTRL_CIRCLE))
+                shell_info(info = 0, action);
             else if (pressed & PSP_CTRL_CROSS) {
-                /* The band's one action. The field drains and is swept
-                   again, and the browser comes back without the band. */
-                shell_info(info = 0);
-                entropy_forget();
-                entropy_init();
-                entropy_screen_run();
-                entropy_save(entropy_screen_is_replay());
+                shell_info(info = 0, action);
+                if (action == 0 && synced) {
+                    /* The catalog is fetched again from where the browser
+                       stands: the list gives way to the word and the status
+                       line, and comes back with whatever is now published,
+                       the cursor on the package it was on if that package is
+                       still there. The sync thread and the media thread share
+                       the one HTTPS stack and the one asset buffer, so the
+                       media thread steps aside for the length of it, as it
+                       does for an install. */
+                    int at = shell_view_index(cursor);
+                    snprintf(keep, sizeof(keep), "%s", at >= 0 ? catalog.apps[at].id : "");
+                    preview_quiesce();
+                    shell_word("Refreshing");
+                    if (sync_start(&catalog) == 0) {
+                        synced = 0;
+                        refreshing = 1;
+                    } else {
+                        keep[0] = '\0';
+                        preview_resume();
+                    }
+                } else if (action == 1) {
+                    /* The field drains and is swept again, in the room the
+                       browser was already standing in. */
+                    entropy_forget();
+                    entropy_init();
+                    entropy_screen_run();
+                    entropy_save(entropy_screen_is_replay());
+                }
             }
-        } else if (pressed & PSP_CTRL_START) {
-            shell_info(info = 1);
+        } else if (pressed & PSP_CTRL_SELECT) {
+            shell_info(info = 1, action);
         } else if (count > 0) {
             int at = shell_view_index(cursor);
             if ((pressed & PSP_CTRL_CROSS) && at >= 0) {
@@ -619,30 +687,14 @@ int main(void) {
             if ((pressed & PSP_CTRL_SQUARE) && at >= 0 &&
                 catalog.apps[at].state != APP_NOT_INSTALLED)
                 ask_remove(at);
+            if ((pressed & PSP_CTRL_START) && at >= 0 &&
+                catalog.apps[at].state != APP_NOT_INSTALLED)
+                launch_app(at);
         } else if ((pressed & PSP_CTRL_CROSS) && sync_state() == SYNC_FAILED) {
             /* Once more from the top: the wait comes back with its word,
                and the frames below carry on as they did the first time. */
             shell_word("Connecting");
             if (sync_start(&catalog) == 0) synced = 0;
-        }
-        if ((pressed & PSP_CTRL_SELECT) && synced) {
-            /* The catalog is fetched again from where the browser stands:
-               the list gives way to the word and the status line, and comes
-               back with whatever is now published. The sync thread and the
-               media thread share the one HTTPS stack and the one asset
-               buffer, so the media thread steps aside for the length of it,
-               as it does for an install. */
-            int at = shell_view_index(cursor);
-            snprintf(keep, sizeof(keep), "%s", at >= 0 ? catalog.apps[at].id : "");
-            preview_quiesce();
-            shell_word("Refreshing");
-            if (sync_start(&catalog) == 0) {
-                synced = 0;
-                refreshing = 1;
-            } else {
-                keep[0] = '\0';
-                preview_resume();
-            }
         }
 
         unsigned tick0 = now_us();
