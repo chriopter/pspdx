@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/chriopter/pspdx/blob/master/schema/v1.pspdx",
+  "title": ".pspdx",
+  "description": "What a PSP homebrew repository says about itself to PSPDX. The version, the date, the package and its size come from the latest release; the id from the repository; the pictures and the sound from the media directory or, failing that, out of the EBOOT.",
+  "type": "object",
+  "required": ["schema", "name", "category"],
+  "additionalProperties": false,
+  "properties": {
+    "schema":   { "const": "https://github.com/chriopter/pspdx/blob/master/schema/v1.pspdx" },
+    "name":     { "type": "string", "minLength": 1, "maxLength": 39,
+                  "description": "what the list shows" },
+    "summary":  { "type": "string", "maxLength": 60,
+                  "description": "one line; the repository's description otherwise" },
+    "category": { "enum": ["games", "emulators", "apps", "plugins", "demos"] },
+    "license":  { "type": "string", "maxLength": 15,
+                  "description": "an SPDX identifier; what GitHub reports otherwise" },
+    "author":   { "type": "string", "maxLength": 39,
+                  "description": "a name; the repository's owner otherwise" },
+    "media":    { "$ref": "#/$defs/path",
+                  "description": "a directory holding ICON0.PNG (144x80), PIC1.PNG (480x272), ICON1.PMF (144x80 PSMF) and SND0.AT3 (ATRAC3), matched without regard to case; the repository root otherwise; the EBOOT for whatever is missing" },
+    "release":  { "type": "string", "pattern": "^\\S+$",
+                  "description": "a tag to pin; the latest release that is not a pre-release otherwise" },
+    "asset":    { "type": "string",
+                  "description": "a glob naming the zip when a release carries more than one" },
+    "install": {
+      "type": "object", "additionalProperties": false,
+      "description": "only when the zip is not one directory with the EBOOT in it",
+      "properties": {
+        "root": { "$ref": "#/$defs/path",
+                  "description": "the directory inside the zip that is the package; the shallowest EBOOT.PBP's otherwise" },
+        "dir":  { "type": "string", "pattern": "^[A-Za-z0-9_.-]{1,32}$",
+                  "description": "its name under PSP/GAME/; the zip's own otherwise" }
+      }
+    }
+  },
+  "$defs": {
+    "path": { "type": "string", "pattern": "^[^/\\\\][^\\0]*$",
+              "description": "relative to the repository root, on the default branch" }
+  }
+}
