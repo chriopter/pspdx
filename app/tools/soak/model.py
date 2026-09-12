@@ -14,8 +14,11 @@ install and every fetch succeeds, because a failure is what the harness is
 looking for and a model that predicted failures would have nothing to catch.
 
 Where main.c and shell.c are mirrored line for line the comment says so.
-Where the code left a choice open, the comment says THE CODE IS AMBIGUOUS and
-run.py's report repeats it.
+Three things a script can press are refused here rather than modelled,
+because the client would leave the loop and never come back to the script:
+Run (sceKernelLoadExec ends the program), the two typing rows of the info
+band (the firmware keyboard owns the pad) and the entropy sweep (it reads
+the pad itself, and a script's keys are never seen by it).
 """
 
 import importlib.machinery
@@ -35,19 +38,53 @@ REPO = os.path.abspath(os.path.join(HERE, "..", "..", ".."))
 KEYS = ("up", "down", "left", "right", "cross", "circle", "square",
         "triangle", "select", "ltrigger", "rtrigger", "shot")
 
+# ------------------------------------------------------------------ timing
+
+# What the loop is away for, and therefore how long a script has to leave
+# before its next key. The planners wait exactly these and the model counts
+# the idle clock from them, so they live here and nowhere else.
+#
+# The mock packages are 85 KB, but every install is a fresh handshake, a
+# download, a hash, an unpack and two renames, and a key that lands inside
+# that window comes out the other side ORed with whatever else queued up.
+# Measured on this rig at well under two seconds; the margin is deliberate
+# and cheap.
+INSTALL_MS = 2600
+REMOVE_MS = 900
+# The whole catalog again, and keys_pressed() is not even consulted until it
+# lands.
+REFRESH_MS = 9000
+
+# main.c: ten seconds without a key and the shell fades; the first key after
+# that only lifts the veil and is otherwise swallowed. Scripted keys count as
+# keys, the stick does not, and the clock starts again whenever the loop has
+# been away (an install, a refetch, a settled screenshot).
+IDLE_MS = 10000
+
 # -------------------------------------------------------------------- tabs
 
-# shell.c: TAB_NAME / TAB_KEY, and the two tabs that are not categories.
+# shell.c: TAB_NAME / TAB_KEY, and the three tabs that are not categories.
 TAB_KEY = ("", "games", "demos", "apps", "emulators", "plugins")
 TAB_ALL = 6
-TAB_UPDATES = -2
+TAB_GEAR = -3                   # the band about the session; always leftmost
+TAB_STICK = -2                  # what is installed, updates first
 TAB_BASKET = -1
 ROW_ACTION = -2
 
 NOT_INSTALLED, CURRENT, UPDATE = "none", "current", "update"
 
-# main.c: enum choice
-CHOICE_UPDATE, CHOICE_REINSTALL, CHOICE_DELETE = 0, 1, 2
+# catalog.h: the one package the client will not delete, because it is the
+# one running.
+PSPDX_SELF_ID = "io.github.chriopter.pspdx"
+
+# main.c: enum choice, the five rows of the options menu in the order drawn.
+(CHOICE_RUN, CHOICE_REINSTALL, CHOICE_DELETE, CHOICE_BASKET,
+ CHOICE_DETAILS) = range(5)
+CHOICE_COUNT = 5
+
+# shell.h: SHELL_INFO_ACTIONS, the rows at the foot of the info band.
+INFO_REFRESH, INFO_ADD_SOURCE, INFO_FROM_GITHUB, INFO_SWEEP = range(4)
+INFO_ACTIONS = 4
 
 # --------------------------------------------------------------- the world
 
@@ -152,8 +189,6 @@ class Sim:
     passed into a single frame's `pressed` and two buttons in one frame is
     not a thing a hand does."""
 
-    # How long the client is away from the input loop for one install. Only
-    # the script writer uses this; the model itself has no clock.
     def __init__(self, world):
         self.apps = [App(a.index, a.id, a.name, a.category, a.rev, a.version,
                          a.size, a.dir) for a in world["apps"]]
@@ -176,15 +211,23 @@ class Sim:
         self.menu_open = False
         self.menu_cursor = 0
         self.menu_of = -1
-        self.menu_on = [0, 0, 0]
-        self.info = False
+        self.menu_on = [0] * CHOICE_COUNT
+        self.info = False               # the band, open while the gear tab is
         self.info_action = 0
+        self.details = False            # the band about one package
 
         self.installs = 0               # how many install_app() calls happened
         self.events = []                # ("install"|"remove"|"refresh", t, id)
         self.shots = 0
+        self.swallowed = []             # (t, key) that only lifted the veil
         self.refresh_pending_at = None
         self.keep = ""
+
+        # main.c: idle_since is set when the catalog comes up (count was 0
+        # until then, which resets it every frame), which is the script's
+        # own zero.
+        self.last_key_t = 0
+        self.hidden = False
 
         # main.c after sync_done(): cursor 0, then the view built afresh.
         self.cursor = 0
@@ -196,13 +239,19 @@ class Sim:
         return sum(1 for a in self.apps if a.state == UPDATE)
 
     def collect_tabs(self, keep):
+        """shell.c collect_tabs(): the gear first and always, the stick while
+        anything is installed, the basket while anything is in it, then the
+        categories that have something. A tab that has gone is answered with
+        All, not with whatever stands leftmost -- that is the band about the
+        session and not a list at all."""
         found = False
         self.tabs = []
         self.tab_at = 0
         if not self.apps:
             return False
-        if self.updates_waiting() > 0:
-            self.tabs.append(TAB_UPDATES)
+        self.tabs.append(TAB_GEAR)
+        if any(a.state != NOT_INSTALLED for a in self.apps):
+            self.tabs.append(TAB_STICK)
         if self.basket:
             self.tabs.append(TAB_BASKET)
         for t in range(TAB_ALL):
@@ -215,24 +264,41 @@ class Sim:
             if tab == keep:
                 self.tab_at = i
                 found = True
+        if not found:
+            for i, tab in enumerate(self.tabs):
+                if tab == 0:
+                    self.tab_at = i
         return found
 
     def build_view(self):
+        """shell.c build_view(): the stick lists what is installed with the
+        updates first, in catalog order within each half; under the gear the
+        list stays whole beneath the band; the basket is the basket. The
+        action row stands on the basket, and on the stick only while an
+        update waits."""
         tab = self.tabs[self.tab_at] if self.tabs else 0
         self.view = []
         self.view_action = 0
         if not self.apps or not self.tabs:
             return
         for i, a in enumerate(self.apps):
-            if tab == TAB_UPDATES:
-                take = a.state == UPDATE
+            if tab == TAB_STICK:
+                take = a.state != NOT_INSTALLED
+            elif tab == TAB_GEAR:
+                take = True
             elif tab == TAB_BASKET:
                 take = i in self.basket
             else:
                 take = (not TAB_KEY[tab]) or a.category == TAB_KEY[tab]
             if take:
                 self.view.append(i)
-        self.view_action = 1 if tab < 0 else 0
+        if tab == TAB_STICK:
+            waiting = [i for i in self.view if self.apps[i].state == UPDATE]
+            rest = [i for i in self.view if self.apps[i].state != UPDATE]
+            self.view = waiting + rest
+        self.view_action = 1 if (tab == TAB_BASKET or
+                                 (tab == TAB_STICK and
+                                  self.updates_waiting() > 0)) else 0
 
     def view_rebuild(self):
         was = self.tabs[self.tab_at] if self.tabs else 0
@@ -262,16 +328,22 @@ class Sim:
         return -1
 
     def tab_kind(self):
-        tab = self.tabs[self.tab_at] if self.tabs else 0
-        return tab
+        """The active tab as shell.c numbers it: a category index at or
+        above zero, or one of TAB_GEAR / TAB_STICK / TAB_BASKET."""
+        return self.tabs[self.tab_at] if self.tabs else 0
 
     def action_plan(self):
+        """shell_action_plan(): on the stick the job is the updates alone
+        and what is merely installed is not counted at all, not even as
+        skipped."""
         plan = {"apps": 0, "again": 0, "skipped": 0, "bytes": 0, "updates": 0}
         if not self.view_action:
             return plan
-        plan["updates"] = 1 if self.tabs[self.tab_at] == TAB_UPDATES else 0
+        plan["updates"] = 1 if self.tab_kind() == TAB_STICK else 0
         for at in self.view:
             a = self.apps[at]
+            if plan["updates"] and a.state != UPDATE:
+                continue
             if not a.has_release or not a.size:
                 plan["skipped"] += 1
                 continue
@@ -301,6 +373,14 @@ class Sim:
         elif self.cursor >= count:
             self.cursor = count - 1 if count > 0 else 0
 
+    def away(self, t, ms):
+        """The loop gone for a while: main.c notices a frame that took more
+        than 300 ms and starts the idle clock again when it is back, so the
+        ten seconds count from the end of the wait and not from the key
+        that started it. The wait is the planner's, which is the only clock
+        this model has for it."""
+        self.last_key_t = max(self.last_key_t, t + ms)
+
     def install_app(self, index, t):
         """install_app() with rc 0. A failure is what the rig is for."""
         a = self.apps[index]
@@ -314,6 +394,7 @@ class Sim:
         self.dirs.add(a.dir)
         self.installs += 1
         self.events.append(("install", t, a.id))
+        self.away(t, INSTALL_MS)
 
     def uninstall_app(self, index, t):
         a = self.apps[index]
@@ -323,12 +404,14 @@ class Sim:
         self.db.pop(a.id, None)
         self.dirs.discard(a.dir)
         self.events.append(("remove", t, a.id))
+        self.away(t, REMOVE_MS)
 
     def install_all(self, t):
         """main.c install_all(): the rows are read into a list before the
-        first fetch, because an install moves the entry out of the updates
-        view under a loop still walking it."""
+        first fetch, because an install moves the entry's state under a loop
+        still walking the view. On the stick only the updates are taken."""
         picked = []
+        on_stick = self.tab_kind() == TAB_STICK
         for row in range(self.view_count()):
             at = self.view_index(row)
             if at < 0:
@@ -336,10 +419,13 @@ class Sim:
             a = self.apps[at]
             if not a.has_release or not a.size:
                 continue
+            if on_stick and a.state != UPDATE:
+                continue
             picked.append(at)
         for at in picked:
             self.install_app(at, t)
             self.basket.discard(at)     # shell_basket_forget on success
+        self.away(t, len(picked) * INSTALL_MS)
         return len(picked)
 
     def ask_install(self, index):
@@ -348,6 +434,8 @@ class Sim:
 
     def ask_remove(self, index):
         a = self.apps[index]
+        if a.id == PSPDX_SELF_ID:
+            return                      # "PSPDX cannot remove itself"
         record = self.db.get(a.id)
         if not record or not record["dir"]:
             return                      # shell_status, and no question
@@ -360,22 +448,38 @@ class Sim:
         self.question = "all"
         self.question_of = -1
 
+    def basket_toggle(self, index):
+        if index in self.basket:
+            self.basket.discard(index)
+        else:
+            self.basket.add(index)
+
     def menu_open_for(self, index):
+        """main.c menu_open(): five rows, the same five for every package;
+        what a row cannot do it says by being grey. The cursor starts on Run
+        for anything installed and on the basket row otherwise."""
         a = self.apps[index]
-        update = a.state == UPDATE
-        self.menu_on = [1 if update else 0, 0 if update else 1, 1]
-        self.menu_cursor = CHOICE_UPDATE if update else CHOICE_REINSTALL
+        installed = a.state != NOT_INSTALLED
+        self.menu_on = [1 if installed else 0,
+                        1 if installed else 0,
+                        1 if installed and a.id != PSPDX_SELF_ID else 0,
+                        1, 1]
+        self.menu_cursor = CHOICE_RUN if installed else CHOICE_BASKET
         self.menu_of = index
         self.menu_open = True
 
     def menu_move(self, by):
-        for _ in range(3):
-            self.menu_cursor = (self.menu_cursor + by + 3) % 3
+        """A greyed row is stepped over rather than landed on."""
+        for _ in range(CHOICE_COUNT):
+            self.menu_cursor = (self.menu_cursor + by + CHOICE_COUNT) % CHOICE_COUNT
             if self.menu_on[self.menu_cursor]:
                 break
 
     def refresh_start(self, t):
-        """SELECT -> fetch again. sync_start() is called and `synced` goes to
+        """X on the band's first row -> fetch again. By then main.c has
+        already stepped off the gear tab onto the one after it, so the
+        package to come back to is row 0 of *that* tab -- or nothing, when
+        row 0 is an action row. sync_start() is called and `synced` goes to
         zero, which stops keys_pressed() from being consulted at all: every
         scripted key whose moment passes while the catalog is being fetched
         is ORed into one frame when it comes back. The scripts this harness
@@ -384,6 +488,7 @@ class Sim:
         self.keep = self.apps[at].id if at >= 0 else ""
         self.refresh_pending_at = t
         self.events.append(("refresh", t, self.keep))
+        self.away(t, REFRESH_MS)
 
     def refresh_finish(self):
         """The second sync coming back: the catalog is parsed again from what
@@ -413,6 +518,13 @@ class Sim:
 
     # ------------------------------------------------------------ input
 
+    def nothing_open(self):
+        """True when the key would reach the list itself: no question, no
+        menu, no details band and not standing on the gear tab. These are
+        also the only conditions under which the idle veil can come down."""
+        return (self.question is None and not self.menu_open and
+                not self.details and not self.info)
+
     def press(self, key, t=0, refresh_ms=8000):
         if self.refresh_pending_at is not None:
             if t - self.refresh_pending_at < refresh_ms:
@@ -422,18 +534,37 @@ class Sim:
                     "others" % (key, t, self.refresh_pending_at))
             self.refresh_finish()
 
+        # main.c: the veil comes down after ten seconds with nothing standing
+        # over the browser, and the first key after that lifts it and does
+        # nothing else. A scripted shot is the exception in both directions:
+        # it neither lifts the veil nor is swallowed, so the veil is a flag
+        # and not a comparison -- it stays down across a shot. Either way
+        # the key resets the clock.
+        if self.nothing_open() and t - self.last_key_t > IDLE_MS:
+            self.hidden = True
+        self.last_key_t = t
+        if self.hidden and key != "shot":
+            self.hidden = False
+            self.swallowed.append((t, key))
+            return
+
         count = self.view_count() if self.apps else 0
 
-        # The triggers and left/right walk the tabs. main.c does this above
-        # the modal test, so a question standing on screen does not stop
-        # them -- see the report: THE CODE IS AMBIGUOUS about whether that
-        # is meant. No script here presses them while something is open.
-        if key in ("ltrigger", "rtrigger", "left", "right") and count > 0:
+        # main.c: modal is a question, the menu or the details band; the
+        # info band is not among them, so the tabs still walk under it.
+        modal = self.question is not None or self.menu_open or self.details
+
+        # The triggers and left/right walk the tabs, and the list starts
+        # again at the top. Walking onto the gear tab opens the band with
+        # its cursor on the first action; walking off it closes it.
+        if key in ("ltrigger", "rtrigger", "left", "right") and count > 0 and not modal:
             self.tab_move(1 if key in ("rtrigger", "right") else -1)
             self.cursor = 0
             count = self.view_count()
+            self.info = self.tab_kind() == TAB_GEAR
+            self.info_action = 0
 
-        modal = self.question is not None or self.menu_open or self.info
+        modal = modal or self.info
         if key == "down" and count > 0 and not modal:
             self.cursor = (self.cursor + 1) % count
         if key == "up" and count > 0 and not modal:
@@ -455,54 +586,92 @@ class Sim:
             elif key == "circle":
                 self.question = None
         elif self.menu_open:
-            if key == "down":
+            # The keys the menu names work from inside it too: square does
+            # its row's thing and takes the menu with it, START would too.
+            index = self.menu_of
+            if key == "square":
+                self.menu_open = False
+                self.basket_toggle(index)
+                self.view_settled()
+            elif key == "start" and self.apps[index].state != NOT_INSTALLED:
+                raise ValueError("START in the menu at %d launches %s: a "
+                                 "script must never" % (t, self.apps[index].id))
+            if not self.menu_open:
+                pass
+            elif key == "down":
                 self.menu_move(1)
-            if key == "up":
+            elif key == "up":
                 self.menu_move(-1)
-            if key == "circle":
+            elif key == "circle":
                 self.menu_open = False
             elif key == "cross":
-                chosen, index = self.menu_cursor, self.menu_of
+                chosen = self.menu_cursor
                 self.menu_open = False
                 if chosen == CHOICE_DELETE:
                     self.ask_remove(index)
+                elif chosen == CHOICE_RUN:
+                    raise ValueError("X on Run at %d launches %s: a script "
+                                     "must never" % (t, self.apps[index].id))
+                elif chosen == CHOICE_BASKET:
+                    self.basket_toggle(index)
+                    self.view_settled()
+                elif chosen == CHOICE_DETAILS:
+                    self.details = True
                 else:
                     self.install_app(index, t)
                     self.view_settled()
         elif self.info:
             if key == "down":
-                self.info_action = (self.info_action + 1) % 2
+                self.info_action = (self.info_action + 1) % INFO_ACTIONS
             if key == "up":
-                self.info_action = (self.info_action + 1) % 2
-            if key in ("select", "circle"):
+                self.info_action = (self.info_action + INFO_ACTIONS - 1) % INFO_ACTIONS
+            # O steps off the band's tab onto the one after it, and so does
+            # taking any of the band's actions.
+            if key in ("circle", "cross"):
                 self.info = False
-            elif key == "cross":
-                self.info = False
-                if self.info_action == 0:
+                self.tab_move(1)
+                self.cursor = 0
+                count = self.view_count()
+            if key == "cross":
+                action = self.info_action
+                if action == INFO_REFRESH:
                     self.refresh_start(t)
-                # action 1 sweeps the entropy field again: it changes
-                # nothing this model predicts, and the scripts avoid it
-                # because the sweep takes the loop away for seconds.
-        elif key == "select":
-            self.info = True
+                elif action in (INFO_ADD_SOURCE, INFO_FROM_GITHUB):
+                    # osk_read(): the firmware keyboard takes the pad and
+                    # the script's keys go nowhere until it is dismissed by
+                    # a hand. There is no modelling that.
+                    raise ValueError("X on info action %d at %d opens the "
+                                     "keyboard: a script cannot type" % (action, t))
+                else:
+                    # entropy_screen_run() reads the pad itself: the keys
+                    # the script has left are never seen by it, and the
+                    # sweep waits for a stick that nobody is moving.
+                    raise ValueError("X on the sweep at %d takes the pad away "
+                                     "from the script" % t)
+        elif self.details:
+            if key == "circle":
+                self.details = False
         elif count > 0:
             at = self.view_index(self.cursor)
             if key == "cross":
+                # X is the one thing there is to do to the package: have it,
+                # or have the newer one. With nothing of that to do it opens
+                # the options, as triangle does.
                 if at == ROW_ACTION:
                     self.ask_all()
-                elif at >= 0 and self.apps[at].state == NOT_INSTALLED:
+                elif at >= 0 and self.apps[at].state in (NOT_INSTALLED, UPDATE):
                     self.ask_install(at)
                 elif at >= 0:
                     self.menu_open_for(at)
             if key == "triangle" and at >= 0:
-                if at in self.basket:
-                    self.basket.discard(at)
-                else:
-                    self.basket.add(at)
+                self.menu_open_for(at)
+            if key == "square" and at >= 0:
+                self.basket_toggle(at)
                 self.view_settled()
-            if key == "square" and at >= 0 and self.apps[at].state != NOT_INSTALLED:
-                self.ask_remove(at)
-            # START is never scripted: it would hand the PSP to the package.
+            if key == "start" and at >= 0 and self.apps[at].state != NOT_INSTALLED:
+                raise ValueError("START at %d launches %s: a script must never"
+                                 % (t, self.apps[at].id))
+            # SELECT does nothing on the browser any more.
 
     # ----------------------------------------------------------- result
 
@@ -518,6 +687,7 @@ class Sim:
             "installs": self.installs,
             "shots": self.shots,
             "events": list(self.events),
+            "swallowed": list(self.swallowed),
         }
 
 

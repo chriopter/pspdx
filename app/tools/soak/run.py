@@ -360,11 +360,14 @@ def check(result, tail, pred, records, dirs, ms, began_at, ended_at, keys, world
     # this line says both that the fetch worked and that the EBOOT on the
     # stick was the one built for the host. A run without it read somebody
     # else's catalog, or none.
+    # The line is "catalog: N of M sources, X apps, Y usable" now that the
+    # catalog comes through sources.txt; the sources are the rig's own and
+    # not what is being judged, so only the tail is held.
     count = len(world["apps"])
-    want = "catalog: %d apps, %d usable" % (count, count)
-    if want not in lines:
+    want = "%d apps, %d usable" % (count, count)
+    if not any(t.startswith("catalog:") and t.endswith(want) for t in lines):
         got = [t for t in lines if t.startswith("catalog:")]
-        fails.append("a: no %r in the log -- saw %r" % (want, got[:2]))
+        fails.append("a: no 'catalog: ... %s' in the log -- saw %r" % (want, got[:2]))
 
     for text in lines:
         for bad in BAD:

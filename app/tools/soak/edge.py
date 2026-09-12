@@ -52,21 +52,22 @@ sys.path.insert(0, HERE)
 
 import model                                            # noqa: E402
 import scenarios                                        # noqa: E402
-from model import (TAB_UPDATES, TAB_BASKET, NOT_INSTALLED,  # noqa: E402
-                   CURRENT, UPDATE)
+from model import (TAB_GEAR, TAB_STICK, TAB_BASKET, NOT_INSTALLED,  # noqa: E402
+                   CURRENT, UPDATE, INSTALL_MS, REMOVE_MS)
 
-# shell.c's tab values: 0 is All, 1 to 5 the categories, and the two that come
-# and go are negative. model.TAB_ALL is the *count* of category tabs and not
-# one of them, which is worth naming once here rather than tripping over.
+# shell.c's tab values: 0 is All, 1 to 5 the categories, and the three that
+# are not categories are negative. model.TAB_ALL is the *count* of category
+# tabs and not one of them, which is worth naming once here rather than
+# tripping over.
 TAB_EVERYTHING = 0
 
 GAP_NAV = scenarios.GAP_NAV
 GAP_ACT = scenarios.GAP_ACT
-INSTALL_MS = scenarios.INSTALL_MS
-REMOVE_MS = scenarios.REMOVE_MS
 # Longer than the soak's: a refetch that runs past the wait puts the next
 # key inside the window, where the client ORs it with the ones after it and
-# a script stops meaning what it says.
+# a script stops meaning what it says. The key after the wait is a circle
+# the planner adds on its own, so a refetch that was *quick* and let the
+# shell fade costs nothing either.
 REFRESH_MS = 12000
 
 # keys_load() reads 4 KB and keeps 256 lines. A script that goes past either
@@ -297,11 +298,12 @@ def done(p):
 
 
 def install_here(p):
-    """X, then X: the question or the menu, and then yes. Either way the
-    entry under the cursor gets fetched."""
-    p.key("cross", GAP_ACT)
-    p.key("cross", GAP_ACT)
-    p.wait(INSTALL_MS)
+    """The entry under the cursor fetched, by whichever keys its state
+    wants: X and yes, or the menu's Reinstall for one already current. The
+    planner reads the state off the model, because X twice on a current row
+    is X on Run."""
+    if not p.install_here():
+        raise SystemExit("edge: nothing to install under the cursor at %d" % p.t)
 
 
 def install_app(p, index):
@@ -313,15 +315,14 @@ def install_app(p, index):
 def remove_app(p, index):
     if not p.goto_app(index):
         raise SystemExit("edge: cannot reach app %d" % index)
-    p.key("square", GAP_ACT)
-    p.key("cross", GAP_ACT)
-    p.wait(REMOVE_MS)
+    if not p.remove_here():
+        raise SystemExit("edge: app %d cannot be removed" % index)
 
 
 def refresh(p):
-    p.key("select", GAP_ACT)
-    p.key("cross", GAP_ACT)             # the first info row is "fetch again"
-    p.wait(REFRESH_MS)
+    """Over to the gear tab and "Update catalog"."""
+    if not p.refresh_here(REFRESH_MS):
+        raise SystemExit("edge: no gear tab to refresh from")
 
 
 def browse(p, steps, gap=GAP_NAV):
@@ -513,7 +514,7 @@ class Scenario:
 # per line and looks for any of these in it, so none of them may be a word as
 # broad as "failed" on its own: that would switch the check off.
 NET_NOISE = ["Install failed", "connect failed", "handshake failed",
-             "dns failed", "read error", "catalog: rc=", "cannot ",
+             "dns failed", "read error", "catalog unreachable", "cannot ",
              "png: rc=", "mp4: rc="]
 
 # And a scenario that hands the unpacker something that is not a package.
@@ -522,17 +523,24 @@ UNPACK_NOISE = ["Install failed", "unpack: refusing", "unpack: failed",
                 "two EBOOT.PBP", "zip: "]
 
 
-STORM_BUTTONS = ("cross", "circle", "triangle", "square", "select",
-                 "left", "right", "up", "down")
+# Every button that cannot, in any sequence, hand the console to another
+# EBOOT or the pad to the firmware keyboard. START is the launch key. Cross
+# and triangle are out with it: on an installed row either one opens the
+# options menu with the cursor on Run, and the next cross is Run -- and
+# from the gear tab, which left and right walk onto, cross on the second or
+# third band row opens the keyboard, which reads the pad itself. Circle,
+# square, SELECT and the four directions can open and close things, fill
+# the basket and walk every tab, and none of that leaves the loop.
+STORM_BUTTONS = ("circle", "square", "select", "left", "right", "up", "down")
 
 
 def storm_mixed(world):
     """Twenty seconds of a thumb going at fifty milliseconds, every button
-    that does not hand the console to another EBOOT.
+    that cannot end the run on its own or with the one after it.
 
-    START is left out on purpose and not by oversight: main.c's launch_app()
-    calls sceKernelLoadExec, which ends this program and this run. What a
-    storm can do to it is covered by storm-bands instead."""
+    START, cross and triangle are left out on purpose and not by oversight:
+    see STORM_BUTTONS. What a storm of X can do to the menu and the
+    question is covered by storm-bands and storm-confirm-band instead."""
     rng = random.Random(0x5701)
     program = [{"op": "wait", "ms": 500}]
     storm_ms = 0
@@ -554,11 +562,11 @@ def storm_mixed(world):
         return fails
     return Scenario(
         "storm-mixed-keys",
-        "twenty seconds of nine buttons at 40-60 ms, through the debugger",
-        # Four hundred random presses can land on the basket tab's action
-        # row with twenty things in the basket, and then the client is away
-        # fetching for a minute. The tail has to cover that or the storm
-        # would be judged on having been cut off.
+        "twenty seconds of seven buttons at 40-60 ms, through the debugger",
+        # Without cross nothing in the storm fetches, but square fills the
+        # basket and the storm can leave the shell anywhere; the tail is
+        # kept generous so the shot is judged on the shell and not on the
+        # clock.
         p.script, oracle, driver=program, extra_s=90)
 
 
@@ -582,25 +590,30 @@ def storm_confirm(world):
 
 def storm_bands(world):
     """The options menu and the info band, opened and closed thirty times
-    each. The menu is X on something installed; the band is SELECT. Neither
-    may fetch anything, and the catalog may not be asked for twice."""
+    each. The menu is triangle on something installed and circle shuts it;
+    the band is the gear tab, one step left of the stick tab, and circle
+    steps off it onto the stick tab again. Neither may fetch anything, and
+    the catalog may not be asked for twice."""
     index = pick(world, CURRENT)
     p = hand(world)
     if not p.goto_app(index):
         raise SystemExit("edge: cannot reach the row")
     for _ in range(30):
-        p.key("cross", 220)             # Update / Reinstall / Delete
+        p.key("triangle", 220)          # Run / Reinstall / Delete / ...
         p.key("circle", 220)
     for _ in range(30):
-        p.key("select", 220)            # the info band
-        p.key("select", 220)            # and closed again
+        if not p.goto_tab(TAB_GEAR):    # the info band
+            raise SystemExit("edge: no gear tab")
+        if not p.sim.info:
+            raise SystemExit("edge: the gear tab did not open the band")
+        p.key("circle", 220)            # and off it again
     done(p)
     script = model.parse_script(scenarios.render(p.script))
     base, _pred = model_oracle(world, script)
 
     def oracle(ctx, rep):
         fails = base(ctx, rep)
-        n = rep.count("catalog: 30 apps, 30 usable")
+        n = rep.count("30 apps, 30 usable")
         if n != 1:
             fails.append("the catalog was parsed %d times; hammering the "
                          "bands fetched something" % n)
@@ -612,7 +625,7 @@ def storm_bands(world):
 
 
 def storm_refresh(world):
-    """SELECT, fetch again, five times in a row."""
+    """The gear tab, "Update catalog", five times in a row."""
     p = hand(world)
     browse(p, 3)
     for _ in range(5):
@@ -622,7 +635,7 @@ def storm_refresh(world):
 
     def oracle(ctx, rep):
         fails = []
-        n = rep.count("catalog: 30 apps, 30 usable")
+        n = rep.count("30 apps, 30 usable")
         if n != 6:
             fails.append("the catalog was parsed %d times, expected 6 "
                          "(the first and five refetches)" % n)
@@ -641,20 +654,32 @@ def storm_refresh_basket(world):
     the fetch has just rewritten -- so the basket tab goes with it.
 
     The assertion is not "the basket looks empty", which is a thing on
-    screen: standing on the basket tab when the refetch lands, the cursor
-    comes back on the *updates* tab if the basket is gone and on the basket
-    tab if it is not. One step down and two X's then install one particular
-    package, and which one it is says which of the two happened."""
+    screen. Taking "Update catalog" steps off the gear tab onto the stick
+    tab, and the refetch lands there; one step right from it is then All
+    if the basket tab is gone and the basket tab if it is not. A walk down
+    All to a package the model chose, and X twice, install that one
+    package; on the basket tab the same presses land on one of the five
+    set aside, or on the action row and all five, and the stick says
+    which. Nothing on the basket tab is installed, so no press there can
+    be Run."""
     want = pick(world, NOT_INSTALLED, 5)
     p = hand(world)
     for index in want:
         if not p.goto_app(index, prefer_category=True):
             raise SystemExit("edge: cannot reach a basket row")
-        p.key("triangle", GAP_NAV)
+        if not p.basket_here():
+            raise SystemExit("edge: square did not fill the basket")
     if not p.goto_tab(TAB_BASKET) or not p.goto_row(1):
         raise SystemExit("edge: no basket tab")
     refresh(p)
-    p.key("down", GAP_NAV)
+    if p.sim.tab_kind() != TAB_STICK:
+        raise SystemExit("edge: the refetch did not land on the stick tab")
+    p.key("right", GAP_NAV)
+    if p.sim.tab_kind() != TAB_EVERYTHING:
+        raise SystemExit("edge: one right of the stick tab is not All")
+    target = pick(world, NOT_INSTALLED, skip=tuple(want))
+    if not p.goto_row(p.sim.view_row(target)):
+        raise SystemExit("edge: cannot reach the row after the refetch")
     install_here(p)
     done(p)
     oracle, pred = model_oracle(world, model.parse_script(scenarios.render(p.script)))
@@ -674,12 +699,10 @@ def bulk_basket_all(world):
     p.goto_tab(TAB_EVERYTHING)
     for row in range(len(world["apps"])):
         p.goto_row(row)
-        p.key("triangle", GAP_NAV)
+        p.basket_here()
     if not p.goto_tab(TAB_BASKET) or not p.goto_row(0):
         raise SystemExit("edge: no basket tab")
-    p.key("cross", GAP_ACT)             # "Install 30 apps?"
-    p.key("cross", GAP_ACT)
-    p.wait(len(world["apps"]) * INSTALL_MS)
+    install_here(p)                     # "Install 30 apps?"
     done(p)
     base, _pred = model_oracle(world, model.parse_script(scenarios.render(p.script)))
 
@@ -695,14 +718,16 @@ def bulk_basket_all(world):
 
 
 def bulk_update_all(world):
-    """The updates tab and its action row: every update waiting, at once."""
+    """The stick tab and its action row: every update waiting, at once. The
+    row is only there while something waits, and it takes the updates
+    alone -- what is merely installed stays as it is."""
     waiting = len(apps_where(world, state=UPDATE))
     p = hand(world)
-    if not p.goto_tab(TAB_UPDATES) or not p.goto_row(0):
-        raise SystemExit("edge: no updates tab")
-    p.key("cross", GAP_ACT)
-    p.key("cross", GAP_ACT)
-    p.wait(waiting * INSTALL_MS)
+    if not p.goto_tab(TAB_STICK) or not p.goto_row(0):
+        raise SystemExit("edge: no stick tab")
+    if p.sim.view_index(0) != model.ROW_ACTION:
+        raise SystemExit("edge: no Update all row on the stick tab")
+    install_here(p)                     # "Update N apps?"
     browse(p, 4)
     done(p)
     base, _pred = model_oracle(world, model.parse_script(scenarios.render(p.script)))
@@ -721,16 +746,15 @@ def bulk_update_all(world):
 
 def bulk_remove_all(world):
     """Every installed package off the stick, one at a time, down the All
-    tab: square, yes, square, yes."""
+    tab: triangle, down to Delete, X, yes, twenty times."""
     p = hand(world)
     p.goto_tab(TAB_EVERYTHING)
     for row, app in enumerate(world["apps"]):
         if app.state == NOT_INSTALLED:
             continue
         p.goto_row(row)
-        p.key("square", GAP_ACT)
-        p.key("cross", GAP_ACT)
-        p.wait(REMOVE_MS)
+        if not p.remove_here():
+            raise SystemExit("edge: row %d cannot be removed" % row)
     done(p)
     base, _pred = model_oracle(world, model.parse_script(scenarios.render(p.script)))
     installed = len([a for a in world["apps"] if a.state != NOT_INSTALLED])
@@ -753,43 +777,43 @@ def bulk_remove_all(world):
 
 
 def bulk_cycle(world):
-    """Everything installed, everything removed, everything installed again:
-    the long one, and the only scenario that sees a package installed over
-    its own remains twice."""
+    """The first fifteen installed, removed, and installed again: the long
+    one, and the only scenario that sees a package installed over its own
+    remains twice. Fifteen and not thirty because Delete lives in the menu
+    now and a removal is five keys, and thirty of everything would be three
+    hundred lines against keys_load()'s 256."""
     p = hand(world)
-    n = len(world["apps"])
+    n = 15
 
     def basket_everything():
         p.goto_tab(TAB_EVERYTHING)
         for row in range(n):
             p.goto_row(row)
-            p.key("triangle", GAP_NAV)
+            p.basket_here()
         if not p.goto_tab(TAB_BASKET) or not p.goto_row(0):
             raise SystemExit("edge: no basket tab")
-        p.key("cross", GAP_ACT)
-        p.key("cross", GAP_ACT)
-        p.wait(n * INSTALL_MS)
+        install_here(p)                 # "Install 15 apps?"
 
     basket_everything()
     p.goto_tab(TAB_EVERYTHING)
     for row in range(n):
         p.goto_row(row)
-        p.key("square", GAP_ACT)
-        p.key("cross", GAP_ACT)
-        p.wait(REMOVE_MS)
+        if not p.remove_here():
+            raise SystemExit("edge: row %d cannot be removed" % row)
     basket_everything()
     done(p)
     base, _pred = model_oracle(world, model.parse_script(scenarios.render(p.script)))
+    said = "%d of %d installed" % (n, n)
 
     def oracle(ctx, rep):
         fails = base(ctx, rep)
-        if rep.count("30 of 30 installed") != 2:
-            fails.append("expected two '30 of 30 installed' lines, saw %d"
-                         % rep.count("30 of 30 installed"))
+        if rep.count(said) != 2:
+            fails.append("expected two '%s' lines, saw %d"
+                         % (said, rep.count(said)))
         return fails
     return Scenario(
         "bulk-install-remove-install",
-        "thirty installed, thirty removed, thirty installed again",
+        "fifteen installed, fifteen removed, fifteen installed again",
         p.script, oracle, extra_s=60)
 
 
@@ -916,7 +940,7 @@ def net_bad_sha(world):
 
     def oracle(ctx, rep):
         fails = []
-        if not rep.has("catalog: 30 apps, 30 usable"):
+        if not rep.has("30 apps, 30 usable"):
             fails.append("the entry with the wrong hash was dropped from the "
                          "catalog instead of failing its download")
         if not rep.has("sha256 MISMATCH"):
@@ -970,10 +994,16 @@ def net_stall_resume(world):
 def net_offline_start(world):
     """Nothing listening when the client starts: Offline, X to try again,
     and the catalog when the server comes back. The key script's clock
-    starts at the *failed* sync, which is when the client loads it."""
+    starts at the *failed* sync, which is when the client loads it.
+
+    Each X is followed by a circle, because the X's that come after the
+    catalog has arrived land on row 0 of All, which is an installed package:
+    X there is the options menu on Run, and a second X would be Run. Circle
+    closes whatever the X opened, and does nothing on the Offline screen."""
     p = hand(world)
     for _ in range(5):                  # X on the offline screen
         p.key("cross", 6000)
+        p.key("circle", 500)
     p.wait(6000)
     browse(p, 5)
     done(p)
@@ -983,10 +1013,12 @@ def net_offline_start(world):
 
     def oracle(ctx, rep):
         fails = []
-        if rep.count("catalog: rc=") < 2:
+        # A fetch that came back with nothing is "catalog: 0 of 1 sources"
+        # now that the catalog is read through sources.txt.
+        if rep.count("catalog: 0 of") < 2:
             fails.append("expected at least two failed fetches, saw %d"
-                         % rep.count("catalog: rc="))
-        if not rep.has("catalog: 30 apps, 30 usable"):
+                         % rep.count("catalog: 0 of"))
+        if not rep.has("30 apps, 30 usable"):
             fails.append("the catalog never arrived after the server came back")
         if not os.path.exists(os.path.join(rep.ms, "PSPDX.BMP")):
             fails.append("no PSPDX.BMP: the Offline screen was never drawn")
@@ -994,10 +1026,9 @@ def net_offline_start(world):
     return Scenario(
         "net-offline-at-start",
         "the server down at boot, X to retry, then the catalog arrives",
-        # Once the catalog does arrive the crosses that are left land on the
-        # updates tab's action row, which is ten packages: the tail has to
-        # cover that, and it is as good a proof as any that the client came
-        # all the way back.
+        # Once the catalog does arrive the crosses that are left open and
+        # close the menu on row 0; the browsing after that is the proof
+        # that the client came all the way back.
         p.script, oracle, plant=[plant], extra_s=45,
         timeline=[(30, lambda ctx: server(ctx, True))],
         expect=NET_NOISE)
@@ -1005,10 +1036,13 @@ def net_offline_start(world):
 
 def net_catalog_truncated(world):
     """The catalog itself cut off mid-body. Nothing is parsed from half a
-    JSON document, and the retry after the fault is lifted must work."""
+    JSON document, and the retry after the fault is lifted must work. The
+    circle after each X is for the same reason as in net_offline_start:
+    row 0 of All is installed, and X twice there would be Run."""
     p = hand(world)
     for _ in range(4):
         p.key("cross", 8000)
+        p.key("circle", 500)
     p.wait(4000)
     browse(p, 5)
     done(p)
@@ -1018,9 +1052,10 @@ def net_catalog_truncated(world):
 
     def oracle(ctx, rep):
         fails = []
-        if not rep.has("catalog: rc=1"):
-            fails.append("a truncated catalog was not reported as truncated")
-        if rep.has("catalog: 30 apps") is False:
+        if not rep.has("catalog: 0 of"):
+            fails.append("a truncated catalog was not reported as a fetch "
+                         "that came back with nothing")
+        if rep.has("30 apps, 30 usable") is False:
             fails.append("the catalog never arrived after the fault was lifted")
         return fails
     return Scenario(
@@ -1346,7 +1381,7 @@ def catalog_bad_entries(world):
 
     def oracle(ctx, rep):
         fails = []
-        want = "catalog: 37 apps, 31 usable"
+        want = "37 apps, 31 usable"
         if not rep.has(want):
             got = [l for l in rep.lines if l.startswith("catalog:")]
             fails.append("expected %r, saw %r" % (want, got[:3]))
@@ -1418,7 +1453,7 @@ def catalog_hostile_strings(world):
 
     def oracle(ctx, rep):
         fails = []
-        want = "catalog: 34 apps, 34 usable"
+        want = "34 apps, 34 usable"
         if not rep.has(want):
             got = [l for l in rep.lines if l.startswith("catalog:")]
             fails.append("expected %r, saw %r" % (want, got[:3]))
@@ -1462,7 +1497,7 @@ def catalog_seventy(world):
 
     def oracle(ctx, rep):
         fails = []
-        want = "catalog: 70 apps, 64 usable"
+        want = "70 apps, 64 usable"
         if not rep.has(want):
             got = [l for l in rep.lines if l.startswith("catalog:")]
             fails.append("expected %r, saw %r" % (want, got[:3]))
@@ -1488,6 +1523,16 @@ def stick_broken_records(world):
     no_record = pick(world, CURRENT, skip=(garbage, truncated, no_dir))
     g, t, n, w = (world["apps"][i] for i in (garbage, truncated, no_dir, no_record))
     p = hand(world)
+    # The planner navigates by the model, and the model has to see the
+    # stick the way the client will: a record it cannot read is no record,
+    # so those three rows are offered as not installed, and X on them is
+    # the install question rather than the options menu.
+    for index in (garbage, truncated, no_record):
+        p.sim.apps[index].state = NOT_INSTALLED
+        p.sim.apps[index].local_rev = 0
+        p.sim.apps[index].local_version = ""
+        p.sim.db.pop(p.sim.apps[index].id, None)
+    p.sim.view_rebuild()
     install_app(p, garbage)             # offered as not installed: install it
     remove_app(p, no_dir)               # a record whose files are already gone
     install_app(p, no_record)           # a directory nothing remembers

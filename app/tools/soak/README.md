@@ -28,8 +28,8 @@ mkdir -p app/wolfssl-psp && cp -r ../pspdx/app/wolfssl-psp/prefix app/wolfssl-ps
 
 | | |
 |---|---|
-| `scenarios.py` | the customers: nine weighted profiles, seeded, so run 47 of seed 1 is always the same person |
-| `model.py` | `main.c`'s input loop and `shell.c`'s view again in Python: what the cursor does, what the tabs do, and which records the run should leave |
+| `scenarios.py` | the customers: eight weighted profiles and a mix of them, seeded, so run 47 of seed 1 is always the same person |
+| `model.py` | `main.c`'s input loop and `shell.c`'s view again in Python: what the cursor does, what the tabs and the menu do, when the idle veil swallows a key, and which records the run should leave |
 | `run.py` | plants the state, writes the keys, runs the rig, reads the log while it is being written, and checks five things |
 | `edge.py` | the thirty edge cases: what to plant, which keys, and the oracle for each |
 | `rig.sh` | the parts that want `tools/localcat/common.sh`: the throwaway CA, the two builds, the mock site and its server |
@@ -114,7 +114,7 @@ PPSSPP's debugger, because `PSPDX.KEYS` holds 256 lines in four kilobytes.
 
 | | what it does |
 |---|---|
-| `storm-mixed-keys` | 20 s of nine buttons 40–60 ms apart, through the debugger |
+| `storm-mixed-keys` | 20 s of seven buttons 40–60 ms apart, through the debugger (not X or triangle: on an installed row either opens the menu on Run, and the next X is Run) |
 | `storm-confirm-band` | the install question opened and cancelled thirty times |
 | `storm-bands` | the options menu and the info band, thirty open-and-close each |
 | `storm-refresh-five` | five catalog refetches back to back |
@@ -122,7 +122,7 @@ PPSSPP's debugger, because `PSPDX.KEYS` holds 256 lines in four kilobytes.
 | `bulk-basket-thirty` | all thirty in the basket, Download all |
 | `bulk-update-all` | every update waiting, in one press |
 | `bulk-remove-twenty` | all twenty installed removed one at a time |
-| `bulk-install-remove-install` | thirty in, thirty out, thirty in again |
+| `bulk-install-remove-install` | fifteen in, fifteen out, fifteen in again (a removal is five keys through the menu, and the key file holds 256 lines) |
 | `net-server-killed` | the server stopped mid-run and started again |
 | `net-404-and-500` | a release that answers 404 and one that answers 500 |
 | `net-truncated-body` | a body cut short under its own Content-Length |
@@ -166,7 +166,7 @@ screenshots. The table at the end lists all thirty with their worst frame and
 their verdict.
 
 The first full campaign found one thing, and `storm-mixed-keys` found it:
-SELECT, down, X is the info band's second row, "sweep the field again", and
+SELECT, down, X was then the info band's second row, "sweep the field again", and
 `entropy_screen_run()` only ended when the pool was full *and* X was pressed.
 With no hand on the analog stick the bar never moves, so two presses from the
 list put the console in a screen with no way out -- the main loop stopped,
@@ -176,6 +176,41 @@ pool it was replacing is put back (`entropy_stash` / `entropy_restore`), so
 walking out of it costs the session nothing. The first sweep of a run, which
 has no pool behind it, is not offered the way out and still has to be
 finished.
+
+## What the model knows about the keys
+
+The model is the oracle, so it mirrors `main.c` as it is now and not as the
+first campaign knew it:
+
+- **Tabs.** The gear tab is leftmost and always there; walking onto it opens
+  the info band and walking off it closes it, and inside the band O or X
+  steps one tab to the right. The stick tab, present while anything is
+  installed, lists what is installed with the updates first; its action row
+  "Update all" is only there while an update waits, and takes the updates
+  alone. The basket tab is as it was. The tabs walk under the info band but
+  not under a question, the menu or the details band. A tab that vanished
+  falls back to All.
+- **Keys on a row.** X asks to install or update a row that is not current
+  and opens the options menu on one that is; triangle opens the menu; square
+  toggles the basket; SELECT does nothing. The menu is Run, Reinstall,
+  Delete, basket, Information, the cursor starting on Run for anything
+  installed and on the basket row otherwise, greyed rows stepped over.
+- **What a script may not press.** Run, whether by START or by X on the
+  menu's first row, and the band's two typing rows, which hand the pad to
+  the firmware keyboard, and its sweep, which reads the pad itself. The model
+  raises on all of them; a script that reached one would not be a script.
+- **The idle veil.** Ten seconds without a key and the shell fades; the first
+  key after that only lifts the veil. The model swallows a key that comes
+  more than ten seconds after the previous one with nothing open. After an
+  install or a refetch the loop was away for a length of time only the
+  emulator knows, so the planners never let that decide anything: a key
+  that would come more than nine seconds after the last one is preceded by a
+  circle, which does nothing on the browser whether the veil was down or
+  not.
+- **The info band's rows** are Update catalog, Add a list or repository,
+  Install from GitHub, and the sweep. The refresher reaches the first by
+  walking left to the gear tab and pressing X; the other three are never
+  pressed.
 
 ## Two things about this desk
 

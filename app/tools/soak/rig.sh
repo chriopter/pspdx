@@ -42,6 +42,33 @@ mock() {
 	python3 "$REPO/dev/mock-catalog" "$1" --work "$WORK" --ms "$MS" --url "$LOCALCAT_URL"
 }
 
+# The client reads where its catalog comes from off the stick now,
+# PSP/PSPDX/sources.txt, and the user's copy names the published list. A
+# test build trusts the throwaway CA alone, so that list is a handshake
+# failure in the log before the built-in loopback cache is taken -- and a
+# "failed" in the log is what a run is judged on. So the rig names the
+# loopback catalog there itself, and puts the user's file back at clean.
+SOURCES="$MS/PSP/PSPDX/sources.txt"
+SOURCES_KEPT="$WORK/sources.txt.user"
+
+soak_plant_sources() {
+	mkdir -p "$MS/PSP/PSPDX"
+	if [ ! -f "$SOURCES_KEPT" ]; then
+		if [ -f "$SOURCES" ]; then cp "$SOURCES" "$SOURCES_KEPT"
+		else : > "$SOURCES_KEPT.absent"; fi
+	fi
+	printf '# sources.txt -- written by app/tools/soak/rig.sh for a campaign\n%s\n' \
+		"$LOCALCAT_URL" > "$SOURCES"
+}
+
+soak_restore_sources() {
+	if [ -f "$SOURCES_KEPT" ]; then
+		cp "$SOURCES_KEPT" "$SOURCES" && rm -f "$SOURCES_KEPT"
+	elif [ -f "$SOURCES_KEPT.absent" ]; then
+		rm -f "$SOURCES" "$SOURCES_KEPT.absent"
+	fi
+}
+
 case "$1" in
 	setup)
 		localcat_certs
@@ -53,6 +80,7 @@ case "$1" in
 		# running has its working directory deleted under it and answers
 		# every request with a closed connection. The two go together.
 		mock make
+		soak_plant_sources
 		soak_start_server
 		;;
 	idle)
@@ -65,7 +93,7 @@ case "$1" in
 		# run-ppsspp.sh does that when its seconds are up.
 		if pgrep -x PPSSPPSDL >/dev/null 2>&1; then echo busy; else echo idle; fi
 		;;
-	clean)   mock clean ;;
+	clean)   mock clean; soak_restore_sources ;;
 	serve)   soak_start_server ;;
 	stop)    soak_stop_server ;;
 	build-local) localcat_build_local ;;
