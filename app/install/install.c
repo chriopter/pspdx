@@ -1,5 +1,5 @@
 /*
- * Installing a package: manifest, download, hash, unpack, one rename.
+ * Installing a package: download, check, unpack, one rename.
  *
  * Nothing is created in place. FAT32 has no transactions and PSP users pull
  * the battery, so the archive is downloaded and unpacked under
@@ -38,18 +38,7 @@
 
 /* A Memory Stick tops out at 32 GB and no homebrew is anywhere near this.
    The number exists so that a size field cannot ask for something absurd. */
-/* ------------------------------------------------------------- manifest */
-
-static char g_manifest[8 * 1024];
-static size_t g_manifest_len;
-
-static int mem_sink(void *ctx, const void *data, size_t len) {
-    (void)ctx;
-    if (g_manifest_len + len >= sizeof(g_manifest)) return -1;
-    memcpy(g_manifest + g_manifest_len, data, len);
-    g_manifest_len += len;
-    return 0;
-}
+/* -------------------------------------------------------------- release */
 
 /* An id becomes a file name, so it may not carry a path. Reverse-DNS letters,
    digits, dot, dash and underscore only. */
@@ -74,102 +63,10 @@ int manifest_size_in_range(double size) {
     return size > 0 && size <= MAX_PACKAGE_BYTES;
 }
 
-static int hexval(char c) {
-    if (c >= '0' && c <= '9') return c - '0';
-    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
-    return -1;
-}
-
-/* A string field of the file into a fixed buffer, empty when the field is
-   missing or not a string: every text field is optional. */
-static void text_field(char *dst, size_t size, cJSON *obj, const char *key) {
-    cJSON *v = cJSON_GetObjectItemCaseSensitive(obj, key);
-    if (cJSON_IsString(v)) snprintf(dst, size, "%s", v->valuestring);
-    else dst[0] = '\0';
-}
-
-int manifest_fetch(const char *url, const char *expect_id, struct manifest *m) {
-    struct https_result r;
-    g_manifest_len = 0;
-    memset(m, 0, sizeof(*m));
-
-    int rc = https_get(url, mem_sink, NULL, NULL, NULL, &r);
-    if (rc != 0 || r.status != 200) {
-        logline("manifest: fetch rc=%d status=%ld", rc, r.status);
-        return -1;
-    }
-
-    cJSON *root = cJSON_ParseWithLength(g_manifest, g_manifest_len);
-    if (!root) { logline("manifest: not json"); return -2; }
-
-    cJSON *schema = cJSON_GetObjectItemCaseSensitive(root, "schema");
-    cJSON *rev    = cJSON_GetObjectItemCaseSensitive(root, "rev");
-    cJSON *u      = cJSON_GetObjectItemCaseSensitive(root, "url");
-    cJSON *sha    = cJSON_GetObjectItemCaseSensitive(root, "sha256");
-    cJSON *size   = cJSON_GetObjectItemCaseSensitive(root, "size");
-    cJSON *id     = cJSON_GetObjectItemCaseSensitive(root, "id");
-    cJSON *disp   = cJSON_GetObjectItemCaseSensitive(root, "display");
-
-    rc = -3;
-    if (!cJSON_IsString(schema) || strcmp(schema->valuestring, PSPDX_SCHEMA) != 0) {
-        logline("manifest: schema");
-        goto out;
-    }
-    if (!cJSON_IsNumber(rev) || !cJSON_IsString(u) || !cJSON_IsString(sha) ||
-        !cJSON_IsNumber(size) || !cJSON_IsString(id)) {
-        logline("manifest: missing field");
-        goto out;
-    }
-    if (strlen(sha->valuestring) != 64) { logline("manifest: sha256 length"); goto out; }
-    for (int i = 0; i < 32; i++) {
-        int hi = hexval(sha->valuestring[2 * i]), lo = hexval(sha->valuestring[2 * i + 1]);
-        if (hi < 0 || lo < 0) { logline("manifest: sha256 hex"); goto out; }
-        m->sha256[i] = (unsigned char)(hi * 16 + lo);
-    }
-    if (!manifest_rev_in_range(rev->valuedouble)) {
-        logline("manifest: rev out of range");
-        goto out;
-    }
-    if (!manifest_size_in_range(size->valuedouble)) {
-        logline("manifest: size out of range");
-        goto out;
-    }
-    if (!manifest_id_is_safe(id->valuestring)) { logline("manifest: unusable id"); goto out; }
-    if (expect_id) {
-        /* The catalog said which package this is, or the list said whose:
-           a manifest that renames itself would otherwise overwrite another
-           package's record, and one that names another owner's app would
-           overwrite that account's. */
-        size_t n = strlen(expect_id);
-        int prefix = n && expect_id[n - 1] == '.';
-        int ok = prefix ? strncmp(expect_id, id->valuestring, n) == 0
-                        : strcmp(expect_id, id->valuestring) == 0;
-        if (!ok) {
-            logline("manifest: id %s is not %s%s", id->valuestring, expect_id,
-                    prefix ? "*" : "");
-            goto out;
-        }
-    }
-    m->rev = (unsigned)rev->valuedouble;
-    m->size = (size_t)size->valuedouble;
-    strncpy(m->id, id->valuestring, sizeof(m->id) - 1);
-    strncpy(m->url, u->valuestring, sizeof(m->url) - 1);
-    /* The version stands at the top of the file; a file written before the
-       author's half existed kept it under "display", and is still read. */
-    text_field(m->version, sizeof(m->version), root, "version");
-    if (!m->version[0] && cJSON_IsObject(disp))
-        text_field(m->version, sizeof(m->version), disp, "version");
-    text_field(m->name, sizeof(m->name), root, "name");
-    text_field(m->author, sizeof(m->author), root, "author");
-    text_field(m->summary, sizeof(m->summary), root, "summary");
-    text_field(m->category, sizeof(m->category), root, "category");
-    text_field(m->license, sizeof(m->license), root, "license");
-    logline("manifest: %s rev %u, %lu bytes", m->id, m->rev, (unsigned long)m->size);
-    rc = 0;
-out:
-    cJSON_Delete(root);
-    return rc;
+int manifest_has_sha256(const struct manifest *m) {
+    for (int i = 0; i < 32; i++)
+        if (m->sha256[i]) return 1;
+    return 0;
 }
 
 /* ------------------------------------------------------------- download */
@@ -210,13 +107,17 @@ static int download(const struct manifest *m, https_progress progress, void *pct
             (unsigned long)d.written, ms / 1000, (ms % 1000) / 100);
     if (rc != 0 || r.status != 200) return -3;
     if (d.written != m->size) {
-        logline("download: size %lu, manifest says %lu",
+        logline("download: size %lu, release says %lu",
                 (unsigned long)d.written, (unsigned long)m->size);
         return -4;
     }
 
     unsigned char digest[32];
     wc_Sha256Final(&d.sha, digest);
+    /* No hash is what the origin path gives: the zip came from the
+       author's own account over TLS and its size agreed, which is the
+       trust there is. A cache that hashed the whole zip is held to it. */
+    if (!manifest_has_sha256(m)) { logline("download: sha256: none, size checked"); return 0; }
     if (memcmp(digest, m->sha256, 32) != 0) { logline("download: sha256 MISMATCH"); return -5; }
     logline("download: sha256 ok");
     return 0;
@@ -402,7 +303,7 @@ static int unpack(struct zipread *z, const char *root, struct install_report *re
 /* ------------------------------------------------------------------- db */
 
 /* What the client will need to uninstall or update later: which directory it
-   actually wrote, and which manifest to ask. */
+   actually wrote, and which repository it came from. */
 /* Written to a temporary name and renamed over the old record, so a stick that
    fills up or a battery that dies leaves the previous record intact rather
    than an empty file where the package's identity used to be. */
@@ -416,8 +317,8 @@ static int db_write(const struct manifest *m, const char *dir) {
     if (fd < 0) { logline("db: cannot write %s", m->id); return -1; }
     char line[1024];
     int n = snprintf(line, sizeof(line),
-                     "{\"id\":\"%s\",\"rev\":%u,\"dir\":\"%s\",\"manifest\":\"%s\",\"version\":\"%s\"}\n",
-                     m->id, m->rev, dir, m->manifest_url, m->version);
+                     "{\"id\":\"%s\",\"rev\":%u,\"dir\":\"%s\",\"repo\":\"%s\",\"version\":\"%s\"}\n",
+                     m->id, m->rev, dir, m->repo, m->version);
     if (n <= 0 || n >= (int)sizeof(line)) { sceIoClose(fd); return -1; }
     int w = sceIoWrite(fd, line, (SceSize)n);
     if (sceIoClose(fd) < 0 || w != n) { logline("db: %s not persisted", m->id); return -1; }
@@ -425,18 +326,38 @@ static int db_write(const struct manifest *m, const char *dir) {
     return 0;
 }
 
-/* The same file from fields rather than from a manifest: PSPDX's own record,
-   which no install ever wrote. The manifest URL is left empty -- the catalog
-   carries the client's release like everyone else's, so nothing would ever
-   read it. */
+/* The same file from a record rather than from a release: PSPDX's own,
+   which no install ever wrote, and any record read back to be rewritten
+   with a new rev. The repository carries over as it was read, empty for
+   the client's own until an install writes it. */
 int db_write_record(const struct installed *record) {
     struct manifest m;
     if (!manifest_id_is_safe(record->id)) { logline("db: unusable id"); return -1; }
     memset(&m, 0, sizeof(m));
     snprintf(m.id, sizeof(m.id), "%s", record->id);
     snprintf(m.version, sizeof(m.version), "%s", record->version);
+    snprintf(m.repo, sizeof(m.repo), "%s", record->repo);
     m.rev = record->rev;
     return db_write(&m, record->dir);
+}
+
+/* A record from before the origin path named the app.pspdx it came from
+   under "manifest", at raw.githubusercontent.com/<owner>/<repo>/... or
+   github.com/<owner>/<repo>/releases/...: the first two parts of the path
+   are the repository either way, and that is what the record keeps now. */
+static void repo_of_manifest(const char *url, char *repo, size_t size) {
+    static const char raw[] = "https://raw.githubusercontent.com/";
+    static const char web[] = "https://github.com/";
+    const char *path = NULL;
+    if (strncmp(url, raw, sizeof(raw) - 1) == 0) path = url + sizeof(raw) - 1;
+    else if (strncmp(url, web, sizeof(web) - 1) == 0) path = url + sizeof(web) - 1;
+    repo[0] = '\0';
+    if (!path) return;
+    size_t owner = strcspn(path, "/");
+    if (!path[owner]) return;
+    size_t name = strcspn(path + owner + 1, "/");
+    if (!owner || !name) return;
+    snprintf(repo, size, "%s%.*s", web, (int)(owner + 1 + name), path);
 }
 
 /* Reads what is installed for one id. Returns 0 if a record exists. */
@@ -456,12 +377,16 @@ int db_read(const char *id, struct installed *out) {
     cJSON *rev = cJSON_GetObjectItemCaseSensitive(root, "rev");
     cJSON *dir = cJSON_GetObjectItemCaseSensitive(root, "dir");
     cJSON *ver = cJSON_GetObjectItemCaseSensitive(root, "version");
+    cJSON *repo = cJSON_GetObjectItemCaseSensitive(root, "repo");
+    cJSON *manifest = cJSON_GetObjectItemCaseSensitive(root, "manifest");
     int ok = cJSON_IsNumber(rev);
     if (ok) {
         out->rev = (unsigned)rev->valuedouble;
         strncpy(out->id, id, sizeof(out->id) - 1);
         if (cJSON_IsString(dir)) strncpy(out->dir, dir->valuestring, sizeof(out->dir) - 1);
         if (cJSON_IsString(ver)) strncpy(out->version, ver->valuestring, sizeof(out->version) - 1);
+        if (cJSON_IsString(repo)) strncpy(out->repo, repo->valuestring, sizeof(out->repo) - 1);
+        else if (cJSON_IsString(manifest)) repo_of_manifest(manifest->valuestring, out->repo, sizeof(out->repo));
     }
     cJSON_Delete(root);
     return ok ? 0 : -1;
@@ -527,18 +452,6 @@ void install_recover(void) {
     }
     sceIoDclose(d);
     rm_rf(STAGE);
-}
-
-int install(const char *manifest_url, const char *expect_id,
-            struct install_report *rep,
-            install_phase_cb phase, https_progress progress, void *pctx) {
-    struct manifest m;
-    memset(rep, 0, sizeof(*rep));
-
-    if (phase) phase(pctx, "manifest");
-    if (manifest_fetch(manifest_url, expect_id, &m) < 0) return -1;
-    strncpy(m.manifest_url, manifest_url, sizeof(m.manifest_url) - 1);
-    return install_release(&m, rep, phase, progress, pctx);
 }
 
 int install_release(const struct manifest *release, struct install_report *rep,

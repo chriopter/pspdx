@@ -1,6 +1,7 @@
 /*
  * The list's icons. Each one goes through the same path as the card's still
- * -- the cache on the stick, else one TLS fetch -- and is then shrunk by
+ * -- an installed app's own EBOOT, else the cache on the stick, else one TLS
+ * fetch -- and is then shrunk by
  * two, because a 144x80 picture in a 256x128 texture is 128 KB and sixty of
  * them would be a quarter of the machine, while 72x40 in 128x64 is 32 KB
  * and still twice what a row can show.
@@ -8,11 +9,13 @@
 
 #include <malloc.h>
 #include <pspkernel.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "gui/icons.h"
 #include "gui/image.h"
 #include "update/assets.h"
+#include "util/pbp.h"
 #include "util/runtime.h"
 
 enum icon_state { ICON_NONE, ICON_WANTED, ICON_READY, ICON_MISSING };
@@ -99,12 +102,29 @@ static int shrink(const struct gfx_texture *big, struct gfx_texture *small) {
 void icons_load(int index) {
     if (!g_catalog || index < 0 || index >= g_catalog->count) return;
     const struct app_entry *entry = &g_catalog->apps[index];
-    size_t len = 0;
-    const void *png = asset_fetch(ASSET_ICON, entry->id, entry->icon, &len);
     struct gfx_texture big;
-    if (!png || image_decode_png(png, len, &big) != 0) {
-        g_state[index] = ICON_MISSING;
-        return;
+    int decoded = -1;
+    /* An installed row is pictured from its own EBOOT before anything is
+       asked of the cache or the network: the stick is free, and the bytes
+       are the app's own rather than what a catalog says about it. Only a
+       bundle without an ICON0 falls through to the catalog's. */
+    if (entry->state != APP_NOT_INSTALLED) {
+        char path[128];
+        void *png;
+        size_t len;
+        if (pbp_installed_path(entry->id, path, sizeof(path)) == 0 &&
+            pbp_section(path, PBP_ICON0, &png, &len) == 0) {
+            decoded = image_decode_png(png, len, &big);
+            free(png);
+        }
+    }
+    if (decoded != 0) {
+        size_t len = 0;
+        const void *png = asset_fetch(ASSET_ICON, entry->id, entry->icon, &len);
+        if (!png || image_decode_png(png, len, &big) != 0) {
+            g_state[index] = ICON_MISSING;
+            return;
+        }
     }
     int rc = shrink(&big, &g_icons[index]);
     gfx_texture_free(&big);

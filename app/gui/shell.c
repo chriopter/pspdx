@@ -336,10 +336,9 @@ void shell_action_plan(struct shell_plan *plan) {
         /* On the stick the job is the updates; what is merely installed is
            not part of it. */
         if (plan->updates && entry->state != APP_UPDATE) continue;
-        /* Without a release in the catalog the size is only known once a
-           manifest has been fetched, and a run of installs that cannot say
-           beforehand what it will download is not one to offer in a single
-           press. Those are counted and left out. */
+        /* An entry whose release says no size is one a run of installs
+           cannot say beforehand what it will download for, and that is not
+           one to offer in a single press. Those are counted and left out. */
         if (!entry->has_release || !entry->release.size) { plan->skipped++; continue; }
         plan->apps++;
         plan->bytes += entry->release.size;
@@ -527,8 +526,8 @@ static const char *action_title(void) {
     return shell_tab_kind() == SHELL_TAB_STICK ? "Update all" : "Download all";
 }
 
-/* "3 apps, 61.5 MB" -- or, when nothing in the tab can be fetched without a
-   manifest first, what is in the way instead. */
+/* "3 apps, 61.5 MB" -- or, when nothing in the tab has a release with a
+   size, what is in the way instead. */
 static const char *action_line(void) {
     static char line[48];
     struct shell_plan plan;
@@ -682,7 +681,7 @@ static void draw_action_panel(const struct catalog *catalog, float t) {
                     size, value);
     } else {
         font_print(FONT_META, PANEL_X, y + 20, g_dim,
-                   "nothing here can be fetched without a manifest first");
+                   "nothing here has a release with a size");
     }
     /* One line a package, in the order they would be fetched, for as many as
        the panel holds; the rest are counted rather than named. */
@@ -1243,7 +1242,7 @@ static void draw_details(void) {
     else if (e->has_release)
         snprintf(value, sizeof(value), "%s", e->release.version);
     else
-        snprintf(value, sizeof(value), "in the manifest");
+        snprintf(value, sizeof(value), "unknown");
     fact(y, FACT_LABEL, FACT_VALUE, SCR_W - FACT_VALUE - 30, "Version", value);
     fact(y + 20, FACT_LABEL, FACT_VALUE, SCR_W - FACT_VALUE - 30, "Author", e->author);
     fact(y + 40, FACT_LABEL, FACT_VALUE, 140, "Licence", e->license);

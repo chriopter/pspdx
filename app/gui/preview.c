@@ -1,7 +1,8 @@
 /*
  * What is on the card, and the thread that fetches it. The main thread
  * only ever hands over an entry and picks up finished pictures; every
- * blocking step -- reading the stick, a TLS fetch, decoding the PNG,
+ * blocking step -- reading an EBOOT or the cache off the stick, a TLS
+ * fetch, decoding the PNG,
  * wrapping the film, starting the decoder -- runs on the media thread
  * below the interface, so a frame never waits for any of it. The decoder
  * itself has its own thread under video/player.c; this one starts and stops
@@ -19,6 +20,7 @@
 #include "gui/icons.h"
 #include "gui/image.h"
 #include "update/assets.h"
+#include "util/pbp.h"
 #include "util/runtime.h"
 #include "video/mp4.h"
 #include "video/player.h"
@@ -42,9 +44,14 @@ enum film_state { FILM_NONE, FILM_LOADING, FILM_PLAYING, FILM_FAILED };
    works from its own copy of the strings, taken when it picks the request
    up: the main thread writes these while the thread may be reading, and a
    fetch keyed on a half-written id would cache one app's picture under
-   another's name. */
+   another's name. installed says the stick has a record of the entry; the
+   thread turns that into the path of its EBOOT, which is then asked for
+   each picture before the cache or the network is: the stick is free, and
+   the bytes are the app's own rather than what a catalog says about it. */
 struct request {
     char id[96], shot_url[256], video_url[256], sound_url[256];
+    int installed;
+    char pbp[128];                      /* the thread's, empty in g_want */
     volatile unsigned gen;
 };
 static struct request g_want;
@@ -79,12 +86,24 @@ static volatile unsigned g_done_gen;    /* gen the thread has finished with */
 static int stale(unsigned gen) { return gen != g_want.gen || g_quit || g_hold; }
 
 static void load_still(const struct request *req, unsigned gen, struct gfx_texture *into) {
-    size_t len = 0;
-    const void *png = asset_fetch(ASSET_SHOT, req->id, req->shot_url, &len);
-    if (stale(gen)) return;
-    if (!png || image_decode_png(png, len, into) != 0) {
-        g_still_state = STILL_FAILED;
-        return;
+    int decoded = -1;
+    if (req->pbp[0]) {
+        void *png;
+        size_t n;
+        if (pbp_section(req->pbp, PBP_PIC1, &png, &n) == 0) {
+            if (!stale(gen)) decoded = image_decode_png(png, n, into);
+            free(png);
+            if (stale(gen)) return;
+        }
+    }
+    if (decoded != 0) {
+        size_t len = 0;
+        const void *png = asset_fetch(ASSET_SHOT, req->id, req->shot_url, &len);
+        if (stale(gen)) return;
+        if (!png || image_decode_png(png, len, into) != 0) {
+            g_still_state = STILL_FAILED;
+            return;
+        }
     }
     g_still_pub = into;
     g_still_state = STILL_READY;
@@ -105,22 +124,22 @@ static void play(unsigned char *psmf, size_t n, unsigned gen) {
 }
 
 /* An ICON1.PMF out of an EBOOT is already what the decoder reads: it goes
-   to the player as it is, once its header has said the picture fits. */
-static void load_psmf(const unsigned char *data, size_t len, unsigned gen) {
+   to the player as it is, once its header has said the picture fits. The
+   buffer is ours to keep or to free, whichever the header decides. */
+static void play_psmf(unsigned char *psmf, size_t len, unsigned gen) {
     struct psmf_info info;
-    if (psmf_parse(data, len, &info) != 0) {
+    if (psmf_parse(psmf, len, &info) != 0) {
         logline("film: a PSMF the header does not describe");
+        free(psmf);
         g_film_state = FILM_FAILED;
         return;
     }
     if (info.width > FILM_W || info.height > FILM_H) {
         logline("film: %dx%d, at most %dx%d", info.width, info.height, FILM_W, FILM_H);
+        free(psmf);
         g_film_state = FILM_FAILED;
         return;
     }
-    unsigned char *psmf = malloc(len);
-    if (!psmf) { logline("film: no room for %lu", (unsigned long)len); g_film_state = FILM_FAILED; return; }
-    memcpy(psmf, data, len);
     g_film.w = info.width;
     g_film.h = info.height;
     logline("film: psmf %dx%d, %d pictures, %u a second, %lu KB as it is", info.width,
@@ -129,7 +148,27 @@ static void load_psmf(const unsigned char *data, size_t len, unsigned gen) {
     play(psmf, len, gen);
 }
 
+/* The same out of the asset buffer, which the next fetch overwrites: the
+   stream is copied out first. */
+static void load_psmf(const unsigned char *data, size_t len, unsigned gen) {
+    unsigned char *psmf = malloc(len);
+    if (!psmf) { logline("film: no room for %lu", (unsigned long)len); g_film_state = FILM_FAILED; return; }
+    memcpy(psmf, data, len);
+    play_psmf(psmf, len, gen);
+}
+
 static void load_film(const struct request *req, unsigned gen) {
+    if (req->pbp[0]) {
+        void *pmf;
+        size_t n;
+        if (pbp_section(req->pbp, PBP_ICON1, &pmf, &n) == 0) {
+            /* Read straight into a buffer of its own, so it is the
+               player's without a copy. */
+            if (stale(gen)) { free(pmf); return; }
+            play_psmf(pmf, n, gen);
+            return;
+        }
+    }
     size_t len = 0;
     const unsigned char *mp4 = asset_fetch(ASSET_VIDEO, req->id, req->video_url, &len);
     if (stale(gen)) return;
@@ -166,6 +205,18 @@ static void load_film(const struct request *req, unsigned gen) {
    landed late never plays under the wrong row. Without a link the cache
    is still tried, which is how a rig plants one. */
 static void load_sound(const struct request *req, unsigned gen) {
+    if (req->pbp[0]) {
+        void *at3;
+        size_t n;
+        if (pbp_section(req->pbp, PBP_SND0, &at3, &n) == 0) {
+            if (!stale(gen)) {
+                audio_sound_play(at3, n);
+                if (stale(gen)) audio_sound_stop();
+            }
+            free(at3);
+            return;
+        }
+    }
     size_t len = 0;
     const void *at3 = asset_fetch(ASSET_SOUND, req->id, req->sound_url, &len);
     if (!at3 || stale(gen)) return;
@@ -202,6 +253,11 @@ static int media_thread(SceSize args, void *argp) {
             memcpy(&req, &g_want, sizeof(req));
         } while (gen != g_want.gen);
         served = gen;
+        /* The record on the stick is read here, off the main thread: a
+           selection is not held up by a file open. An installed entry
+           whose record names no directory is pictured like any other. */
+        req.pbp[0] = '\0';
+        if (req.installed) pbp_installed_path(req.id, req.pbp, sizeof(req.pbp));
 
         player_stop();
         free(g_psmf);
@@ -330,6 +386,7 @@ void preview_show(const struct app_entry *entry, int immediately) {
              entry ? entry->video : "");
     snprintf(g_want.sound_url, sizeof(g_want.sound_url), "%s",
              entry ? entry->sound : "");
+    g_want.installed = entry && entry->state != APP_NOT_INSTALLED;
     g_nothing = !entry;
     /* The sound goes with the pictures: out now, over its fade, whether
        or not the next row has one. */

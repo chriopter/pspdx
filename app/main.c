@@ -188,11 +188,8 @@ static int install_app(int index, int screenshot, int at, int of) {
     SceUID self = sceKernelGetThreadId();
     sceKernelChangeThreadPriority(self, 0x22);
     unsigned start = now_ms();
-    int rc = entry->has_release
-        ? install_release(&entry->release, &report, shell_install_phase,
-                          shell_install_progress, NULL)
-        : install(entry->manifest, entry->id, &report, shell_install_phase,
-                  shell_install_progress, NULL);
+    int rc = install_release(&entry->release, &report, shell_install_phase,
+                             shell_install_progress, NULL);
     unsigned seconds = (now_ms() - start) / 1000;
     sceKernelChangeThreadPriority(self, 0x20);
     preview_resume();
@@ -328,7 +325,7 @@ static void ask_install(int index) {
         snprintf(line, sizeof(line), "%lu.%lu MB to download",
                  (unsigned long)(size >> 20), (unsigned long)((size * 10 >> 20) % 10));
     } else {
-        snprintf(line, sizeof(line), "size known once the manifest is read");
+        snprintf(line, sizeof(line), "size unknown");
     }
     shell_ask(title, line);
     g_question = ASK_INSTALL;
@@ -507,22 +504,29 @@ static void menu_move(int by) {
     menu_push();
 }
 
+/* The unattended install for the rig: PSPDX.INSTALL on the stick names
+   a repository, as a URL or as owner/repo, and it is asked at the origin
+   like one typed on the gear tab. Returns its index in the catalog. */
 static int auto_install_index(void) {
-    char id[96];
+    char text[SOURCE_URL], url[SOURCE_URL];
     int fd = sceIoOpen("ms0:/PSPDX.INSTALL", PSP_O_RDONLY, 0777);
     if (fd < 0) return -1;
-    int n = sceIoRead(fd, id, sizeof(id) - 1);
+    int n = sceIoRead(fd, text, sizeof(text) - 1);
     sceIoClose(fd);
     if (n <= 0) return -1;
-    id[n] = '\0';
-    char *newline = strpbrk(id, "\r\n");
+    text[n] = '\0';
+    char *newline = strpbrk(text, "\r\n");
     if (newline) *newline = '\0';
-    for (int i = 0; i < catalog.count; i++)
-        if (strcmp(catalog.apps[i].id, id) == 0 || strcmp(catalog.apps[i].manifest, id) == 0) return i;
-    for (int i = 0; i < catalog.count; i++)
-        if (strstr(catalog.apps[i].id, id) || strstr(catalog.apps[i].manifest, id)) return i;
-    logline("PSPDX.INSTALL: no app matches %s", id);
-    return -1;
+    if (strncmp(text, "https://", 8) == 0) snprintf(url, sizeof(url), "%s", text);
+    else snprintf(url, sizeof(url), "https://github.com/%.200s", text);
+    /* The media thread shares the network stack; it is parked for the
+       two requests as it is for the install that follows. */
+    preview_quiesce();
+    int index = catalog_add_repo(&catalog, url);
+    preview_resume();
+    if (index < 0) logline("PSPDX.INSTALL: nothing to install at %s", url);
+    else shell_view_rebuild(&catalog);
+    return index;
 }
 
 /* Scripted input for the test rig: PSPDX.KEYS on the stick holds lines
@@ -617,9 +621,9 @@ static void osk_draw(void *ctx) {
 
 /* What the gear tab's two typing rows lead to: a source added and the
    catalog fetched again, and for "Install from GitHub" the one repository
-   typed, found in the new catalog by the file it was read from and put
-   under the cursor with the install question already asked. */
-static char g_wanted_url[SOURCE_URL];     /* that file, while one is waited for */
+   typed, found in the new catalog by its URL and put under the cursor
+   with the install question already asked. */
+static char g_wanted_url[SOURCE_URL];     /* that repository, while one is waited for */
 static char g_wanted_name[64];            /* owner/repo, for the status line */
 
 /* Reads a source from the keyboard and adds it. Returns 1 when the catalog
@@ -644,7 +648,7 @@ static int type_source(int install) {
         shell_status("Install from GitHub wants owner/repo");
         return 0;
     }
-    sources_repo_manifest(&repo, g_wanted_url, sizeof(g_wanted_url));
+    sources_repo_url(&repo, g_wanted_url, sizeof(g_wanted_url));
     snprintf(g_wanted_name, sizeof(g_wanted_name), "%.24s/%.36s", repo.owner, repo.name);
     return 1;
 }
@@ -653,16 +657,13 @@ static int type_source(int install) {
    question is asked, or it is not, and the status line says why. */
 static int wanted_settled(int *cursor) {
     char message[96];
-    int found = -1;
-    for (int i = 0; found < 0 && i < catalog.count; i++)
-        if (strcmp(catalog.apps[i].manifest, g_wanted_url) == 0) found = i;
+    int found = catalog_find_repo(&catalog, g_wanted_url);
     if (found < 0) {
         int why = catalog_refused(g_wanted_url);
-        if (why == -1)
-            snprintf(message, sizeof(message), "No app.pspdx at %.62s", g_wanted_name);
-        else if (why < -1)
-            snprintf(message, sizeof(message), "The app.pspdx at %.50s was refused, see the log",
-                     g_wanted_name);
+        if (why == REFUSED_REPO)
+            snprintf(message, sizeof(message), "GitHub has no repository %.62s", g_wanted_name);
+        else if (why == REFUSED_RELEASE)
+            snprintf(message, sizeof(message), "no release with a zip at %.62s", g_wanted_name);
         else
             snprintf(message, sizeof(message), "%.60s did not make it into the catalog",
                      g_wanted_name);

@@ -47,7 +47,7 @@ static int trim(char *line) {
 
 /* Two URLs that differ only by case or a trailing slash name the same
    place, and one of them in the file is enough. */
-static int same_url(const char *a, const char *b) {
+int sources_same_url(const char *a, const char *b) {
     size_t na = strlen(a), nb = strlen(b);
     while (na && a[na - 1] == '/') na--;
     while (nb && b[nb - 1] == '/') nb--;
@@ -75,7 +75,7 @@ int sources_load(struct sources *s) {
         if (end) *end++ = '\0';
         if (trim(line) > 0 && strncmp(line, "https://", 8) == 0) {
             int dup = 0;
-            for (int i = 0; i < s->count; i++) dup = dup || same_url(s->url[i], line);
+            for (int i = 0; i < s->count; i++) dup = dup || sources_same_url(s->url[i], line);
             /* A line longer than a URL slot is not a URL anyone typed. */
             if (!dup && strlen(line) < SOURCE_URL) {
                 memcpy(s->url[s->count], line, strlen(line) + 1);
@@ -104,7 +104,7 @@ int sources_add(const char *text, char *url, size_t size) {
     struct sources have;
     sources_load(&have);
     for (int i = 0; i < have.count; i++)
-        if (same_url(have.url[i], url)) return 0;
+        if (sources_same_url(have.url[i], url)) return 0;
     if (have.count >= SOURCES_MAX) { logline("sources: the file is full"); return -1; }
 
     int fd = sceIoOpen(SOURCES_PATH, PSP_O_WRONLY | PSP_O_CREAT | PSP_O_APPEND, 0777);
@@ -147,7 +147,55 @@ int sources_parse_repo(const char *url, struct source_repo *out) {
     const char *at = strchr(p + len, '@');
     if (at && at[1]) snprintf(out->ref, sizeof(out->ref), "%s", at + 1);
     else snprintf(out->ref, sizeof(out->ref), "HEAD");
+    snprintf(out->category, sizeof(out->category), "apps");
     return 1;
+}
+
+/* One word off the front of a line: up to the next space, except that a
+   quote, at the front or after a key=, runs to its closing quote and is
+   dropped, so that a value can have spaces in it. Returns the word,
+   NUL-terminated in place, and moves the cursor past it; NULL when the
+   line is spent. */
+static char *word(char **cursor) {
+    char *p = *cursor;
+    while (*p == ' ' || *p == '\t') p++;
+    if (!*p) return NULL;
+    char *start = p, *out = p;
+    while (*p && *p != ' ' && *p != '\t') {
+        if (*p == '"') {
+            p++;
+            while (*p && *p != '"') *out++ = *p++;
+            if (*p) p++;
+        } else {
+            *out++ = *p++;
+        }
+    }
+    if (*p) p++;
+    *out = '\0';
+    *cursor = p;
+    return start;
+}
+
+/* The words after the URL: the category, then key=value overrides. A key
+   this does not know is passed over, so a list can say more than this
+   build understands. */
+static void overrides(char *rest, struct source_repo *r) {
+    char *w = word(&rest);
+    if (w && !strchr(w, '=')) {
+        snprintf(r->category, sizeof(r->category), "%s", w);
+        w = word(&rest);
+    }
+    for (; w; w = word(&rest)) {
+        char *value = strchr(w, '=');
+        if (!value) continue;
+        *value++ = '\0';
+        struct source_override *o = &r->over;
+        if (strcmp(w, "name") == 0) snprintf(o->name, sizeof(o->name), "%s", value);
+        else if (strcmp(w, "author") == 0) snprintf(o->author, sizeof(o->author), "%s", value);
+        else if (strcmp(w, "summary") == 0) snprintf(o->summary, sizeof(o->summary), "%s", value);
+        else if (strcmp(w, "license") == 0) snprintf(o->license, sizeof(o->license), "%s", value);
+        else if (strcmp(w, "asset") == 0) snprintf(o->asset, sizeof(o->asset), "%s", value);
+    }
 }
 
 int sources_parse_list(const char *text, struct source_list *out) {
@@ -163,8 +211,15 @@ int sources_parse_list(const char *text, struct source_list *out) {
                 char *url = line + 6;
                 trim(url);
                 if (!out->cache[0]) snprintf(out->cache, sizeof(out->cache), "%s", url);
-            } else if (sources_parse_repo(line, &out->repo[out->count])) {
-                out->count++;
+            } else {
+                /* The URL is the first word; the rest of the line is the
+                   category and the overrides. */
+                char *rest = line + strcspn(line, " \t");
+                if (*rest) *rest++ = '\0';
+                if (sources_parse_repo(line, &out->repo[out->count])) {
+                    overrides(rest, &out->repo[out->count]);
+                    out->count++;
+                }
             }
         }
         line = end;
@@ -174,22 +229,24 @@ int sources_parse_list(const char *text, struct source_list *out) {
 }
 
 /* The id names a directory on the stick, so only [a-z0-9] of the owner
-   survive in it: "Chris-Opter" owns io.github.chrisopter. */
-void sources_repo_expect(const struct source_repo *r, char *id, size_t size) {
-    size_t n = (size_t)snprintf(id, size, "io.github.");
-    for (const char *p = r->owner; *p && n + 2 < size; p++) {
+   and the repository survive in it: "Chris-Opter/PSP-Thing" becomes
+   io.github.chrisopter.pspthing. */
+static size_t append_plain(char *id, size_t n, size_t size, const char *text) {
+    for (const char *p = text; *p && n + 1 < size; p++) {
         int c = tolower((unsigned char)*p);
         if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) id[n++] = (char)c;
     }
-    id[n++] = '.';
     id[n] = '\0';
+    return n;
 }
 
-void sources_repo_manifest(const struct source_repo *r, char *url, size_t size) {
-    if (strcmp(r->ref, "HEAD") == 0)
-        snprintf(url, size, "https://raw.githubusercontent.com/%s/%s/HEAD/app.pspdx",
-                 r->owner, r->name);
-    else
-        snprintf(url, size, "https://github.com/%s/%s/releases/download/%s/app.pspdx",
-                 r->owner, r->name, r->ref);
+void sources_repo_id(const struct source_repo *r, char *id, size_t size) {
+    size_t n = (size_t)snprintf(id, size, "io.github.");
+    n = append_plain(id, n, size, r->owner);
+    if (n + 1 < size) id[n++] = '.';
+    append_plain(id, n, size, r->name);
+}
+
+void sources_repo_url(const struct source_repo *r, char *url, size_t size) {
+    snprintf(url, size, "https://github.com/%s/%s", r->owner, r->name);
 }

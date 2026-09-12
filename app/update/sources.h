@@ -33,11 +33,26 @@ int sources_add(const char *text, char *url, size_t size);
 enum source_kind { SOURCE_LIST, SOURCE_REPO, SOURCE_CATALOG };
 enum source_kind sources_kind(const char *url);
 
-/* One line of a list: https://github.com/<owner>/<repo>[@tag]. */
+/* One line of a list: https://github.com/<owner>/<repo>[@tag] category
+   [key=value ...]. The category is the word after the URL and "apps" when
+   there is none; the words after it override what would be derived, for
+   the title that is an abbreviation in the SFO or the licence GitHub
+   cannot see. A single repository typed by the user is a line with nothing
+   after the URL. */
+struct source_override {
+    char name[40];
+    char author[40];
+    char summary[60];
+    char license[16];
+    char asset[64];             /* a glob naming the zip when there is more than one */
+};
+
 struct source_repo {
     char owner[40];
     char name[100];
     char ref[40];               /* the tag, or HEAD when none is pinned */
+    char category[12];
+    struct source_override over;
 };
 
 #define LIST_REPOS 64
@@ -51,19 +66,22 @@ struct source_list {
    are passed over. Returns the number of repositories. */
 int sources_parse_list(const char *text, struct source_list *out);
 
-/* A repository URL into its parts. Returns 0 when it is not one. */
+/* A repository URL into its parts, category "apps" and no overrides.
+   Returns 0 when it is not one. */
 int sources_parse_repo(const char *url, struct source_repo *out);
 
-/* What a repository's app.pspdx has to say it is: an id beginning with
-   io.github.<owner>. -- lower case, anything outside [a-z0-9] dropped --
-   the rest being the author's choice. In the form manifest_fetch takes as a
-   prefix. */
-void sources_repo_expect(const struct source_repo *r, char *id, size_t size);
+/* Two URLs that differ only by case or a trailing slash name the same
+   place. */
+int sources_same_url(const char *a, const char *b);
 
-/* Where the file is: the tree's copy at HEAD, or the copy the action
-   attached to the release when the line pins a tag -- the tag was cut
-   before the action ran, so the tree at the tag still holds the release
-   before. */
-void sources_repo_manifest(const struct source_repo *r, char *url, size_t size);
+/* The id the repository derives to: io.github.<owner>.<repo>, lower case,
+   [a-z0-9] only, so that "Chris-Opter/PSP-Thing" owns io.github.chrisopter.pspthing.
+   It names a directory on the stick and never changes. */
+void sources_repo_id(const struct source_repo *r, char *id, size_t size);
+
+/* The repository's canonical URL, https://github.com/<owner>/<repo>, with
+   no tag on it: what the record on the stick and the cache both call the
+   repository, so the two can be compared. */
+void sources_repo_url(const struct source_repo *r, char *url, size_t size);
 
 #endif

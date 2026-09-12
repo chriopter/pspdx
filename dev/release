@@ -52,12 +52,4 @@ rm -rf "$HERE/dist"
 gh release create "v$VERSION" "$HERE/pspdx.zip" -t "v$VERSION" -n "$NOTES" \
 	--target "$COMMIT"
 
-# The release half of app.pspdx, the way the action writes it for every other
-# app: from the bytes GitHub now serves. Committed to master and attached to
-# the release, so a list reads the same file either way.
-python3 "$HERE/action/release.py" --repo chriopter/pspdx --tag "v$VERSION" --write-only
-git -C "$HERE" add app.pspdx
-git -C "$HERE" commit -q -m "app.pspdx for $VERSION"
-git -C "$HERE" push -q origin master
-gh release upload "v$VERSION" "$HERE/app.pspdx" --clobber
-echo "v$VERSION is out; pspdx-catalog reads app.pspdx on its next build"
+echo "v$VERSION is out; the catalog derives it on its next build"

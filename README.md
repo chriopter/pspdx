@@ -26,65 +26,50 @@ dev/start installs: × S, ○ D, □ A, △ W, START Enter, SELECT Space, L Q,
 R E, the d-pad on the arrows, the stick on I J K L. There is no HOME;
 Esc is the emulator's own pause menu.
 
-To get your open source licensed brew listed: an `app.pspdx` in your
-repository, the release action, and one line in
+To get your open source licensed brew listed: a GitHub release with one zip
+that has an `EBOOT.PBP` in it, and one line in
 [pspdx-catalog](https://github.com/chriopter/pspdx-catalog)'s `repos.txt`.
-Or open an issue and ask.
+Or open an issue and ask. Nothing to write, nothing to maintain.
 
 ## What an app is
 
-One file in the author's own repository, `app.pspdx`, and a package on a
-GitHub release. [manifest.md](manifest.md) is the long version,
-[architecture.md](architecture.md) is why.
+A GitHub repository with a release, and in the release a zip with an
+`EBOOT.PBP`. Everything the console shows is derived from that:
+[manifest.md](manifest.md) says from where, [architecture.md](architecture.md)
+says why.
 
 <details>
-<summary><b><code>app.pspdx</code></b> — in the author's repository. Half written once by a person, half by the release action.</summary>
+<summary><b>Derived, not declared</b> — the id from the URL, the title from the SFO, the pictures from the PBP, the version from the release.</summary>
 
-```json
-{
-  "schema":   "https://github.com/chriopter/pspdx/blob/master/manifest.md",
-  "id":       "io.github.chriopter.extremetuxracer",
-  "name":     "Extreme Tux Racer",
-  "author":   "chriopter",
-  "summary":  "Downhill racing with a penguin.",
-  "category": "games",
-  "license":  "GPL-2.0",
-  "repo":     "https://github.com/chriopter/psp-tuxracer",
+| field | source |
+|---|---|
+| id | the repository URL, `io.github.<owner>.<repo>` |
+| name | `TITLE` in the EBOOT's `PARAM.SFO` |
+| author | the repository's owner |
+| summary | the repository's description |
+| license | what GitHub reports |
+| category | the list: the word after the URL |
+| version, date, zip, size | the release |
+| sha256 | computed by the cache, which downloads the whole zip |
+| icon, picture, film, sound | `ICON0.PNG`, `PIC1.PNG`, `ICON1.PMF`, `SND0.AT3` in the EBOOT |
 
-  "version":  "0.24.0",
-  "rev":      1789071038,
-  "url":      "https://github.com/chriopter/psp-tuxracer/releases/download/v0.24.0/etr.zip",
-  "sha256":   "807b7e08…",
-  "size":     44048464,
-  "root":     "PSP/GAME/ExtremeTuxRacer/"
-}
-```
-
-The first seven fields are the author's, written once. The rest is the
-release, written by [the action](action/) every time one is published: it
-downloads the zip, hashes it, finds the EBOOT, commits the file and attaches
-a copy to the release. Nobody types a hash.
-
-The pictures are not in the file. They are in the `EBOOT.PBP`, where Sony
-put them: `ICON0.PNG` is the icon at the row, `PIC1.PNG` the picture on the
-card, `ICON1.PMF` the film, `SND0.AT3` the sound under the card while the
-cursor rests on the app. [`app/tools/eboot-media/`](app/tools/eboot-media/)
-makes the last two out of an MP4 and a WAV.
-
-Copy: [`app.pspdx.template`](app.pspdx.template)
+The bar is Sony's: a title, an ICON0 and a PIC1 in the PBP. `ICON1.PMF`
+and `SND0.AT3` make the card move and sound;
+[`app/tools/eboot-media/`](app/tools/eboot-media/) makes them from an MP4
+and a WAV. A line on the list can override any derived word, for the title
+that is an abbreviation or the licence GitHub cannot see.
 
 </details>
 
 <details>
 <summary><b>Lists and the catalog</b> — where the console finds apps: a text file of repositories, and a cache anyone can build.</summary>
 
-A *list* is a text file, one GitHub repository a line. Given one, the
-console reads every repository's `app.pspdx` from `raw.githubusercontent.com`,
-one small file a repository. A `cache` line at the top
-names a `catalog.json` that has done that already and mirrors the pictures
-out of the EBOOTs; the console takes the cache when it answers and walks the
-list when it does not. It proves nothing: the zip is checked against the
-`sha256` in the file either way.
+A *list* is a text file, one GitHub repository a line with its category.
+A `cache` line at the top names a `catalog.json` that has done the
+deriving already and mirrors the pictures out of the EBOOTs; the console
+takes the cache when it answers and asks GitHub's API at the origin for
+whatever it did not cover, two small requests a repository. An installed
+app is pictured from its own EBOOT on the stick either way.
 
 [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) is the list the
 console ships with, `repos.txt`, and the workflow that rebuilds its cache
@@ -98,9 +83,10 @@ all installs the same way.
 <details>
 <summary><b>The id, and how an update is noticed</b> — one name that is a URL, a cache file and a record on the stick; one number that says whether the stick is behind.</summary>
 
-The id is the `id` in `app.pspdx`, in the reverse-domain style of Flatpak
-ids and fixed by the repository: `io.github.chriopter.rustraytracer` for
-`github.com/chriopter/psp-rust-raytracer` (the dashes go). Lowercase letters, digits, dots and dashes,
+The id is the repository URL in the reverse-domain style of Flatpak ids:
+`io.github.chriopter.psprustraytracer` for
+`github.com/chriopter/psp-rust-raytracer` (the dashes go). Nobody types
+it, so it cannot be wrong. Lowercase letters, digits, dots and dashes,
 at most eighty characters, no `..`. The rules are strict because the same
 string becomes a URL (`icons/<id>.png`), a file in the cache
 (`PSP/PSPDX/cache/<id>.mp4`) and a record on the stick, so it has to be a
@@ -144,7 +130,7 @@ through the ordinary path — the running EBOOT is in RAM, the directory under
 it is replaced, and the band says to press START to restart. It refuses to
 remove itself. The version comes from `git describe --tags` at build time;
 `dev/release 0.1.0` builds with it set, packs the EBOOT and publishes the
-release; the action then writes `app.pspdx`.
+release, and the catalog derives the rest on its next build.
 
 </details>
 
@@ -167,7 +153,7 @@ below are relative to `app/`.
 
 - One request gets the whole index: [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) is folded into a single `catalog.json`. The PSP pays per TLS handshake, not per byte.
 - Downloads come from the author's own release. PSPDX hosts nothing and mirrors nothing.
-- The truth is the author's `app.pspdx`; the index is a cache of it. A list without a cache still works, one small file per app over one connection.
+- The truth is the author's repository and release; the index is a cache of what they say. A list without a cache still works: the console asks GitHub for each app itself.
 - TLS 1.3, with the seed collected off the analog stick at startup, because the PSP has no usable PRNG.
 - Every manifest sits on the same GitHub host, so one handshake covers the whole update check.
 
@@ -393,7 +379,7 @@ that works on a real PSP, and on a host whose desktop is locked.
 | `PSPDX1.BMP` | the screen a scripted `shot` key asked for |
 | `PSPDX2.BMP` | the screen after an install |
 | `PSPDX.KEYS` | scripted input, one `<ms> <key>` per line from the moment the catalog is up: `up`, `down`, `left`, `right`, `cross`, `circle`, `square`, `triangle`, `ltrigger`, `rtrigger`, `select`, `start`, or `shot` |
-| `PSPDX.INSTALL` | an `app.pspdx` URL here installs that app unattended, for testing |
+| `PSPDX.INSTALL` | a repository URL here installs that app unattended, for testing |
 | `PSP/PSPDX/sources.txt` | the lists, one URL a line, the built-in one first |
 | `PSP/PSPDX/cache/<served name>` | a picture once fetched, so it costs one handshake per stick, not per run. The catalog serves every asset under `<id>-<sha8>.<ext>`, a name that carries the bytes, so a changed picture arrives under a new name and the old file is simply never asked for again. An entry that links nothing is looked up as `<id>.<ext>`, which is where the rig plants a clip |
 | `PSP/PSPDX/font/ltn8.pgf` | never written by the client: where it looks for the system font when `flash0:` has none |
