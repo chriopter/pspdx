@@ -8,10 +8,10 @@
   "license":  "GPL-2.0",
   "repo":     "https://github.com/chriopter/pspdx",
 
-  "version":  "0.2.0",
-  "rev":      1789200663,
-  "url":      "https://github.com/chriopter/pspdx/releases/download/v0.2.0/pspdx.zip",
-  "sha256":   "ae1bd2a402dc462887c90a32dd3f71e466604833aa604b7c8b7e65f64a92020c",
-  "size":     1416988,
+  "version":  "0.2.1",
+  "rev":      1789202405,
+  "url":      "https://github.com/chriopter/pspdx/releases/download/v0.2.1/pspdx.zip",
+  "sha256":   "a223fd5cdd3a34224b96798686baa25ce57dc25cb3f65baf91ebf514ff50eaf4",
+  "size":     1416989,
   "root":     "PSP/GAME/PSPDX/"
 }
