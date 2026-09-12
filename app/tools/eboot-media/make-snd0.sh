@@ -62,32 +62,39 @@ ffmpeg -v error -y -ss "$start" -t "$dur" -i "$src" -vn \
 (cd "$tmp" && "$enc" -e "$codec" -i snd0.wav -o snd0.at3 >/dev/null)
 [ "$(head -c 4 "$tmp/snd0.at3")" = "RIFF" ] || { echo "the encoder did not write a RIFF" >&2; exit 1; }
 
-# The firmware refuses the file as the encoder leaves it: atracdenc writes
+# The firmware refuses the file as the encoder leaves it. atracdenc writes
 # the fact chunk, the count of samples, rounded up to whole frames, and
-# sceAtrac checks that frames times the block size do not exceed the data,
-# which that count always does. The true count is the WAV's, so it is
-# written over the encoder's, and the file plays on the console.
+# sceAtrac turns that count plus the decoder's lead-in (the chunk's second
+# word and 69 samples more) into a count of frames that has to be strictly
+# less than the frames the data holds. So the count is written down to the
+# largest that passes: the WAV's own, or a frame or two under the data's
+# end, which a looped clip with a fade never reaches.
 python3 - "$tmp/snd0.wav" "$tmp/snd0.at3" <<'PY'
 import struct, sys
 wav, at3 = sys.argv[1], sys.argv[2]
+
+def chunks(b):
+    pos = 12
+    while pos + 8 <= len(b):
+        tag, n = bytes(b[pos:pos + 4]), struct.unpack('<I', b[pos + 4:pos + 8])[0]
+        yield tag, pos + 8, n
+        pos += 8 + n + (n & 1)
+
 w = open(wav, 'rb').read()
-pos, frames = 12, None
-while pos + 8 <= len(w):
-    tag, n = w[pos:pos + 4], struct.unpack('<I', w[pos + 4:pos + 8])[0]
-    if tag == b'data': frames = n // 4; break
-    pos += 8 + n + (n & 1)
+true = next(n // 4 for tag, at, n in chunks(w) if tag == b'data')
 a = bytearray(open(at3, 'rb').read())
-pos = 12
-while pos + 8 <= len(a):
-    tag, n = bytes(a[pos:pos + 4]), struct.unpack('<I', a[pos + 4:pos + 8])[0]
-    if tag == b'fact':
-        struct.pack_into('<I', a, pos + 8, frames)
-        open(at3, 'wb').write(a)
-        print("fact: %d samples" % frames)
-        break
-    pos += 8 + n + (n & 1)
-else:
-    sys.exit("no fact chunk in the encoder's output")
+fmt = next((at, n) for tag, at, n in chunks(a) if tag == b'fmt ')
+block = struct.unpack('<H', a[fmt[0] + 12:fmt[0] + 14])[0]
+data = next(n for tag, at, n in chunks(a) if tag == b'data')
+fact = next((at, n) for tag, at, n in chunks(a) if tag == b'fact')
+lead = struct.unpack('<I', a[fact[0] + 4:fact[0] + 8])[0] if fact[1] >= 8 else 0
+frames = data // block
+count = true
+while ((count + lead + 69 - 1) >> 10) * block >= data and count > 1024:
+    count -= 1024
+struct.pack_into('<I', a, fact[0], count)
+open(at3, 'wb').write(a)
+print("fact: %d of %d samples, %d frames of %d" % (count, true, (count + lead + 68) >> 10, frames))
 PY
 mv "$tmp/snd0.at3" "$out"
 echo "$out: $(stat -c %s "$out") bytes"
