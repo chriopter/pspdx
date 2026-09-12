@@ -52,7 +52,14 @@ static void cache_path(enum asset_kind kind, const char *id, const char *url,
             safe[n++] = ok ? c : '_';
         }
         safe[n] = '\0';
-        snprintf(out, size, CACHE_DIR "/%s", safe);
+        /* At the origin the served name is Sony's -- every app's picture is
+           called ICON0.PNG -- so the id goes in front of it or the first
+           app's icon would be shown for all of them. A catalog's name
+           already begins with the id and is left as it is, hash and all. */
+        if (strncmp(safe, id, strlen(id)) != 0)
+            snprintf(out, size, CACHE_DIR "/%s-%s", id, safe);
+        else
+            snprintf(out, size, CACHE_DIR "/%s", safe);
         return;
     }
     snprintf(out, size, CACHE_DIR "/%s.%s", id, EXT[kind]);

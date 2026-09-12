@@ -17,6 +17,13 @@ struct manifest {
     size_t size;
     char version[32];
     char repo[256];
+    /* What the .pspdx said about the shape of the zip, straight from the
+       file or from a cache entry's "install", and empty when it said
+       nothing: root is the directory inside the zip that is the package,
+       dir the name it takes under PSP/GAME. Only a zip that is not one
+       directory with the EBOOT in it needs either. */
+    char root[200];
+    char dir[64];
 };
 
 struct install_report {
@@ -65,6 +72,17 @@ int manifest_id_is_safe(const char *id);
 int manifest_rev_in_range(double rev);
 int manifest_size_in_range(double size);
 int manifest_has_sha256(const struct manifest *m);
+
+/* A directory under PSP/GAME, wherever the name came from -- a record on
+   the stick, a .pspdx, a cache entry: a plain name and nothing else, since
+   it is joined to a path that gets written into and, on uninstall,
+   recursively deleted. */
+int manifest_dir_is_safe(const char *dir);
+
+/* A directory inside the zip: relative, going nowhere but down. It may
+   have slashes in it, which is the difference from a dir -- "PSP/GAME/Foo/"
+   is a perfectly ordinary package root. */
+int manifest_root_is_safe(const char *root);
 
 /* Finishes an install interrupted between its two renames. Call once at
    startup, before anything reads the database. */

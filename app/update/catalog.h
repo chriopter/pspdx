@@ -76,11 +76,13 @@ const char *catalog_progress(void);
 
 /* Why a repository, named by its URL, did not make it into the catalog
    when it was asked at the origin: 0 if it did or was never asked for,
-   REFUSED_REPO when GitHub had no such repository or did not answer,
-   REFUSED_RELEASE when it has no release with one zip on it. Only the
-   last one is kept, which is the one the gear tab just asked for. */
+   REFUSED_PSPDX when it has no .pspdx in its root or the one it has is not
+   a v1 file, REFUSED_REPO when GitHub had no such repository or did not
+   answer, REFUSED_RELEASE when it has no release with one zip on it. Only
+   the last one is kept, which is the one the gear tab just asked for. */
 #define REFUSED_REPO (-1)
 #define REFUSED_RELEASE (-2)
+#define REFUSED_PSPDX (-3)
 int catalog_refused(const char *url);
 
 int catalog_check_updates(struct catalog *catalog);

@@ -660,7 +660,9 @@ static int wanted_settled(int *cursor) {
     int found = catalog_find_repo(&catalog, g_wanted_url);
     if (found < 0) {
         int why = catalog_refused(g_wanted_url);
-        if (why == REFUSED_REPO)
+        if (why == REFUSED_PSPDX)
+            snprintf(message, sizeof(message), "no .pspdx at %.62s", g_wanted_name);
+        else if (why == REFUSED_REPO)
             snprintf(message, sizeof(message), "GitHub has no repository %.62s", g_wanted_name);
         else if (why == REFUSED_RELEASE)
             snprintf(message, sizeof(message), "no release with a zip at %.62s", g_wanted_name);

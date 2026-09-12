@@ -147,55 +147,7 @@ int sources_parse_repo(const char *url, struct source_repo *out) {
     const char *at = strchr(p + len, '@');
     if (at && at[1]) snprintf(out->ref, sizeof(out->ref), "%s", at + 1);
     else snprintf(out->ref, sizeof(out->ref), "HEAD");
-    snprintf(out->category, sizeof(out->category), "apps");
     return 1;
-}
-
-/* One word off the front of a line: up to the next space, except that a
-   quote, at the front or after a key=, runs to its closing quote and is
-   dropped, so that a value can have spaces in it. Returns the word,
-   NUL-terminated in place, and moves the cursor past it; NULL when the
-   line is spent. */
-static char *word(char **cursor) {
-    char *p = *cursor;
-    while (*p == ' ' || *p == '\t') p++;
-    if (!*p) return NULL;
-    char *start = p, *out = p;
-    while (*p && *p != ' ' && *p != '\t') {
-        if (*p == '"') {
-            p++;
-            while (*p && *p != '"') *out++ = *p++;
-            if (*p) p++;
-        } else {
-            *out++ = *p++;
-        }
-    }
-    if (*p) p++;
-    *out = '\0';
-    *cursor = p;
-    return start;
-}
-
-/* The words after the URL: the category, then key=value overrides. A key
-   this does not know is passed over, so a list can say more than this
-   build understands. */
-static void overrides(char *rest, struct source_repo *r) {
-    char *w = word(&rest);
-    if (w && !strchr(w, '=')) {
-        snprintf(r->category, sizeof(r->category), "%s", w);
-        w = word(&rest);
-    }
-    for (; w; w = word(&rest)) {
-        char *value = strchr(w, '=');
-        if (!value) continue;
-        *value++ = '\0';
-        struct source_override *o = &r->over;
-        if (strcmp(w, "name") == 0) snprintf(o->name, sizeof(o->name), "%s", value);
-        else if (strcmp(w, "author") == 0) snprintf(o->author, sizeof(o->author), "%s", value);
-        else if (strcmp(w, "summary") == 0) snprintf(o->summary, sizeof(o->summary), "%s", value);
-        else if (strcmp(w, "license") == 0) snprintf(o->license, sizeof(o->license), "%s", value);
-        else if (strcmp(w, "asset") == 0) snprintf(o->asset, sizeof(o->asset), "%s", value);
-    }
 }
 
 int sources_parse_list(const char *text, struct source_list *out) {
@@ -212,14 +164,14 @@ int sources_parse_list(const char *text, struct source_list *out) {
                 trim(url);
                 if (!out->cache[0]) snprintf(out->cache, sizeof(out->cache), "%s", url);
             } else {
-                /* The URL is the first word; the rest of the line is the
-                   category and the overrides. */
-                char *rest = line + strcspn(line, " \t");
-                if (*rest) *rest++ = '\0';
-                if (sources_parse_repo(line, &out->repo[out->count])) {
-                    overrides(rest, &out->repo[out->count]);
+                /* The URL is the whole line. Anything after it is from a
+                   list written for the older shape, where the category and
+                   the overrides stood there; it is passed over rather than
+                   made to refuse the repository, since the .pspdx says all
+                   of it now. */
+                line[strcspn(line, " \t")] = '\0';
+                if (sources_parse_repo(line, &out->repo[out->count]))
                     out->count++;
-                }
             }
         }
         line = end;

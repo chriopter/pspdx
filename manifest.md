@@ -14,7 +14,8 @@ from the release and the EBOOT and never written by hand.
   "summary":  "Ten churches, and the sun through their glass.",
   "category": "demos",
   "license":  "BSD-3-Clause",
-  "media":    "media/"
+  "media":    "media/",
+  "install":  "PSP/GAME/Cathedral/"
 }
 ```
 
@@ -27,14 +28,11 @@ version 2 gets a new name without making a single old file wrong.
 | `schema` | required | |
 | `name` | required, under 40 characters | |
 | `category` | required: `games`, `emulators`, `apps`, `plugins`, `demos` | |
+| `install` | required: the directory inside the zip that is the package, holding the `EBOOT.PBP`; its last part is the name the app gets under `PSP/GAME/` | |
 | `summary` | one line, at most 60 characters | the repository's description |
 | `license` | an SPDX identifier | what GitHub reports |
 | `author` | a name | the repository's owner |
 | `media` | a directory holding `ICON0.PNG`, `PIC1.PNG`, `ICON1.PMF`, `SND0.AT3` under Sony's names, case not mattering | the repository root; the EBOOT for whatever is missing |
-| `release` | a tag, to pin | the latest release that is not a pre-release |
-| `asset` | a glob naming the zip | the only zip on the release |
-| `install.root` | the directory inside the zip that is the package | the shallowest `EBOOT.PBP`'s |
-| `install.dir` | its name under `PSP/GAME/` | the zip's own |
 
 Unknown fields are refused, so a misspelt one is noticed rather than
 ignored.
@@ -46,9 +44,9 @@ ignored.
 | `id` | the repository URL: `io.github.<owner>.<repo>`, lower case, `[a-z0-9]` in the last part, dashes and dots dropped. Nobody types it, so it cannot be wrong, and a fork is its own app. |
 | `version` | the release tag without its `v` |
 | `rev` | the release's `published_at` as unix seconds. Integers compare; version strings do not. **The higher `rev` wins.** |
-| `url`, `size` | the zip on the release |
+| `url`, `size` | the zip on the release, of which there must be exactly one |
 | `sha256` | computed by whoever downloads the whole zip: the cache |
-| the package | `install.root`, else the directory of the shallowest `EBOOT.PBP`; its `PARAM.SFO` must say `CATEGORY` `MG`, a game or app for the Memory Stick |
+| the package | the `install` directory inside the zip; its `PARAM.SFO` must say `CATEGORY` `MG`, a game or app for the Memory Stick |
 | icon, picture, film, sound | the media directory; `ICON0`, `PIC1`, `ICON1`, `SND0` inside the EBOOT for what is not there |
 
 A release that is a pre-release or a draft is not seen. Nothing is ever
@@ -107,7 +105,14 @@ same id from any source. The first list to name an id wins.
 
 **The release in the file.** Version, date, URL and hash were in an earlier
 shape of this file and went stale the first week: a file that has to be
-touched at every release is touched at none. The release knows all of it.
+touched at every release is touched at none. The release knows all of it,
+and which release is current is GitHub's own answer: the latest one that
+is not a draft and not a pre-release. A tag can still be frozen, by the
+curator, with `@tag` on the list line.
+
+**A glob for the package.** In version 1 a release carries exactly one
+zip, or it is not listed. A release with several is a release whose author
+has to be asked something anyway.
 
 **The repository in the file.** Whoever reads the file knows where it came
 from, and a file that named a repository would let a fork claim the

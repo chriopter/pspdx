@@ -69,6 +69,23 @@ int manifest_has_sha256(const struct manifest *m) {
     return 0;
 }
 
+int manifest_dir_is_safe(const char *dir) {
+    /* Sixty-three is what the record's field holds, not the schema's
+       thirty-two: a name derived from a zip has never been held to the
+       schema, and a record already on a stick has to stay removable. */
+    if (!dir || !dir[0] || strlen(dir) > 63) return 0;
+    if (strpbrk(dir, "/\\:") || strstr(dir, "..")) return 0;
+    if (strcmp(dir, ".") == 0) return 0;
+    return 1;
+}
+
+int manifest_root_is_safe(const char *root) {
+    if (!root || strlen(root) >= 200) return 0;
+    if (root[0] == '/' || root[0] == '\\') return 0;
+    if (strstr(root, "..") || strchr(root, ':')) return 0;
+    return 1;
+}
+
 /* ------------------------------------------------------------- download */
 
 struct dl {
@@ -155,13 +172,15 @@ static int rm_rf(const char *path) {
 
 static int safe_relative(const char *rel);
 
-/* Where the package sits inside the archive: the directory of the
+/* Where the package sits inside the archive: install.root out of the
+   .pspdx when the author named one, and otherwise the directory of the
    shallowest EBOOT.PBP, which is the rule the catalog's scanner applies
    too. Of sixteen surveyed release archives, ten put the EBOOT one
    directory down, three at the root and two under PSP/GAME/; the root case
    has no directory name of its own and takes the last part of the id.
    root comes back with its trailing slash, or empty; dir is what the
-   directory under PSP/GAME will be called. */
+   directory under PSP/GAME will be called -- install.dir when the file
+   named one. */
 static void slashes(char *name) {
     for (char *p = name; *p; p++) if (*p == '\\') *p = '/';
 }
@@ -179,11 +198,43 @@ static int ends_with_eboot(const char *name) {
     return n == 9 || name[n - 10] == '/';
 }
 
-static int find_package(struct zipread *z, const char *id, char *root, size_t rootsz,
-                        char *dir, size_t dirsz) {
+/* The package root the .pspdx named, if it named one: it is taken as it
+   stands, with a trailing slash put on, and only checked for being a
+   relative path and for actually holding the EBOOT. A root that names
+   nothing in the zip would unpack an empty directory and commit it over a
+   working install, which is worse than refusing. */
+static int stated_root(struct zipread *z, const char *stated, char *root, size_t rootsz) {
+    if (!manifest_root_is_safe(stated)) {
+        logline("unpack: refusing the stated root %s", stated);
+        return -1;
+    }
+    size_t n = strlen(stated);
+    if (n + 2 > rootsz) { logline("unpack: stated root too long"); return -1; }
+    memcpy(root, stated, n);
+    for (size_t i = 0; i < n; i++) if (root[i] == '\\') root[i] = '/';
+    if (n && root[n - 1] != '/') root[n++] = '/';
+    root[n] = '\0';
+
+    struct zipentry e;
+    int rc, found = 0;
+    for (rc = zip_first(z, &e); rc > 0 && !found; rc = zip_next(z, &e)) {
+        if (e.name_truncated) continue;
+        slashes(e.name);
+        if (strncmp(e.name, root, n) == 0 && ends_with_eboot(e.name)) found = 1;
+    }
+    if (rc < 0) return -1;
+    if (!found) {
+        logline("unpack: no EBOOT.PBP under the stated root %s", root);
+        return -1;
+    }
+    return 0;
+}
+
+/* The shallowest EBOOT.PBP's directory, for a zip whose .pspdx said
+   nothing about its shape. */
+static int shallowest_root(struct zipread *z, char *root, size_t rootsz) {
     struct zipentry e;
     int rc, depth = -1, tied = 0;
-    root[0] = dir[0] = '\0';
     for (rc = zip_first(z, &e); rc > 0; rc = zip_next(z, &e)) {
         if (e.name_truncated) continue;
         slashes(e.name);
@@ -206,6 +257,31 @@ static int find_package(struct zipread *z, const char *id, char *root, size_t ro
     if (depth < 0) { logline("unpack: no EBOOT.PBP in archive"); return -1; }
     if (tied) { logline("unpack: two EBOOT.PBP at the same depth"); return -1; }
     if (!safe_relative(root)) { logline("unpack: refusing package at %s", root); return -1; }
+    return 0;
+}
+
+static int find_package(struct zipread *z, const struct manifest *m, char *root,
+                        size_t rootsz, char *dir, size_t dirsz) {
+    const char *id = m->id;
+    root[0] = dir[0] = '\0';
+
+    int stated = m->root[0] != '\0';
+    if (stated ? stated_root(z, m->root, root, rootsz) < 0
+               : shallowest_root(z, root, rootsz) < 0) return -1;
+
+    /* The name the file gave it, when it gave one. A stated name is the
+       author's, and it is what the cache's entry says too, so the same
+       package lands in the same directory whichever path installed it. */
+    if (m->dir[0]) {
+        if (!manifest_dir_is_safe(m->dir) || strlen(m->dir) >= dirsz) {
+            logline("unpack: refusing the stated directory %s", m->dir);
+            return -1;
+        }
+        snprintf(dir, dirsz, "%s", m->dir);
+        logline("unpack: package at %s -> PSP/GAME/%s, as the file says",
+                root[0] ? root : "(root)", dir);
+        return 0;
+    }
 
     /* The directory's own name: the root's last part, or the id's. */
     const char *name;
@@ -224,7 +300,10 @@ static int find_package(struct zipread *z, const char *id, char *root, size_t ro
     if (len == 0 || len >= dirsz) { logline("unpack: unusable directory name"); return -1; }
     memcpy(dir, name, len);
     dir[len] = '\0';
-    logline("unpack: package at %s%s -> PSP/GAME/%s", root[0] ? root : "", root[0] ? "" : "(root)", dir);
+    if (!manifest_dir_is_safe(dir)) { logline("unpack: refusing directory %s", dir); return -1; }
+    logline("unpack: package at %s%s -> PSP/GAME/%s%s",
+            root[0] ? root : "", root[0] ? "" : "(root)", dir,
+            stated ? ", root as the file says" : "");
     return 0;
 }
 
@@ -399,8 +478,7 @@ int uninstall(const char *id) {
     /* The record is a file on a stick anyone can edit, and what follows is a
        recursive delete: only a plain directory name under PSP/GAME is ever
        acted on, never a path. */
-    if (!rec.dir[0] || strpbrk(rec.dir, "/\\:") || strstr(rec.dir, "..") ||
-        strcmp(rec.dir, ".") == 0) {
+    if (!manifest_dir_is_safe(rec.dir)) {
         logline("uninstall: %s names no directory of its own", id);
         return -3;
     }
@@ -485,7 +563,7 @@ int install_release(const struct manifest *release, struct install_report *rep,
         sceIoRemove(ARCHIVE);
         return -3;
     }
-    int rc = find_package(&z, m.id, root, sizeof(root), dir, sizeof(dir));
+    int rc = find_package(&z, &m, root, sizeof(root), dir, sizeof(dir));
     if (rc == 0) {
         strncpy(rep->dir, dir, sizeof(rep->dir) - 1);
         mkdir_p(STAGE);

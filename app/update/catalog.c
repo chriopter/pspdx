@@ -5,8 +5,8 @@
 #include <strings.h>
 
 #include "update/catalog.h"
-#include "util/pbp.h"
 #include "update/sources.h"
+#include "update/pspdx.h"
 #include "install/install.h"
 #include "util/runtime.h"
 
@@ -133,6 +133,17 @@ static int parse(struct catalog *catalog, const char *base) {
                package could never be found at its source once the cache
                is gone. */
             memcpy(m->repo, entry->repo, sizeof(entry->repo));
+            /* The shape of the zip, as the app's .pspdx stated it and the
+               cache copied it over. Checked where it is used, in
+               install.c, so that a cache and the origin path are held to
+               the same rule by the same code. */
+            cJSON *install = cJSON_GetObjectItemCaseSensitive(app, "install");
+            if (cJSON_IsObject(install)) {
+                copy_str(m->root, sizeof(m->root),
+                         cJSON_GetObjectItemCaseSensitive(install, "root"));
+                copy_str(m->dir, sizeof(m->dir),
+                         cJSON_GetObjectItemCaseSensitive(install, "dir"));
+            }
         }
 
         char shot[256];
@@ -255,11 +266,38 @@ static cJSON *fetch_json(const char *url) {
     return root;
 }
 
-/* One repository asked at the origin -- api.github.com for the repository
-   and for its release, two small files -- and made into an entry. Nothing
-   there is a picture; the console shows nothing on the card rather than
-   spend a third request finding out. Returns 1 taken, 0 already there,
-   -1 refused, with why kept for the gear tab. */
+static void refuse(const char *url, int why) {
+    snprintf(g_refused_url, sizeof(g_refused_url), "%s", url);
+    g_refused_rc = why;
+}
+
+/* One of the media directory's four files, at raw.githubusercontent.com.
+   Sony's own spelling and nothing else is tried: the cache can list the
+   directory and match without regard to case, while a console can only ask
+   for a name, and sixteen guesses a picture is sixteen handshakes. An
+   author who wants the console to see the files calls them ICON0.PNG,
+   PIC1.PNG, ICON1.PMF and SND0.AT3. */
+static void media_url(const struct source_repo *repo, const char *media,
+                      const char *file, char *out, size_t size) {
+    char url[512];
+    int n = snprintf(url, sizeof(url), "https://raw.githubusercontent.com/%s/%s/%s/%s%s%s",
+                     repo->owner, repo->name, repo->ref, media,
+                     media[0] ? "/" : "", file);
+    /* A URL too long for the field is no URL at all: a cut one would ask
+       for something else and be answered. */
+    if (n < 0 || (size_t)n >= size) { out[0] = '\0'; return; }
+    memcpy(out, url, (size_t)n + 1);
+}
+
+/* One repository asked at the origin and made into an entry: its .pspdx
+   at raw.githubusercontent.com first, since that file is the consent and a
+   repository without one is not an app; then api.github.com for the
+   release, and for the repository too unless the file already said
+   everything that would come from it. The pictures are four more URLs
+   under the media directory, not fetched here -- the card and the row ask
+   for them when the cursor arrives, exactly as they do from a cache.
+   Returns 1 taken, 0 already there, -1 refused, with why kept for the
+   gear tab. */
 static int take_origin(struct catalog *catalog, const struct source_repo *repo) {
     char id[96], url[SOURCE_URL], api[SOURCE_URL];
     sources_repo_id(repo, id, sizeof(id));
@@ -267,48 +305,84 @@ static int take_origin(struct catalog *catalog, const struct source_repo *repo) 
     if (catalog->count >= MAX_APPS) return -1;
     if (has_id(catalog, id)) return 0;
 
+    struct pspdx_file file;
+    char reason[64];
+    snprintf(api, sizeof(api), "https://raw.githubusercontent.com/%s/%s/%s/.pspdx",
+             repo->owner, repo->name, repo->ref);
+    if (fetch_text(api, NULL) < 0) {
+        logline("origin: %s/%s has no .pspdx at %s, not listed",
+                repo->owner, repo->name, repo->ref);
+        refuse(url, REFUSED_PSPDX);
+        return -1;
+    }
+    if (pspdx_parse(response, response_len, &file, reason, sizeof(reason)) < 0) {
+        logline("origin: %s/%s .pspdx refused: %s", repo->owner, repo->name, reason);
+        refuse(url, REFUSED_PSPDX);
+        return -1;
+    }
+    logline("origin: %s/%s .pspdx: %s, %s", repo->owner, repo->name,
+            file.name, file.category);
+
     struct app_entry *entry = &catalog->apps[catalog->count];
     memset(entry, 0, sizeof(*entry));
     snprintf(entry->id, sizeof(entry->id), "%s", id);
     snprintf(entry->repo, sizeof(entry->repo), "%s", url);
-    snprintf(entry->author, sizeof(entry->author), "%s", repo->owner);
-    snprintf(entry->category, sizeof(entry->category), "%s", repo->category);
+    snprintf(entry->name, sizeof(entry->name), "%s", file.name);
+    snprintf(entry->category, sizeof(entry->category), "%s", file.category);
+    snprintf(entry->author, sizeof(entry->author), "%s",
+             file.author[0] ? file.author : repo->owner);
+    snprintf(entry->summary, sizeof(entry->summary), "%s", file.summary);
+    snprintf(entry->license, sizeof(entry->license), "%s", file.license);
 
-    snprintf(api, sizeof(api), "https://api.github.com/repos/%s/%s", repo->owner, repo->name);
-    cJSON *root = fetch_json(api);
-    if (!root) {
-        snprintf(g_refused_url, sizeof(g_refused_url), "%s", url);
-        g_refused_rc = REFUSED_REPO;
-        return -1;
+    /* The repository itself is one more request, and sixty an hour are
+       allowed from one address: it is asked only for what the file left
+       out. A file that names its author, its summary and its licence is
+       the whole answer, and the request is not made at all. */
+    if (!file.author[0] || !file.summary[0] || !file.license[0]) {
+        snprintf(api, sizeof(api), "https://api.github.com/repos/%s/%s",
+                 repo->owner, repo->name);
+        cJSON *root = fetch_json(api);
+        if (!root) {
+            /* The file said the repository is an app, and it is. GitHub
+               being unreachable or out of requests costs the summary and
+               the licence, not the entry. */
+            logline("origin: %s/%s: no repository answer, the file stands alone",
+                    repo->owner, repo->name);
+        } else {
+            cJSON *description = cJSON_GetObjectItemCaseSensitive(root, "description");
+            if (!entry->summary[0] && cJSON_IsString(description))
+                cut_summary(entry->summary, sizeof(entry->summary), description->valuestring);
+            cJSON *license = cJSON_GetObjectItemCaseSensitive(root, "license");
+            if (!entry->license[0] && cJSON_IsObject(license))
+                copy_str(entry->license, sizeof(entry->license),
+                         cJSON_GetObjectItemCaseSensitive(license, "spdx_id"));
+            /* What GitHub says when it saw a licence file it could not name. */
+            if (strcmp(entry->license, "NOASSERTION") == 0) entry->license[0] = '\0';
+            cJSON_Delete(root);
+            logline("origin: %s/%s: repository asked for%s%s%s", repo->owner, repo->name,
+                    file.author[0] ? "" : " author", file.summary[0] ? "" : " summary",
+                    file.license[0] ? "" : " licence");
+        }
+    } else {
+        logline("origin: %s/%s: the file says all three, no repository request",
+                repo->owner, repo->name);
     }
-    /* The repository's name with its dashes as spaces stands in for the
-       title until the SFO's is on the stick. */
-    char name[40];
-    copy_str(name, sizeof(name), cJSON_GetObjectItemCaseSensitive(root, "name"));
-    for (char *p = name; *p; p++) if (*p == '-') *p = ' ';
-    cJSON *description = cJSON_GetObjectItemCaseSensitive(root, "description");
-    if (cJSON_IsString(description))
-        cut_summary(entry->summary, sizeof(entry->summary), description->valuestring);
-    cJSON *license = cJSON_GetObjectItemCaseSensitive(root, "license");
-    if (cJSON_IsObject(license))
-        copy_str(entry->license, sizeof(entry->license),
-                 cJSON_GetObjectItemCaseSensitive(license, "spdx_id"));
-    /* What GitHub says when it saw a licence file it could not name. */
-    if (strcmp(entry->license, "NOASSERTION") == 0) entry->license[0] = '\0';
-    cJSON_Delete(root);
-    snprintf(entry->name, sizeof(entry->name), "%.39s", name[0] ? name : repo->name);
 
-    if (strcmp(repo->ref, "HEAD") == 0)
+    /* Which release: the list's @tag pins hardest, then the file's own
+       release, and with neither it is whatever GitHub calls latest. */
+    const char *pinned = strcmp(repo->ref, "HEAD") != 0 ? repo->ref
+                       : file.release[0] ? file.release : NULL;
+    if (pinned)
+        snprintf(api, sizeof(api), "https://api.github.com/repos/%s/%s/releases/tags/%s",
+                 repo->owner, repo->name, pinned);
+    else
         snprintf(api, sizeof(api), "https://api.github.com/repos/%s/%s/releases/latest",
                  repo->owner, repo->name);
-    else
-        snprintf(api, sizeof(api), "https://api.github.com/repos/%s/%s/releases/tags/%s",
-                 repo->owner, repo->name, repo->ref);
-    root = fetch_json(api);
+    cJSON *root = fetch_json(api);
     if (!root) {
-        logline("origin: %s/%s has no release", repo->owner, repo->name);
-        snprintf(g_refused_url, sizeof(g_refused_url), "%s", url);
-        g_refused_rc = REFUSED_RELEASE;
+        logline("origin: %s/%s has no release %s", repo->owner, repo->name,
+                pinned ? pinned : "(latest)");
+        refuse(url, REFUSED_RELEASE);
         return -1;
     }
     struct manifest *m = &entry->release;
@@ -320,9 +394,9 @@ static int take_origin(struct catalog *catalog, const struct source_repo *repo) 
     snprintf(m->version, sizeof(m->version), "%.31s", tag[0] == 'v' ? tag + 1 : tag);
     cJSON *published = cJSON_GetObjectItemCaseSensitive(root, "published_at");
     m->rev = iso8601(cJSON_IsString(published) ? published->valuestring : NULL);
-    /* The zip: the only one on the release, or the one the list's asset=
+    /* The zip: the only one on the release, or the one the file's asset
        glob names when there are several. */
-    const char *glob = repo->over.asset[0] ? repo->over.asset : NULL;
+    const char *glob = file.asset[0] ? file.asset : NULL;
     int zips = 0;
     cJSON *asset;
     cJSON_ArrayForEach(asset, cJSON_GetObjectItemCaseSensitive(root, "assets")) {
@@ -339,30 +413,27 @@ static int take_origin(struct catalog *catalog, const struct source_repo *repo) 
     if (zips != 1 || !m->rev || !m->url[0] || !m->size) {
         logline("origin: %s/%s %s: %d zip%s%s, rev %u", repo->owner, repo->name,
                 tag[0] ? tag : "no tag", zips, zips == 1 ? "" : "s",
-                glob ? " matching asset=" : "", m->rev);
-        snprintf(g_refused_url, sizeof(g_refused_url), "%s", url);
-        g_refused_rc = REFUSED_RELEASE;
+                glob ? " matching the file's asset" : "", m->rev);
+        refuse(url, REFUSED_RELEASE);
         return -1;
     }
     entry->has_release = 1;
+    /* The shape of the zip, as the author stated it; install.c holds both
+       to their rules, the same ones a cache entry's are held to. */
+    snprintf(m->root, sizeof(m->root), "%s", file.root);
+    snprintf(m->dir, sizeof(m->dir), "%s", file.dir);
 
-    /* Once the app is on the stick its own EBOOT says what it is called,
-       and that is the name the XMB shows too; the repository's name was
-       only for as long as there was nothing better. */
-    char pbp[128], title[40];
-    if (pbp_installed_path(entry->id, pbp, sizeof(pbp)) == 0 &&
-        pbp_title(pbp, title, sizeof(title)) == 0 && title[0])
-        snprintf(entry->name, sizeof(entry->name), "%s", title);
+    /* The four pictures under the media directory. Nothing is fetched now:
+       a 404 is simply no picture and is logged where it happens, once, by
+       whoever went looking -- the row for the icon, the card for the rest. */
+    media_url(repo, file.media, "ICON0.PNG", entry->icon, sizeof(entry->icon));
+    media_url(repo, file.media, "PIC1.PNG", entry->screenshot, sizeof(entry->screenshot));
+    media_url(repo, file.media, "ICON1.PMF", entry->video, sizeof(entry->video));
+    media_url(repo, file.media, "SND0.AT3", entry->sound, sizeof(entry->sound));
 
-    /* The list's word over what was derived, where it has one. */
-    const struct source_override *o = &repo->over;
-    if (o->name[0]) snprintf(entry->name, sizeof(entry->name), "%s", o->name);
-    if (o->author[0]) snprintf(entry->author, sizeof(entry->author), "%s", o->author);
-    if (o->summary[0]) snprintf(entry->summary, sizeof(entry->summary), "%s", o->summary);
-    if (o->license[0]) snprintf(entry->license, sizeof(entry->license), "%s", o->license);
-
-    logline("origin: %s/%s %s rev %u, %lu bytes", repo->owner, repo->name, tag,
-            m->rev, (unsigned long)m->size);
+    logline("origin: %s/%s %s rev %u, %lu bytes, media %s/", repo->owner, repo->name,
+            tag, m->rev, (unsigned long)m->size,
+            file.media[0] ? file.media : "(root)");
     settle_state(entry);
     catalog->count++;
     catalog->total++;
