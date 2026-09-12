@@ -137,8 +137,17 @@ sleep 1
 # scales it, so what is on screen is what a PSP shows, pixel for pixel.
 # The ini is rewritten by a running emulator on exit, which is why this
 # comes after the old instance is gone.
+# The settings and the keyboard map under dev/ppsspp, so that every desk and
+# every rig plays the same way.
 INI="$MS/PSP/SYSTEM/ppsspp.ini"
-[ -f "$INI" ] && sed -i 's/^InternalResolution = .*/InternalResolution = 1/' "$INI"
+if [ -f "$INI" ]; then
+	grep -v '^#' "$HERE/dev/ppsspp/settings" | while IFS='=' read -r key value; do
+		key=$(printf '%s' "$key" | sed 's/ *$//'); value=$(printf '%s' "$value" | sed 's/^ *//')
+		[ -n "$key" ] && sed -i "s/^$key = .*/$key = $value/" "$INI"
+	done
+fi
+mkdir -p "$MS/PSP/SYSTEM"
+cp "$HERE/dev/ppsspp/controls.ini" "$MS/PSP/SYSTEM/controls.ini"
 systemd-run --user --collect --quiet --unit="$UNIT" \
   --setenv=SDL_VIDEODRIVER=wayland --setenv=WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-1}" \
   flatpak run --socket=wayland --share=network $AUDIO --env=PSPDX_OWNER="$OWNER" --filesystem="$MS" \

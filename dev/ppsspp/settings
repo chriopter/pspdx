@@ -1,0 +1,8 @@
+# PPSSPP settings the desk and the rig both want, one "Key = Value" a line,
+# applied to PSP/SYSTEM/ppsspp.ini by dev/start and app/run-ppsspp.sh: a key
+# that is in the file is set, one that is not is left alone. controls.ini
+# beside this file is copied whole -- it is the keyboard map the README
+# describes, and every machine should have the same one.
+InternalResolution = 1
+DumpFrames = False
+DumpAudio = False

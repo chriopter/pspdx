@@ -21,6 +21,11 @@ is installed, updates first, *Update all* while any wait), the basket, then
 the categories. Left alone for ten seconds the shell fades out and leaves the
 water and the film; any key brings it back.
 
+Under PPSSPP the keys are what `dev/ppsspp/controls.ini` says, which
+dev/start installs: × S, ○ D, □ A, △ W, START Enter, SELECT Space, L Q,
+R E, the d-pad on the arrows, the stick on I J K L. There is no HOME;
+Esc is the emulator's own pause menu.
+
 To get your open source licensed brew listed, send a PR to
 [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) or open an issue.
 

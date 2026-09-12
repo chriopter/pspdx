@@ -90,8 +90,17 @@ rm -f "$MS/PSPDX.LOG" "$MS/PSPDX.BMP" "$MS/PSPDX1.BMP" "$MS/PSPDX.BENCH" "$MS/PS
 # scales it, so what is on screen is what a PSP shows, pixel for pixel.
 # The ini is rewritten by a running emulator on exit; a rig run that
 # overlaps one loses this, which is harmless for a rig.
+# The settings and the keyboard map under dev/ppsspp, so that every desk and
+# every rig plays the same way.
 INI="$MS/PSP/SYSTEM/ppsspp.ini"
-[ -f "$INI" ] && sed -i 's/^InternalResolution = .*/InternalResolution = 1/' "$INI"
+if [ -f "$INI" ]; then
+	grep -v '^#' "$HERE/../dev/ppsspp/settings" | while IFS='=' read -r key value; do
+		key=$(printf '%s' "$key" | sed 's/ *$//'); value=$(printf '%s' "$value" | sed 's/^ *//')
+		[ -n "$key" ] && sed -i "s/^$key = .*/$key = $value/" "$INI"
+	done
+fi
+mkdir -p "$MS/PSP/SYSTEM"
+cp "$HERE/../dev/ppsspp/controls.ini" "$MS/PSP/SYSTEM/controls.ini"
 
 # In its own session, so that the kill below reaches the emulator inside
 # the flatpak sandbox and not only the launcher: an instance that survives
