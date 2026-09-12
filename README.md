@@ -26,57 +26,59 @@ dev/start installs: × S, ○ D, □ A, △ W, START Enter, SELECT Space, L Q,
 R E, the d-pad on the arrows, the stick on I J K L. There is no HOME;
 Esc is the emulator's own pause menu.
 
-To get your open source licensed brew listed: a GitHub release with one zip
-that has an `EBOOT.PBP` in it, and one line in
+To get your open source licensed brew listed: a `.pspdx` file in your
+repository's root, a GitHub release with one zip that has an `EBOOT.PBP`
+in it, and one line in
 [pspdx-catalog](https://github.com/chriopter/pspdx-catalog)'s `repos.txt`.
-Or open an issue and ask. Nothing to write, nothing to maintain.
+[pspdx-demo](https://github.com/chriopter/pspdx-demo) is the whole of it,
+done right, in a hello world.
 
 ## What an app is
 
-A GitHub repository with a release, and in the release a zip with an
-`EBOOT.PBP`. Everything the console shows is derived from that:
-[manifest.md](manifest.md) says from where, [architecture.md](architecture.md)
-says why.
+A repository that says so. [manifest.md](manifest.md) is the format,
+[`schema/v1.pspdx`](schema/v1.pspdx) the schema,
+[architecture.md](architecture.md) the why.
 
 <details>
-<summary><b>Derived, not declared</b> — the id from the URL, the title from the SFO, the pictures from the PBP, the version from the release.</summary>
+<summary><b><code>.pspdx</code></b> — the author's consent and words. Everything that changes comes from the release and the EBOOT.</summary>
 
-| field | source |
-|---|---|
-| id | the repository URL, `io.github.<owner>.<repo>` |
-| name | `TITLE` in the EBOOT's `PARAM.SFO` |
-| author | the repository's owner |
-| summary | the repository's description |
-| license | what GitHub reports |
-| category | the list: the word after the URL |
-| version, date, zip, size | the release |
-| sha256 | computed by the cache, which downloads the whole zip |
-| icon, picture, film, sound | `ICON0.PNG`, `PIC1.PNG`, `ICON1.PMF`, `SND0.AT3` in the EBOOT |
+```json
+{
+  "schema":   "https://github.com/chriopter/pspdx/blob/master/schema/v1.pspdx",
+  "name":     "PSPDX Demo",
+  "summary":  "Hello, PSP: the smallest thing PSPDX can list.",
+  "category": "demos",
+  "license":  "MIT",
+  "media":    "media/"
+}
+```
 
-The bar is Sony's: a title, an ICON0 and a PIC1 in the PBP. `ICON1.PMF`
-and `SND0.AT3` make the card move and sound;
-[`app/tools/eboot-media/`](app/tools/eboot-media/) makes them from an MP4
-and a WAV. A line on the list can override any derived word, for the title
-that is an abbreviation or the licence GitHub cannot see.
+Required: `schema`, `name`, `category`. The rest is optional and derived
+when absent: the summary from the repository's description, the licence
+from GitHub, the author from the owner, the pictures from `ICON0.PNG`,
+`PIC1.PNG`, `ICON1.PMF` and `SND0.AT3` in the media directory or, failing
+that, inside the EBOOT. Never in the file: the version, the date, the zip,
+its size and hash, which the release knows, and the id, which is the
+repository URL. A file that has to be touched at every release is touched
+at none.
 
 </details>
 
 <details>
 <summary><b>Lists and the catalog</b> — where the console finds apps: a text file of repositories, and a cache anyone can build.</summary>
 
-A *list* is a text file, one GitHub repository a line with its category.
-A `cache` line at the top names a `catalog.json` that has done the
-deriving already and mirrors the pictures out of the EBOOTs; the console
-takes the cache when it answers and asks GitHub's API at the origin for
-whatever it did not cover, two small requests a repository. An installed
-app is pictured from its own EBOOT on the stick either way.
+A *list* is a text file, one GitHub repository a line. A `cache` line at
+the top names a `catalog.json` that has read every `.pspdx`, verified every
+release and mirrored the pictures; the console takes the cache when it
+answers and reads at the origin what it did not cover: the file and the
+pictures from `raw.githubusercontent.com`, the release from GitHub's API.
+An installed app is pictured from its own EBOOT on the stick either way.
 
 [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) is the list the
 console ships with, `repos.txt`, and the workflow that rebuilds its cache
 every hour. Anyone can publish another; the console keeps its lists in
 `PSP/PSPDX/sources.txt` and takes more through the gear tab, where a single
-repository typed as `owner/repo` is a list of one: an app in no catalog at
-all installs the same way.
+repository typed as `owner/repo` is a list of one.
 
 </details>
 
@@ -153,7 +155,7 @@ below are relative to `app/`.
 
 - One request gets the whole index: [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) is folded into a single `catalog.json`. The PSP pays per TLS handshake, not per byte.
 - Downloads come from the author's own release. PSPDX hosts nothing and mirrors nothing.
-- The truth is the author's repository and release; the index is a cache of what they say. A list without a cache still works: the console asks GitHub for each app itself.
+- The truth is the author's `.pspdx`, release and EBOOT; the index is a cache of what they say. A list without a cache still works: the console reads each app at the origin itself.
 - TLS 1.3, with the seed collected off the analog stick at startup, because the PSP has no usable PRNG.
 - Every manifest sits on the same GitHub host, so one handshake covers the whole update check.
 
