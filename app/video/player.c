@@ -21,10 +21,11 @@
 #define FILM_STACK 0x4000
 
 static const unsigned char *g_psmf;     /* the whole stream, header and all */
-static size_t g_psmf_len;
+static struct psmf_info g_info;        /* what its header says */
+static unsigned g_frame_ticks;          /* one picture's stay, at 90 kHz */
 static const unsigned char *g_stream;   /* the packs, after the header */
 static int g_packs, g_next_pack;
-static int g_modules;
+static int g_avcodec, g_modules;
 
 static SceMpeg g_mpeg;
 static SceMpegRingbuffer g_ring;
@@ -57,12 +58,20 @@ static SceInt32 feed(ScePVoid data, SceInt32 packets, ScePVoid param) {
     return packets;
 }
 
-static int modules_up(void) {
-    if (g_modules) return 1;
-    if (sceUtilityLoadAvModule(PSP_AV_MODULE_AVCODEC) < 0) {
-        logline("player: avcodec module");
+int player_avcodec_up(void) {
+    if (g_avcodec) return 1;
+    int rc = sceUtilityLoadAvModule(PSP_AV_MODULE_AVCODEC);
+    if (rc < 0) {
+        logline("player: avcodec module %08x", rc);
         return 0;
     }
+    g_avcodec = 1;
+    return 1;
+}
+
+static int modules_up(void) {
+    if (g_modules) return 1;
+    if (!player_avcodec_up()) return 0;
     if (sceUtilityLoadAvModule(PSP_AV_MODULE_MPEGBASE) < 0) {
         logline("player: mpegbase module");
         return 0;
@@ -75,10 +84,12 @@ static void stream_close(void);
 
 static int stream_open(void) {
     if (g_open) stream_close();
-    if (g_psmf_len < PSMF_HEADER + PSMF_PACK || !modules_up()) return -1;
+    if (g_info.stream_size < PSMF_PACK || !modules_up()) return -1;
 
-    g_stream = g_psmf + PSMF_HEADER;
-    g_packs = (int)((g_psmf_len - PSMF_HEADER) / PSMF_PACK);
+    /* Where the header says the packs are, not where psmf_build puts
+       them: an ICON1.PMF out of an EBOOT says so itself. */
+    g_stream = g_psmf + g_info.stream_offset;
+    g_packs = (int)(g_info.stream_size / PSMF_PACK);
     g_next_pack = 0;
 
     int rc = sceMpegInit();
@@ -176,10 +187,11 @@ static int decode_thread(SceSize args, void *argp) {
     int paced = 0;
 
     while (!g_quit) {
-        /* Thirty pictures a second by the clock, not by the frame: when the
+        /* The film's own rate by the clock, not by the frame: when the
            thread was held off for a while the next pictures come back to
            back until the film is in step again. */
-        if ((unsigned)paced >= (now_ms() - started) * 30 / 1000) {
+        if ((unsigned long long)paced * g_frame_ticks >=
+            (unsigned long long)(now_ms() - started) * 90) {
             sceKernelDelayThread(2000);
             continue;
         }
@@ -214,8 +226,15 @@ static int decode_thread(SceSize args, void *argp) {
 int player_start(const unsigned char *psmf, size_t len, void *frame_a,
                  void *frame_b, int stride) {
     player_stop();
+    /* Read here, on the caller's thread, so a film that is not a PSMF at
+       all is refused before a thread is spent on it. */
+    if (psmf_parse(psmf, len, &g_info) != 0) {
+        logline("player: not a psmf");
+        g_failed = 1;
+        return -1;
+    }
+    g_frame_ticks = psmf_frame_ticks(&g_info);
     g_psmf = psmf;
-    g_psmf_len = len;
     g_stride = stride;
     g_buf[0] = frame_a;
     g_buf[1] = frame_b;
@@ -266,5 +285,4 @@ void player_stop(void) {
     }
     g_ready = 0;
     g_psmf = 0;
-    g_psmf_len = 0;
 }

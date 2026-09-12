@@ -34,4 +34,10 @@ int player_failed(void);
    has finished. Safe when nothing was started. */
 void player_stop(void);
 
+/* Loads the firmware's AVCODEC module, once, for whichever side asks
+   first: the film's decoder sits on it and so does the card's sound, and
+   the firmware refuses to load a module a second time. Returns 1 when it
+   is there. */
+int player_avcodec_up(void);
+
 #endif

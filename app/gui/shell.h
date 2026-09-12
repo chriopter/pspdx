@@ -123,11 +123,13 @@ void shell_menu(const char *title, const char *const *items,
                 int count, int cursor);
 
 /* The info band over the dimmed browser: what this session is connected to
-   and what it is standing on, and at its foot the two things that can be
-   done about either. action is which of them the cursor is on. Drawn while
-   open, and nothing more -- what moves that cursor and what takes the row
-   under it is read in the main loop. */
-#define SHELL_INFO_ACTIONS 2
+   and what it is standing on, and at its foot the things that can be done
+   about either -- the catalog fetched again, a list or a repository added
+   to where it comes from, one repository fetched and offered, the entropy
+   swept again. action is which of them the cursor is on, in that order.
+   Drawn while open, and nothing more -- what moves that cursor and what
+   takes the row under it is read in the main loop. */
+#define SHELL_INFO_ACTIONS 4
 void shell_info(int open, int action);
 
 /* Idle: the whole interface gone but the picture, the room left standing

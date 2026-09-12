@@ -1,0 +1,33 @@
+name: pspdx release
+description: >-
+  Writes the release half of app.pspdx at every release, commits it to the
+  default branch and attaches a copy to the release.
+
+inputs:
+  token:
+    description: >-
+      A token that can push to the default branch and upload release assets.
+      The workflow's own does, given `permissions: contents: write`.
+    default: ${{ github.token }}
+  asset:
+    description: >-
+      A glob naming which release file is the package, when the release
+      carries more than one zip. Overrides the "asset" field of app.pspdx.
+    default: ""
+  tag:
+    description: >-
+      The release's tag, for a workflow that creates the release itself:
+      a release made with GITHUB_TOKEN fires no `release` event, so the
+      action runs as the next step instead and fetches the release by tag.
+      Empty means the `release` event's payload is used.
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - run: python3 "${{ github.action_path }}/release.py"
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.token }}
+        PSPDX_ASSET: ${{ inputs.asset }}
+        PSPDX_TAG: ${{ inputs.tag }}

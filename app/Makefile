@@ -1,7 +1,7 @@
 TARGET = pspdx
 OBJS = main.o gui/screen.o gui/entropy_screen.o gui/gfx.o gui/font.o \
-       gui/image.o gui/lattice.o gui/title.o gui/preview.o gui/icons.o gui/marks.o gui/shell.o logic/entropy.o network/https.o network/bench.o \
-       update/catalog.o update/assets.o update/sync.o install/install.o \
+       gui/image.o gui/lattice.o gui/title.o gui/preview.o gui/icons.o gui/marks.o gui/shell.o gui/osk.o logic/entropy.o network/https.o network/bench.o \
+       update/catalog.o update/sources.o update/assets.o update/sync.o install/install.o \
        install/zipread.o audio/audio.o audio/synth.o audio/music.o \
        audio/cues.o video/mp4.o video/psmf.o video/player.o util/runtime.o
 
@@ -32,13 +32,18 @@ LIBDIR = $(WOLFSSL_PREFIX)/lib
 LIBS = -lwolfssl -lcjson -lintrafont -lpng -lz -lm \
        -lpspgu -lpspgum -lpspmpeg -lpspaudio -lpspsemaphore_660 -lpsppower \
        -lpspnet_resolver -lpspnet_apctl -lpspnet_inet -lpspnet \
-       -lpsputility -lpspdebug -lpspdisplay -lpspge -lpspctrl
+       -lpsputility -lpspdebug -lpspdisplay -lpspge -lpspctrl -lpspatrac3
 
 EXTRA_TARGETS = EBOOT.PBP
 PSP_EBOOT_TITLE = PSPDX
 # The picture the XMB shows beside the title, and the one the catalog lists
 # the client under: the same file, 144x80, as every PSP package carries.
 PSP_EBOOT_ICON = assets/icon0.png
+# The rest of what Sony put in a PBP, and what the catalog takes out of one:
+# the picture on the card, a six-second film, the tune under the card.
+PSP_EBOOT_PIC1 = assets/pic1.png
+PSP_EBOOT_ICON1 = assets/icon1.pmf
+PSP_EBOOT_SND0 = assets/snd0.at3
 
 PSPSDK = $(shell psp-config --pspsdk-path)
 include $(PSPSDK)/lib/build.mak

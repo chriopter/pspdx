@@ -1,54 +1,55 @@
 # Architecture
 
-PSPDX is an index, not a host. It knows what exists and what the current
-version of it is; the files themselves stay in their authors' releases.
+PSPDX is an index, not a host. The truth about an app is one file in its
+author's own repository, `app.pspdx`; the files themselves stay in the
+author's release; the index is a cache of what the files say.
 
 The principle everything follows from: **poll where it is free, ask once where
 it is expensive.** A 333 MHz handheld on 802.11b pays over a second for a TLS
-handshake. GitHub Actions pays nothing for the same question, and an unchanged
-repository answers `304`. So the hundred questions are asked in CI, and the
-console asks one.
+handshake. GitHub Actions pays nothing for the same question. So the hundred
+questions are asked in CI, and the console asks one, and can still ask the
+hundred itself over a single connection when no cache answers.
 
 ```mermaid
 flowchart TD
-    A["Author cuts a release"] --> B["scan.py sees it, within the hour<br/>downloads it, hashes it, looks inside"]
-    B --> C[("catalog.json<br/>one file: every version, every hash")]
-    C --> D["PSP asks once, at startup<br/>304 when nothing changed"]
-    D --> E["Install, straight from the author's release<br/>sha256 verified"]
-
-    A -. "optional, and most authors never do" .-> M["app.pspdx<br/>kept by the author"]
-    D -. "only for the app you picked<br/>minutes instead of an hour" .-> M
-
-    linkStyle 4,5 stroke-dasharray:5
+    A["Author cuts a release"] --> B["The release action, in the author's repo<br/>downloads, hashes, finds the EBOOT<br/>writes app.pspdx, commits it"]
+    B --> L[("repos.txt<br/>a list: one repository a line")]
+    L --> C["The list's workflow, hourly<br/>reads every app.pspdx, verifies every zip<br/>takes the pictures out of the EBOOTs"]
+    C --> D[("catalog.json + pictures<br/>the cache, on Pages")]
+    D --> E["PSP asks once, at startup"]
+    L -. "no cache, or a list of one" .-> F["PSP reads every app.pspdx itself<br/>one small file a repository"]
+    E --> G["Install, straight from the author's release<br/>sha256 verified"]
+    F --> G
+    linkStyle 5 stroke-dasharray:5
 ```
 
 ## Who owns what
 
 | | |
 |---|---|
-| **Catalog entry** | Name, summary, category, licence: written once by a person. The release block — `rev`, `url`, `sha256`, `size` — belongs to `scan.py` and is never edited by hand. |
-| **`scan.py`** | Asks GitHub what the newest release is, downloads it, hashes the bytes it actually received, and looks inside the archive. A release that moves the package is refused, not published. |
-| **The author** | Nothing is required. An optional `app.pspdx` with the current release makes updates visible in minutes instead of within the hour. |
+| **The author** | The first half of `app.pspdx`: id, name, summary, category, licence, repository. Written once. And the pictures, in the `EBOOT.PBP` where Sony put them: ICON0, PIC1, ICON1, SND0. |
+| **The release action** | The second half: version, rev, url, sha256, size, root. Written at every release, from the bytes GitHub actually serves. Never edited by hand. |
+| **A list** | Which repositories. Anyone's text file. The one the console ships with is `repos.txt` in pspdx-catalog. |
+| **A cache** | A workflow that reads the list, verifies every package once, mirrors the pictures, and publishes one `catalog.json`. Stateless: nothing is committed, the next run builds it again from the files. |
 
 ## What the console does
 
-One conditional fetch of `catalog.json` at startup, usually answered `304`.
-That is the whole list, every version, every hash — the update check costs no
+One fetch of the cache's `catalog.json` at startup. That is the whole list,
+every version, every hash, every picture's URL; the update check costs no
 further request.
 
-When you select an app, and only then, it fetches that app's `app.pspdx` if the
-entry names one. One request, at the moment you are already waiting. This is
-how the PSP's own game patches worked: a small file per title, fetched for the
-title you launched, never for the library.
+When there is no cache, or the source is a single repository someone typed
+in, the console reads each `app.pspdx` itself: one small file a repository,
+all on the same host. Each is its own connection today, a handshake apiece;
+keeping one connection open across them is the next step.
 
-**The higher `rev` wins.** A stale author manifest is therefore harmless, which
-matters, because they go stale — the one in `psp-tuxracer` says 0.16.0 while
-its releases are at 0.21.0. Taking part helps; not taking part costs nothing;
-taking part badly costs nothing either.
+**The higher `rev` wins.** A cache that has fallen behind the author's file
+is harmless: the record on the stick says what is installed, the file says
+what is published, and the larger number is the update.
 
-## Not yet true
+## Trust
 
-The console asks for the release out of the catalog and installs it, which it
-did not when this was written. What it still will not do is install an archive
-that does not put its EBOOT under `PSP/GAME/` — two of sixteen surveyed
-archives do — even though the scanner has already worked out where it sits.
+The cache proves nothing and is not asked to. The console checks the zip
+against the `sha256` in `app.pspdx`, and that file sits in the author's own
+repository under the author's own account. A list is trusted the way a
+package source is: whoever wrote it chose what is on it.

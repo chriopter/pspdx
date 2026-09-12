@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "audio/audio.h"
 #include "gui/preview.h"
 #include "gui/icons.h"
 #include "gui/image.h"
@@ -43,7 +44,7 @@ enum film_state { FILM_NONE, FILM_LOADING, FILM_PLAYING, FILM_FAILED };
    fetch keyed on a half-written id would cache one app's picture under
    another's name. */
 struct request {
-    char id[96], shot_url[256], video_url[256];
+    char id[96], shot_url[256], video_url[256], sound_url[256];
     volatile unsigned gen;
 };
 static struct request g_want;
@@ -89,11 +90,52 @@ static void load_still(const struct request *req, unsigned gen, struct gfx_textu
     g_still_state = STILL_READY;
 }
 
+/* Starts the decoder on a PSMF that is ours to keep: the asset buffer is
+   the next fetch's, so the stream is moved out of it first. */
+static void play(unsigned char *psmf, size_t n, unsigned gen) {
+    if (stale(gen)) { free(psmf); return; }
+    g_psmf = psmf;
+    if (player_start(g_psmf, n, g_film_buf[0], g_film_buf[1], FILM_STRIDE) != 0) {
+        free(g_psmf);
+        g_psmf = 0;
+        g_film_state = FILM_FAILED;
+        return;
+    }
+    g_film_state = FILM_PLAYING;
+}
+
+/* An ICON1.PMF out of an EBOOT is already what the decoder reads: it goes
+   to the player as it is, once its header has said the picture fits. */
+static void load_psmf(const unsigned char *data, size_t len, unsigned gen) {
+    struct psmf_info info;
+    if (psmf_parse(data, len, &info) != 0) {
+        logline("film: a PSMF the header does not describe");
+        g_film_state = FILM_FAILED;
+        return;
+    }
+    if (info.width > FILM_W || info.height > FILM_H) {
+        logline("film: %dx%d, at most %dx%d", info.width, info.height, FILM_W, FILM_H);
+        g_film_state = FILM_FAILED;
+        return;
+    }
+    unsigned char *psmf = malloc(len);
+    if (!psmf) { logline("film: no room for %lu", (unsigned long)len); g_film_state = FILM_FAILED; return; }
+    memcpy(psmf, data, len);
+    g_film.w = info.width;
+    g_film.h = info.height;
+    logline("film: psmf %dx%d, %d pictures, %u a second, %lu KB as it is", info.width,
+            info.height, info.frames, 90000 / psmf_frame_ticks(&info),
+            (unsigned long)(len / 1024));
+    play(psmf, len, gen);
+}
+
 static void load_film(const struct request *req, unsigned gen) {
     size_t len = 0;
     const unsigned char *mp4 = asset_fetch(ASSET_VIDEO, req->id, req->video_url, &len);
     if (stale(gen)) return;
     if (!mp4) { g_film_state = FILM_FAILED; return; }
+    /* The bytes say what they are, not the name they were served under. */
+    if (psmf_is(mp4, len)) { load_psmf(mp4, len, gen); return; }
     if (mp4_parse(mp4, len, &g_track) != 0) {
         logline("film: not a video track the PSP can play");
         g_film_state = FILM_FAILED;
@@ -113,16 +155,22 @@ static void load_film(const struct request *req, unsigned gen) {
     unsigned char *psmf = malloc(cap);
     if (!psmf) { logline("film: no room for %lu", (unsigned long)cap); g_film_state = FILM_FAILED; return; }
     size_t n = psmf_build(mp4, &g_track, psmf, cap);
-    if (!n || stale(gen)) { free(psmf); if (!n) { logline("film: could not wrap"); g_film_state = FILM_FAILED; } return; }
+    if (!n) { free(psmf); logline("film: could not wrap"); g_film_state = FILM_FAILED; return; }
     logline("film: %d pictures, %lu KB wrapped", g_track.count, (unsigned long)(n / 1024));
-    g_psmf = psmf;
-    if (player_start(g_psmf, n, g_film_buf[0], g_film_buf[1], FILM_STRIDE) != 0) {
-        free(g_psmf);
-        g_psmf = 0;
-        g_film_state = FILM_FAILED;
-        return;
-    }
-    g_film_state = FILM_PLAYING;
+    play(psmf, n, gen);
+}
+
+/* The sound is the last thing fetched for a row, after the pictures the
+   eye is waiting for. It is handed to the audio side, which copies it; a
+   selection that moved meanwhile takes it back at once, so a fetch that
+   landed late never plays under the wrong row. Without a link the cache
+   is still tried, which is how a rig plants one. */
+static void load_sound(const struct request *req, unsigned gen) {
+    size_t len = 0;
+    const void *at3 = asset_fetch(ASSET_SOUND, req->id, req->sound_url, &len);
+    if (!at3 || stale(gen)) return;
+    audio_sound_play(at3, len);
+    if (stale(gen)) audio_sound_stop();
 }
 
 /* The list's icons come after the card: one at a time, and only while no
@@ -174,6 +222,7 @@ static int media_thread(SceSize args, void *argp) {
         } else {
             g_film_state = FILM_FAILED;
         }
+        load_sound(&req, gen);
         if (gen == g_want.gen) g_done_gen = gen;
         else if (g_film_state == FILM_PLAYING) { player_stop(); free(g_psmf); g_psmf = 0; g_film_state = FILM_NONE; }
         load_icons(gen);
@@ -224,6 +273,7 @@ void preview_init(void) {
 }
 
 void preview_shutdown(void) {
+    audio_sound_stop();
     if (g_thread >= 0) {
         g_quit = 1;
         wake();
@@ -278,7 +328,12 @@ void preview_show(const struct app_entry *entry, int immediately) {
              entry ? entry->screenshot : "");
     snprintf(g_want.video_url, sizeof(g_want.video_url), "%s",
              entry ? entry->video : "");
+    snprintf(g_want.sound_url, sizeof(g_want.sound_url), "%s",
+             entry ? entry->sound : "");
     g_nothing = !entry;
+    /* The sound goes with the pictures: out now, over its fade, whether
+       or not the next row has one. */
+    audio_sound_stop();
     /* Nothing of the last entry stays on the card: the pictures may still
        exist, they are just not drawn until the thread has this one. */
     g_still_pub = 0;

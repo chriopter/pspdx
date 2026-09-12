@@ -1,197 +1,157 @@
-# The catalog format
+# The app.pspdx format
 
-An entry names the format it is in: `schema` is
-`https://github.com/chriopter/pspdx/blob/master/manifest.md`, this file. An
-integer said as much to us and nothing at all to whoever finds one of these on
-a Memory Stick in ten years. It points at github.com rather than the Pages
-site because GitHub redirects a renamed repository and Pages does not. A later
-version of the format points somewhere else.
+An app describes itself in one file, `app.pspdx`, in the root of its own
+repository. The file names the format it is in: `schema` is
+`https://github.com/chriopter/pspdx/blob/master/manifest.md`, this page. An
+integer would say as much to us and nothing at all to whoever finds one of
+these on a Memory Stick in ten years. It points at github.com rather than the
+Pages site because GitHub redirects a renamed repository and Pages does not.
+A later version of the format points somewhere else.
 
-JSON throughout, because cJSON is in the pspdev tree and a TOML parser is not —
+JSON throughout, because cJSON is in the pspdev tree and a TOML parser is not:
 one parser on the device rather than two.
 
-## An entry
-
-One directory per app in [pspdx-catalog](https://github.com/chriopter/pspdx-catalog),
-named after the id. Two files, and the split is the point.
-
-`app.json` — a person's. Nothing automated ever writes it.
+## The file
 
 ```json
 {
-  "id": "io.github.chriopter.extremetuxracer",
-  "name": "Extreme Tux Racer",
-  "author": "chriopter",
-  "summary": "Downhill racing with a penguin.",
+  "schema":   "https://github.com/chriopter/pspdx/blob/master/manifest.md",
+  "id":       "io.github.chriopter.extremetuxracer",
+  "name":     "Extreme Tux Racer",
+  "author":   "chriopter",
+  "summary":  "Downhill racing with a penguin.",
   "category": "games",
-  "license": "GPL-2.0",
-  "repo": "https://github.com/chriopter/psp-tuxracer"
+  "license":  "GPL-2.0",
+  "repo":     "https://github.com/chriopter/psp-tuxracer",
+
+  "version":  "0.24.0",
+  "rev":      1789071038,
+  "url":      "https://github.com/chriopter/psp-tuxracer/releases/download/v0.24.0/etr.zip",
+  "sha256":   "807b7e08e3ac6e791b12025cef617a72c920c0d98fd5d38c59d70784262c5be2",
+  "size":     44048464,
+  "root":     "PSP/GAME/ExtremeTuxRacer/"
 }
 ```
 
-`latest.json` — the scanner's, rewritten whole, never edited by hand.
+Two halves, and the split is the point.
 
-```json
-{
-  "rev": 1789046256,
-  "seen": 1789071038,
-  "version": "0.24.0",
-  "url": "https://github.com/…/extremetuxracer-psp.zip",
-  "sha256": "9f2c1e4b8a7d…",
-  "size": 44048460,
-  "root": "PSP/GAME/ExtremeTuxRacer/"
-}
-```
+**The author's half** is written once by hand: `id`, `name`, `author`,
+`summary`, `category`, `license`, `repo`. Nothing automated ever changes it.
+Optional beside it: `"asset": "*-psp.zip"`, a glob naming which release file
+is the package when a release carries more than one.
 
-| Field | |
+| field | rule |
 |---|---|
-| `id` | reverse-DNS, stable forever, also the directory name |
-| `name`, `summary` | what the client lists; summary fits one PSP line |
-| `author` | who publishes the PSP build, not the upstream project |
-| `category` | `games`, `emulators`, `apps`, `plugins`, `demos` |
-| `license` | SPDX id, or `proprietary` |
-| `repo` | the project |
-| `asset` | optional: a glob, when a release attaches more than one file |
-| `scan` | optional: `false` pins the entry where it is |
-| `rev`, `version`, `url`, `sha256`, `size` | the release, and what the console needs |
-| `seen`, `root` | how the scanner recognises the next release; never served |
+| `id` | `io.github.<owner>.<name>`: the owner is the repository's, so nobody can write a file that claims another account's app; the name is the author's, lower case `[a-z0-9]`, the repository's own name with the dashes dropped by default. At most 80 characters. It names a directory on the stick and a file in the cache, and it never changes. |
+| `name` | what the list shows; under 40 characters, or the row clips it |
+| `author` | a name, not a URL |
+| `summary` | one line, at most 60 characters: a PSP screen is 480 pixels wide |
+| `category` | one of `games`, `emulators`, `apps`, `plugins`, `demos` |
+| `license` | an SPDX identifier; open source only |
+| `repo` | the GitHub repository the file lives in |
 
-The id comes from a domain the author controls, reversed. Without one, GitHub
-supplies it: `io.github.<user>.<app>`, from `github.io`, the same rule Flathub
-uses. Stable forever means exactly that — it is the directory on the Memory
-Stick and the key in the install journal, so changing it orphans installs.
+**The release half** is written by the release action at every release and
+never by hand: `version`, `rev`, `url`, `sha256`, `size`, `root`.
 
-A bot commits into `latest.json` every hour and people edit `app.json` by pull
-request. Keeping them in one file meant merge conflicts between the two, and a
-diff nobody could skim; the workflows stage `apps/*/latest.json` and nothing
-else, so the separation is enforced rather than promised.
+| field | rule |
+|---|---|
+| `version` | the tag without its `v`, for display and for the record on the stick |
+| `rev` | the release's `published_at` as unix seconds. Integers compare; version strings do not, and there is no telling `1.10` from `1.9` without a policy nobody agreed to. **The higher `rev` wins.** |
+| `url` | the package: one `.zip` on the GitHub release with an `EBOOT.PBP` anywhere inside |
+| `sha256` | of the bytes at `url`, hex; the console refuses a download that does not match |
+| `size` | in bytes, the same bytes; the confirm band quotes it |
+| `root` | the directory inside the zip that holds the EBOOT, as it lands under `PSP/GAME/`; a moved EBOOT is a moved package |
 
-## Why `rev` is a number, and why there are two of them
+`rev` and `size` are read as numbers, `sha256` as 64 hex digits, `url` and
+`id` as strings within their limits. Anything else in the file is ignored, so
+the file may grow. Nothing is ever compared but `rev`.
 
-Unix seconds, and the only field compared. Homebrew version strings are chaos — `r12`, `v0.9b`, `final2`,
-`1.0 FIXED` — and no ordering can be derived from them. Keeping `rev` separate
-also means no version parser runs on the console, and a downgrade cannot be
-expressed. `version` sits beside it to be printed and is never compared.
+## What the console does with it
 
-`rev` is the revision of the bytes and `seen` is the release the scanner last
-looked at. They differ whenever an author re-tags the same build: `seen` moves,
-`rev` does not, and nobody is offered an update that would download what they
-already have. `seen` also takes the newest of the release's own timestamp and
-its assets', because deleting an asset and uploading a replacement under the
-same tag leaves `published_at` untouched — and used to leave the catalog
-serving a checksum for bytes that were gone.
+The console reads the file from
+`https://raw.githubusercontent.com/<owner>/<repo>/HEAD/app.pspdx`, or from a
+catalog that mirrors it. A line pinned to a tag reads the copy the action
+attached to that release instead,
+`https://github.com/<owner>/<repo>/releases/download/<tag>/app.pspdx`: the
+tag was cut before the action ran, so the tree at the tag still holds the
+release before. `rev` above the record on the stick is an update;
+equal is current; no record is *not installed*. An install fetches `url`,
+checks `sha256` and `size`, unpacks `root` under `PSP/GAME/`, and writes a
+record with the `id`, the `rev`, the `version` and where the file came from.
+Everything else in the file is shown, never acted on.
 
-`sha256` is what actually protects the payload, and `size` is mandatory rather
-than a convenience — 42 MB over 802.11b is minutes, and that belongs in front
-of the download rather than behind it.
+The file's own `id` has to begin with `io.github.<owner>.` for the owner
+the list named, and a catalog entry's id has to be the one the file says, or
+the console refuses it: a file that claims another account's id must not be
+allowed to overwrite that account's record.
 
-## Assets
+## Pictures and sound: in the EBOOT
 
-Convention, not fields: drop `icon.png` (the 144x80 `ICON0.PNG` out of the
-EBOOT), `screenshot.png` (480x272) or `video.mp4` into the app's directory and
-the generated entry gains an `icon`, `screenshot` or `video` path. Leave one
-out and the entry has none, so the console never spends a request discovering
-that there is nothing there. All three are fetched per app and only for the app
-on screen — a list of fifty stays one request.
+The file carries no pictures. They are where Sony put them, inside the
+`EBOOT.PBP`, and the catalog takes them out of the package it verifies:
 
-Ten seconds of video is about 750 KB. The PSP decodes H.264 baseline in
-hardware on the Media Engine, which is what UMD Video shipped, so nothing else
-will play:
+| in the PBP | on the console |
+|---|---|
+| `ICON0.PNG`, 144x80 | the icon at the row, the same one the XMB shows |
+| `PIC1.PNG`, 480x272 | the picture on the card |
+| `ICON1.PMF`, 144x80 PSMF, a few seconds | the film on the card, played as it is |
+| `SND0.AT3`, ATRAC3, a short loop | played under the card while the cursor rests on the app |
 
-```sh
-ffmpeg -i recording.avi -ss 3 -t 10 \
-  -vf "scale=480:272:flags=lanczos,fps=30" \
-  -c:v libx264 -profile:v baseline -level 3.0 -pix_fmt yuv420p \
-  -b:v 600k -maxrate 800k -bufsize 1200k \
-  -movflags +faststart -an video.mp4
+Leave one out and the console shows nothing there; it never spends a request
+discovering that. `pack-pbp` takes all four beside `PARAM.SFO` and `DATA.PSP`.
+[`app/tools/eboot-media/`](app/tools/eboot-media/) turns an MP4 into a
+conformant `ICON1.PMF` and a WAV into `SND0.AT3`.
+
+## The release action
+
+A workflow of three lines in the author's repository, on `release: published`,
+runs [`chriopter/pspdx/action`](action/). It picks the zip (the only one, or
+the one `asset` names), downloads it, hashes it, finds the EBOOT, writes the
+release half into `app.pspdx`, commits the file to the default branch and
+attaches a copy to the release. The author's half is read from the file that
+is already there; a repository without one gets a first draft from the
+repository's own name, owner, description and licence, to be corrected by
+hand.
+
+## Lists and catalogs
+
+Where the console finds apps is a *list*: a text file, one GitHub repository
+a line.
+
+```
+# repos.txt -- one repository a line; @tag pins a release
+cache https://chriopter.github.io/pspdx-catalog/catalog.json
+https://github.com/chriopter/psp-tuxracer
+https://github.com/chriopter/psp-rust-raytracer@v0.4.1
 ```
 
-Baseline rules out B-frames, `yuv420p` is the only chroma the decoder takes,
-and 480x272 at 30 fps is the panel. Audio is dropped: the catalog is browsed
-with the speaker off as often as not. Recordings come from PPSSPP with
-`DumpFrames = True`, which captures what the GE renders — an app that writes
-its framebuffer directly records as noise and needs a screenshot instead.
+Given a list, the console fetches every repository's `app.pspdx` from
+`raw.githubusercontent.com`: one host, one small file a repository. (Today
+each file is its own connection and costs a handshake, about a fifth of a
+second; keeping the connection open across them is the obvious next step,
+and the cache makes it one request either way.)
+A `cache` line names a catalog that has done that already and mirrors the
+pictures: a `catalog.json` whose `apps` carry the same fields, a `release`
+object with the release half, and `icon`, `screenshot`, `video`, `sound`
+URLs. The console takes the cache when it answers and walks the list when it
+does not. A cache proves nothing; the console checks the zip against the
+`sha256` in the file either way.
 
-## `app.pspdx` — optional, in the author's repository
-
-An author who would rather not wait for the next scan can keep the same release
-fields in a file of their own, at `app.pspdx` on the default branch:
-
-```json
-{
-  "schema": "https://github.com/chriopter/pspdx/blob/master/manifest.md",
-  "id":     "io.github.chriopter.extremetuxracer",
-  "rev":    1789034687,
-  "url":    "https://github.com/…/extremetuxracer-psp.zip",
-  "sha256": "9f2c1e4b8a7d…",
-  "size":   44048460,
-  "requires": { "ram_mb": 64 },
-  "display": { "version": "0.21.0", "notes": "Fixes the crash on large courses." }
-}
-```
-
-This is not wired up: the scanner does not look for the file and the entry
-gains no `manifest` field, so nothing on the console asks for one. The shape is
-here because the console still reads a `manifest` field if an entry carries
-one, and because an author who publishes releases often is the case that would
-justify building it.
-
-**The higher `rev` wins.** A stale manifest is therefore harmless, and they do
-go stale: `psp-tuxracer` shipped one saying 0.16.0 while its releases were at
-0.21.0. Taking part helps, not taking part costs nothing, taking part badly
-costs nothing either.
-
-Everything under `display` is shown and never acted on: never parsed, never
-compared, never part of a decision. That turns a convention into a checkable
-boundary, and makes it the safe place for later additions like an author or an
-icon.
-
-## Scanning
-
-Nobody types a sha256. `scan.py` asks GitHub for the newest release,
-downloads the archive, hashes the bytes it actually received, and looks inside
-to see where the EBOOT sits.
-
-```sh
-python3 scan.py https://github.com/user/repo   # add it, or refresh it
-python3 scan.py --all                          # refresh everything
-python3 scan.py --all --check                  # say what would change
-```
-
-It runs hourly in Actions, one small API call per app. Conditional requests
-were tried and dropped: the release JSON carries each asset's `download_count`,
-so its ETag changes whenever anybody downloads anything and the 304 almost
-never arrives. `"scan": false` pins an entry where it is.
-
-Assuming a fixed archive layout does not survive contact with PSP homebrew: of
-sixteen surveyed release archives that contain an EBOOT, ten put it one
-directory down, three at the root, and two under `PSP/GAME/`. So the shallowest
-`EBOOT.PBP` wins and its directory is the package. If a new release moves that
-directory the entry is **not** updated — it keeps the release known to install,
-and the scan opens an issue.
-
-An author with no access can ask for a rescan by opening an issue titled
-`rescan: <repo url>`, which is acted on only for repositories already listed.
-From a release workflow:
-
-```yaml
-- run: gh issue create -R chriopter/pspdx-catalog
-       -t "rescan: ${{ github.repository }}" -b ""
-  env:
-    GH_TOKEN: ${{ secrets.PSPDX_PING }}
-```
-
-The token is the author's own, in the author's own repository. Nothing of ours
-is shared, and it grants no access to the index.
+Anyone can publish a list. [pspdx-catalog](https://github.com/chriopter/pspdx-catalog)
+is the one the console ships with, together with the workflow that builds
+its cache every hour. The console keeps its lists in `PSP/PSPDX/sources.txt`,
+one URL a line, the built-in one first; more come in through the gear tab,
+and so does a single repository, which is a list of one. The first list to
+name an id wins.
 
 ## What was left out
 
-`channel`, because there is one channel. `source`, because the GPL source only
-matters if we mirror, which we do not, and the author's release page carries it
-anyway. `root` as something an author fills in, replaced by a rule the scanner
-applies. And no `key`: nothing is signed.
+**Signatures.** A sha256 in the file only proves that the bytes are the ones
+the author's action hashed. The trust is in the release on the author's own
+GitHub account, and in whoever wrote the list.
 
-`PARAM.SFO` inside the EBOOT already carries the title, category and required
-system version, and `ICON0.PNG` is the icon. Deriving them would mean existing
-homebrew could be indexed without anyone writing a description at all, which
-matters more for adoption than any format decision.
+**Dependencies, requirements, screenshots as fields.** Homebrew has no shared
+libraries to depend on, every PSP that runs a browser runs any of these, and
+the pictures are in the EBOOT already.
+
+**Version comparison.** `rev` is a number so that no policy is needed.

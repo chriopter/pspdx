@@ -8,8 +8,11 @@
    so a file found years from now points at its own documentation. */
 #define PSPDX_SCHEMA "https://github.com/chriopter/pspdx/blob/master/manifest.md"
 
-/* The fields the client acts on. Everything under "display" is shown, never
-   compared -- version is carried along only to be printed. */
+/* The fields the client acts on, and under them the author's half, which is
+   shown and never compared -- version included, which is carried along only
+   to be printed. The text fields are optional in the file and empty when
+   absent; their sizes are the catalog entry's, since that is where they
+   end up. */
 struct manifest {
     char id[96];
     unsigned rev;               /* unix seconds set by the publish step */
@@ -18,6 +21,11 @@ struct manifest {
     size_t size;
     char version[32];
     char manifest_url[512];
+    char name[40];
+    char author[40];
+    char summary[60];
+    char category[12];
+    char license[16];
 };
 
 struct install_report {
@@ -57,7 +65,9 @@ typedef void (*install_phase_cb)(void *ctx, const char *phase);
 
 /* expect_id, when given, is the id the catalog promised: a manifest that
    claims a different one is refused rather than allowed to overwrite another
-   package's record. */
+   package's record. A list promises less -- whose app it is, not which --
+   so an expect_id ending in a dot, "io.github.<owner>.", is a prefix the
+   file's id has to begin with, the rest being the author's to choose. */
 int manifest_fetch(const char *url, const char *expect_id, struct manifest *m);
 
 /* The rules a manifest's fields are held to, for whoever else reads the

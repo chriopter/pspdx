@@ -3,10 +3,10 @@
 
 #include <stddef.h>
 
-/* The pictures a catalog entry links to: its icon, a still, and a moving one. Every
-   fetch costs a TLS handshake, and on a PSP over 802.11b that is the
-   expensive part, so an asset is fetched once and then read off the stick
-   under PSP/PSPDX/cache for the life of the installation.
+/* What a catalog entry links to: its icon, a still, a moving one, and a
+   sound. Every fetch costs a TLS handshake, and on a PSP over 802.11b that
+   is the expensive part, so an asset is fetched once and then read off the
+   stick under PSP/PSPDX/cache for the life of the installation.
 
    The cache is consulted before the URL, so what is on the stick is shown
    even when the catalog no longer links it -- and a file planted there by
@@ -15,7 +15,8 @@
 enum asset_kind {
     ASSET_ICON,         /* PNG, the bundle's 144x80 ICON0 */
     ASSET_SHOT,         /* PNG, at most 480x272 */
-    ASSET_VIDEO         /* H.264 baseline, 480x272 at 30, ten seconds or so */
+    ASSET_VIDEO,        /* an ICON1.PMF, or an H.264 baseline MP4 the client wraps */
+    ASSET_SOUND         /* SND0.AT3: ATRAC3, a short loop */
 };
 
 /* Returns a pointer into a buffer owned here, valid until the next call --

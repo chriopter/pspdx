@@ -133,7 +133,7 @@ static signed char g_menu_key[MENU_MAX];
 static int g_menu_count, g_menu_cursor;
 static float g_menu_slide;              /* 0 off the right edge, 1 in place */
 static int g_menu_leaving;              /* sliding out; count drops at 0 */
-#define INFO_ACTIONS 2
+#define INFO_ACTIONS SHELL_INFO_ACTIONS
 static int g_info, g_info_action;
 static const struct app_entry *g_details;   /* the package the band is about */
 static int g_hidden;                    /* square: where the veil is going */
@@ -1093,12 +1093,19 @@ static void read_storage(void) {
     if (all) g_storage_used = 1.0f - (float)((double)left / (double)all);
 }
 
-/* The two things the band does rather than says. Which one X takes is the
+/* The things the band does rather than says. Which one X takes is the
    cursor's, and the cursor is the main loop's. */
 static const char *const INFO_ACTION[INFO_ACTIONS] = {
     "Update catalog",
+    "Add a list or repository",
+    "Install from GitHub",
     "Discard entropy and sweep again",
 };
+
+/* Four rows at the foot leave the facts above them 18 pixels apart rather
+   than 24, which the small face reads at without touching. */
+#define ACTION_Y (INFO_Y + 148)
+#define ACTION_H 18
 
 static void draw_info(void) {
     draw_band(INFO_Y, INFO_H);
@@ -1108,11 +1115,11 @@ static void draw_info(void) {
 
     /* Which build this is, above the rest: the one fact the band states about
        itself rather than about the run. */
-    fact(INFO_Y + 20, FACT_LABEL, FACT_VALUE, SCR_W - FACT_VALUE - 30,
+    fact(INFO_Y + 18, FACT_LABEL, FACT_VALUE, SCR_W - FACT_VALUE - 30,
          "PSPDX", PSPDX_VERSION);
 
     url_host(catalog_url(), value, sizeof(value));
-    fact(INFO_Y + 40, FACT_LABEL, FACT_VALUE, SCR_W - FACT_VALUE - 30,
+    fact(INFO_Y + 36, FACT_LABEL, FACT_VALUE, SCR_W - FACT_VALUE - 30,
          "Catalog", value);
 
     if (tls->cipher[0]) {
@@ -1122,14 +1129,14 @@ static void draw_info(void) {
     } else {
         snprintf(value, sizeof(value), "not connected");
     }
-    fact(INFO_Y + 64, FACT_LABEL, FACT_VALUE, SCR_W - FACT_VALUE - 30,
+    fact(INFO_Y + 54, FACT_LABEL, FACT_VALUE, SCR_W - FACT_VALUE - 30,
          "Connection", value);
 
     snprintf(value, sizeof(value), "%u ms", tls->handshake_ms);
-    fact(INFO_Y + 92, FACT_LABEL, FACT_VALUE, 140, "Handshake", value);
+    fact(INFO_Y + 76, FACT_LABEL, FACT_VALUE, 140, "Handshake", value);
 
     snprintf(value, sizeof(value), "%d bits", entropy_bits());
-    fact(INFO_Y + 116, FACT_LABEL, FACT_VALUE, 140, "Entropy", value);
+    fact(INFO_Y + 96, FACT_LABEL, FACT_VALUE, 140, "Entropy", value);
 
     /* Not a scheduler's number -- the PSP has none to ask. The share of each
        frame that goes into drawing it; the rest is the wait for vblank, which
@@ -1137,33 +1144,33 @@ static void draw_info(void) {
     snprintf(value, sizeof(value), "%d fps, %d%% drawing",
              g_frame_us > 0.0f ? (int)(1000000.0f / g_frame_us + 0.5f) : 0,
              (int)(g_load * 100.0f + 0.5f));
-    fact(INFO_Y + 140, FACT_LABEL, FACT_VALUE, 160, "Frames", value);
+    fact(INFO_Y + 116, FACT_LABEL, FACT_VALUE, 160, "Frames", value);
 
     int installed = 0;
     if (g_catalog)
         for (int i = 0; i < g_catalog->count; i++)
             if (g_catalog->apps[i].state != APP_NOT_INSTALLED) installed++;
     snprintf(value, sizeof(value), "%d", installed);
-    fact(INFO_Y + 92, FACT_LABEL2, FACT_VALUE2, 110, "Installed", value);
+    fact(INFO_Y + 76, FACT_LABEL2, FACT_VALUE2, 110, "Installed", value);
 
     snprintf(value, sizeof(value), "%u KB",
              (unsigned)sceKernelTotalFreeMemSize() / 1024);
-    fact(INFO_Y + 116, FACT_LABEL2, FACT_VALUE2, 110, "Memory free", value);
+    fact(INFO_Y + 96, FACT_LABEL2, FACT_VALUE2, 110, "Memory free", value);
 
     /* Room on the stick is the one fact here that is a proportion, so it is
        drawn as one: the line fills as the stick does, and what is left of it
        is what a package has to fit into. */
-    fact(INFO_Y + 140, FACT_LABEL2, FACT_VALUE2, 110, "Stick free", g_storage);
+    fact(INFO_Y + 116, FACT_LABEL2, FACT_VALUE2, 110, "Stick free", g_storage);
     if (g_storage_used >= 0.0f) {
-        int x = FACT_VALUE2, w = SCR_W - FACT_VALUE2 - 30, y = INFO_Y + 149;
+        int x = FACT_VALUE2, w = SCR_W - FACT_VALUE2 - 30, y = INFO_Y + 125;
         int used = (int)(w * g_storage_used + 0.5f);
         gfx_rect(x, y, w, 3, RGBA(255, 255, 255, 28));
         if (used > 0) gfx_hgrad(x, y, used, 3, rgb_pack(g_tint, 255), g_accent);
     }
 
-    band_rule(INFO_Y + 158, 160, 120);
+    band_rule(INFO_Y + 134, 160, 120);
     for (int i = 0; i < INFO_ACTIONS; i++) {
-        int y = INFO_Y + 180 + i * 22;
+        int y = ACTION_Y + i * ACTION_H;
         int on = i == g_info_action;
         if (on) {
             gfx_glow(SCR_W / 2, y - 5, 380, 32, rgb_pack(g_tint, 110));
@@ -1219,7 +1226,7 @@ static int draw_wrapped(enum font_style style, float x, float y, float width,
    reading. */
 static void draw_details(void) {
     const struct app_entry *e = g_details;
-    char value[80], size[24];
+    char value[96], size[24];
     draw_band(INFO_Y, INFO_H);
 
     float w = font_width(FONT_BODY, e->name);
@@ -1229,7 +1236,7 @@ static void draw_details(void) {
 
     int y = INFO_Y + 56;
     if (e->state == APP_UPDATE)
-        snprintf(value, sizeof(value), "%s installed, %s published",
+        snprintf(value, sizeof(value), "%.31s installed, %.31s published",
                  e->local_version, e->remote_version);
     else if (e->state != APP_NOT_INSTALLED)
         snprintf(value, sizeof(value), "%s installed", e->local_version);

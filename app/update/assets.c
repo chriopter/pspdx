@@ -16,8 +16,12 @@
 static unsigned char g_buf[ASSET_MAX];
 static size_t g_len;
 
+/* The name a file gets when only the id names it, and the word the log
+   uses for the kind. A served name keeps whatever it came with: a film is
+   cached as the .pmf or .mp4 it was served as, and the bytes say which it
+   is, not the name. */
 static const char *EXT[] = { [ASSET_ICON] = "icon.png", [ASSET_SHOT] = "png",
-                             [ASSET_VIDEO] = "mp4" };
+                             [ASSET_VIDEO] = "mp4", [ASSET_SOUND] = "at3" };
 
 static int sink(void *ctx, const void *data, size_t len) {
     (void)ctx;

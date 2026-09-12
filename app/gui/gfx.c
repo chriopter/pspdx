@@ -263,6 +263,9 @@ void gfx_frame_begin(unsigned clear) {
 }
 
 static unsigned g_worst_ge, g_worst_vblank;
+static void (*g_overlay)(void);
+
+void gfx_frame_overlay(void (*overlay)(void)) { g_overlay = overlay; }
 
 void gfx_frame_end(void) {
     gfx_batch_end();
@@ -270,6 +273,10 @@ void gfx_frame_end(void) {
     unsigned t0 = now_us();
     sceGuSync(0, 0);
     unsigned t1 = now_us();
+    /* The firmware's dialogs draw themselves over a finished frame, so
+       this is the one place they can be given the buffer: the list is
+       done and nothing has been shown yet. */
+    if (g_overlay) g_overlay();
     sceDisplayWaitVblankStart();
     unsigned t2 = now_us();
     if (t1 - t0 > g_worst_ge) g_worst_ge = t1 - t0;

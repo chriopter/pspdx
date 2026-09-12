@@ -1,9 +1,0 @@
-{
-  "id": "io.github.chriopter.extremetuxracer",
-  "name": "Extreme Tux Racer",
-  "author": "chriopter",
-  "summary": "Downhill racing with a penguin.",
-  "category": "games",
-  "license": "GPL-2.0",
-  "repo": "https://github.com/chriopter/psp-tuxracer"
-}

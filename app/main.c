@@ -19,11 +19,13 @@
 #include "gui/screen.h"
 #include "gui/lattice.h"
 #include "gui/marks.h"
+#include "gui/osk.h"
 #include "gui/shell.h"
 #include "install/install.h"
 #include "logic/entropy.h"
 #include "network/bench.h"
 #include "update/catalog.h"
+#include "update/sources.h"
 #include "update/sync.h"
 #include "util/runtime.h"
 
@@ -598,6 +600,91 @@ static unsigned keys_pressed(void) {
     return pressed;
 }
 
+/* ------------------------------------------------------------------ typing */
+
+/* One frame while the keyboard is up: the browser as it was, the keyboard
+   drawn over it by the firmware. The pad is the keyboard's for the
+   duration; the one scripted key still honoured is the rig's shot, so
+   that the keyboard can be photographed. */
+static void osk_draw(void *ctx) {
+    int cursor = *(const int *)ctx;
+    shell_draw(shown(), cursor);
+    if (keys_pressed() & KEY_SHOT) {
+        gfx_screenshot("ms0:/PSPDX1.BMP");
+        logline("shot: PSPDX1.BMP with the keyboard up");
+    }
+}
+
+/* What the gear tab's two typing rows lead to: a source added and the
+   catalog fetched again, and for "Install from GitHub" the one repository
+   typed, found in the new catalog by the file it was read from and put
+   under the cursor with the install question already asked. */
+static char g_wanted_url[SOURCE_URL];     /* that file, while one is waited for */
+static char g_wanted_name[64];            /* owner/repo, for the status line */
+
+/* Reads a source from the keyboard and adds it. Returns 1 when the catalog
+   should be fetched again, 0 when there is nothing new. */
+static int type_source(int install) {
+    char text[SOURCE_URL], url[SOURCE_URL], message[96];
+    int rc = osk_read(install ? "Install from GitHub: owner/repo"
+                              : "Add a list or repository", "", text, sizeof(text));
+    if (rc <= 0 || !text[0]) return 0;
+    rc = sources_add(text, url, sizeof(url));
+    if (rc < 0) {
+        snprintf(message, sizeof(message), "Not a URL or owner/repo: %.60s", text);
+        shell_status(message);
+        return 0;
+    }
+    if (!install) {
+        if (rc == 0) { shell_status("Already in sources.txt"); return 0; }
+        return 1;
+    }
+    struct source_repo repo;
+    if (!sources_parse_repo(url, &repo)) {
+        shell_status("Install from GitHub wants owner/repo");
+        return 0;
+    }
+    sources_repo_manifest(&repo, g_wanted_url, sizeof(g_wanted_url));
+    snprintf(g_wanted_name, sizeof(g_wanted_name), "%.24s/%.36s", repo.owner, repo.name);
+    return 1;
+}
+
+/* The catalog is back: the repository typed is either in it, and the
+   question is asked, or it is not, and the status line says why. */
+static int wanted_settled(int *cursor) {
+    char message[96];
+    int found = -1;
+    for (int i = 0; found < 0 && i < catalog.count; i++)
+        if (strcmp(catalog.apps[i].manifest, g_wanted_url) == 0) found = i;
+    if (found < 0) {
+        int why = catalog_refused(g_wanted_url);
+        if (why == -1)
+            snprintf(message, sizeof(message), "No app.pspdx at %.62s", g_wanted_name);
+        else if (why < -1)
+            snprintf(message, sizeof(message), "The app.pspdx at %.50s was refused, see the log",
+                     g_wanted_name);
+        else
+            snprintf(message, sizeof(message), "%.60s did not make it into the catalog",
+                     g_wanted_name);
+        shell_status(message);
+        return -1;
+    }
+    /* The tab that is open need not show it: All does, and is at most a
+       ring of tabs away. */
+    for (int n = shell_tab_count(); n > 0 && shell_view_row(found) < 0; n--)
+        shell_tab_move(1);
+    *cursor = shell_view_row(found);
+    if (*cursor < 0) *cursor = 0;
+    const struct app_entry *entry = &catalog.apps[found];
+    if (entry->state == APP_NOT_INSTALLED || entry->state == APP_UPDATE) {
+        ask_install(found);
+    } else {
+        snprintf(message, sizeof(message), "%s is installed and current", entry->name);
+        shell_status(message);
+    }
+    return found;
+}
+
 /* argv[0] is the path the firmware loaded this from -- the main thread's argp,
    which the loader fills with the EBOOT's own name. It is the only thing that
    says which directory under PSP/GAME the client is sitting in. */
@@ -668,6 +755,7 @@ int main(int argc, char *argv[]) {
        ten seconds the average, the worst, and how many missed 60 Hz. */
     unsigned frame_us = now_us(), frames = 0, worst = 0, late = 0, total = 0;
     unsigned bucket[4] = { 0, 0, 0, 0 };    /* 17-20, 20-25, 25-35, >35 ms */
+    osk_frame(osk_draw, &cursor);
     for (;;) {
         unsigned now = now_us(), took = now - frame_us;
         frame_us = now;
@@ -733,7 +821,13 @@ int main(int argc, char *argv[]) {
                     preview_resume();
                 }
                 if (sync_state() == SYNC_DONE) shell_status("");
-                else {
+                if (g_wanted_url[0]) {
+                    /* A fetch that failed altogether says so below; the
+                       repository waited for is let go of either way. */
+                    if (sync_state() == SYNC_DONE) wanted_settled(&cursor);
+                    g_wanted_url[0] = '\0';
+                }
+                if (sync_state() != SYNC_DONE) {
                     /* Nothing came: say so, and offer the one thing that
                        can be done about it. */
                     char again[96];
@@ -903,7 +997,7 @@ int main(int argc, char *argv[]) {
                 shell_info(1, action = (action + SHELL_INFO_ACTIONS - 1) %
                                        SHELL_INFO_ACTIONS);
             /* O steps off the band's tab onto the one after it, and so
-               does taking either of the band's two actions: both leave the
+               does taking any of the band's actions: all of them leave the
                browser standing in a list again. */
             if (pressed & (PSP_CTRL_CIRCLE | PSP_CTRL_CROSS)) {
                 shell_info(info = 0, action);
@@ -912,7 +1006,10 @@ int main(int argc, char *argv[]) {
                 count = shell_view_count();
             }
             if (pressed & PSP_CTRL_CROSS) {
-                if (action == 0 && synced) {
+                int refetch = 0;
+                if (action == 0 && synced) refetch = 1;
+                else if ((action == 1 || action == 2) && synced) refetch = type_source(action == 2);
+                if (refetch) {
                     /* The catalog is fetched again from where the browser
                        stands: the list gives way to the word and the status
                        line, and comes back with whatever is now published,
@@ -930,9 +1027,10 @@ int main(int argc, char *argv[]) {
                         refreshing = 1;
                     } else {
                         keep[0] = '\0';
+                        g_wanted_url[0] = '\0';
                         preview_resume();
                     }
-                } else if (action == 1) {
+                } else if (action == 3) {
                     /* The field drains and is swept again, in the room the
                        browser was already standing in. The old pool is set
                        aside rather than thrown away until the new one is

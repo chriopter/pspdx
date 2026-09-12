@@ -26,46 +26,81 @@ dev/start installs: × S, ○ D, □ A, △ W, START Enter, SELECT Space, L Q,
 R E, the d-pad on the arrows, the stick on I J K L. There is no HOME;
 Esc is the emulator's own pause menu.
 
-To get your open source licensed brew listed, send a PR to
-[pspdx-catalog](https://github.com/chriopter/pspdx-catalog) or open an issue.
+To get your open source licensed brew listed: an `app.pspdx` in your
+repository, the release action, and one line in
+[pspdx-catalog](https://github.com/chriopter/pspdx-catalog)'s `repos.txt`.
+Or open an issue and ask.
 
 ## What an app is
 
-One entry in the catalog, and — if its author feels like it — one file in their
-own repository. [manifest.md](manifest.md) is the long version,
+One file in the author's own repository, `app.pspdx`, and a package on a
+GitHub release. [manifest.md](manifest.md) is the long version,
 [architecture.md](architecture.md) is why.
 
 <details>
-<summary><b>Catalog entry</b> — required. In <a href="https://github.com/chriopter/pspdx-catalog">pspdx-catalog</a>, as <code>apps/&lt;id&gt;/app.json</code>.</summary>
+<summary><b><code>app.pspdx</code></b> — in the author's repository. Half written once by a person, half by the release action.</summary>
 
 ```json
 {
-  "id": "io.github.chriopter.extremetuxracer",
-  "name": "Extreme Tux Racer",
-  "author": "chriopter",
-  "summary": "Downhill racing with a penguin.",
+  "schema":   "https://github.com/chriopter/pspdx/blob/master/manifest.md",
+  "id":       "io.github.chriopter.extremetuxracer",
+  "name":     "Extreme Tux Racer",
+  "author":   "chriopter",
+  "summary":  "Downhill racing with a penguin.",
   "category": "games",
-  "license": "GPL-2.0",
-  "repo": "https://github.com/chriopter/psp-tuxracer"
+  "license":  "GPL-2.0",
+  "repo":     "https://github.com/chriopter/psp-tuxracer",
+
+  "version":  "0.24.0",
+  "rev":      1789071038,
+  "url":      "https://github.com/chriopter/psp-tuxracer/releases/download/v0.24.0/etr.zip",
+  "sha256":   "807b7e08…",
+  "size":     44048464,
+  "root":     "PSP/GAME/ExtremeTuxRacer/"
 }
 ```
 
-That is the whole human half, written once. `scan.py` adds `release` — the
-`rev`, `url`, `sha256` and `size` of whatever GitHub is serving — and keeps it
-current, so nobody types a hash. An `icon.png`, `screenshot.png` or
-`video.mp4` in the same directory is picked up by name;
-[manifest.md](manifest.md) has the encoding the PSP can decode.
+The first seven fields are the author's, written once. The rest is the
+release, written by [the action](action/) every time one is published: it
+downloads the zip, hashes it, finds the EBOOT, commits the file and attaches
+a copy to the release. Nobody types a hash.
 
-Copy: [`app.json.template`](app.json.template)
+The pictures are not in the file. They are in the `EBOOT.PBP`, where Sony
+put them: `ICON0.PNG` is the icon at the row, `PIC1.PNG` the picture on the
+card, `ICON1.PMF` the film, `SND0.AT3` the sound under the card while the
+cursor rests on the app. [`app/tools/eboot-media/`](app/tools/eboot-media/)
+makes the last two out of an MP4 and a WAV.
+
+Copy: [`app.pspdx.template`](app.pspdx.template)
+
+</details>
+
+<details>
+<summary><b>Lists and the catalog</b> — where the console finds apps: a text file of repositories, and a cache anyone can build.</summary>
+
+A *list* is a text file, one GitHub repository a line. Given one, the
+console reads every repository's `app.pspdx` from `raw.githubusercontent.com`,
+one small file a repository. A `cache` line at the top
+names a `catalog.json` that has done that already and mirrors the pictures
+out of the EBOOTs; the console takes the cache when it answers and walks the
+list when it does not. It proves nothing: the zip is checked against the
+`sha256` in the file either way.
+
+[pspdx-catalog](https://github.com/chriopter/pspdx-catalog) is the list the
+console ships with, `repos.txt`, and the workflow that rebuilds its cache
+every hour. Anyone can publish another; the console keeps its lists in
+`PSP/PSPDX/sources.txt` and takes more through the gear tab, where a single
+repository typed as `owner/repo` is a list of one: an app in no catalog at
+all installs the same way.
 
 </details>
 
 <details>
 <summary><b>The id, and how an update is noticed</b> — one name that is a URL, a cache file and a record on the stick; one number that says whether the stick is behind.</summary>
 
-The id is the app's directory name in the catalog, in the reverse-domain
-style of Flatpak ids: `io.github.chriopter.rustraytracer` for a repository
-under `github.com/chriopter`. Lowercase letters, digits, dots and dashes,
+The id is the `id` in `app.pspdx`, in the reverse-domain style of Flatpak
+ids and fixed by the repository: `io.github.chriopter.rustraytracer` for
+`github.com/chriopter/psp-rust-raytracer` (the dashes go). Lowercase letters, digits, dots and dashes,
 at most eighty characters, no `..`. The rules are strict because the same
 string becomes a URL (`icons/<id>.png`), a file in the cache
 (`PSP/PSPDX/cache/<id>.mp4`) and a record on the stick, so it has to be a
@@ -109,36 +144,10 @@ through the ordinary path — the running EBOOT is in RAM, the directory under
 it is replaced, and the band says to press START to restart. It refuses to
 remove itself. The version comes from `git describe --tags` at build time;
 `dev/release 0.1.0` builds with it set, packs the EBOOT and publishes the
-release the scanner then lists.
+release; the action then writes `app.pspdx`.
 
 </details>
 
-<details>
-<summary><b><code>app.pspdx</code></b> — optional. In the author's repository.</summary>
-
-```json
-{
-  "schema": "https://github.com/chriopter/pspdx/blob/master/manifest.md",
-  "id": "io.github.chriopter.extremetuxracer",
-  "rev": 1789034382,
-  "url": "https://github.com/chriopter/psp-tuxracer/releases/download/v0.16.0/extremetuxracer-psp.zip",
-  "sha256": "2cd0a663535b613a2449fcd68c111b9f4301465aefdda4c6c3fce33e5cd8d231",
-  "size": 44048460,
-  "requires": { "ram_mb": 64 },
-  "display": {
-    "version": "0.16.0",
-    "notes": "First release listed in PSPDX."
-  }
-}
-```
-
-For an author who would rather not wait for the next scan. The console asks for
-it only when you select that app, and the higher `rev` wins — so a stale one is
-harmless, which matters, because they go stale.
-
-Copy: [`app.pspdx.template`](app.pspdx.template)
-
-</details>
 
 ## What is listed
 
@@ -158,7 +167,7 @@ below are relative to `app/`.
 
 - One request gets the whole index: [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) is folded into a single `catalog.json`. The PSP pays per TLS handshake, not per byte.
 - Downloads come from the author's own release. PSPDX hosts nothing and mirrors nothing.
-- An author who publishes an `app.pspdx` gets updates on the device minutes later, with no change to the index. An author who has stopped answering is carried by the index instead.
+- The truth is the author's `app.pspdx`; the index is a cache of it. A list without a cache still works, one small file per app over one connection.
 - TLS 1.3, with the seed collected off the analog stick at startup, because the PSP has no usable PRNG.
 - Every manifest sits on the same GitHub host, so one handshake covers the whole update check.
 
@@ -239,11 +248,12 @@ ca-certificates package on most machines.
 <details>
 <summary><b>The film</b> — an MP4 on the way in, a PSMF on the way out, decoded on the Media Engine.</summary>
 
-The catalog serves a plain MP4 -- H.264 baseline, 480x272 at 30 -- the same
-file a PSP plays out of `PSP/VIDEO`. The PSP's decoder, `sceMpeg` on the
-Media Engine, does not read MP4 though: it wants the same H.264 in a PSMF,
-Sony's envelope -- a header, then an MPEG-2 program stream in 2048-byte
-packs. So the client wraps the film itself, in RAM, on the way in:
+The film is the app's own `ICON1.PMF`, a PSMF out of the EBOOT, and the
+decoder, `sceMpeg` on the Media Engine, plays it as it is. Older entries
+serve a plain MP4 -- H.264 baseline -- and the PSP's decoder does not read
+MP4: it wants the same H.264 in a PSMF, Sony's envelope -- a header, then
+an MPEG-2 program stream in 2048-byte packs. So the client wraps such a film
+itself, in RAM, on the way in:
 `video/mp4.c` finds the samples and the parameter sets, `video/psmf.c`
 packs them, `video/player.c` feeds the result through a ring buffer and
 decodes straight into the card's texture, thirty pictures a second by the
@@ -383,7 +393,8 @@ that works on a real PSP, and on a host whose desktop is locked.
 | `PSPDX1.BMP` | the screen a scripted `shot` key asked for |
 | `PSPDX2.BMP` | the screen after an install |
 | `PSPDX.KEYS` | scripted input, one `<ms> <key>` per line from the moment the catalog is up: `up`, `down`, `left`, `right`, `cross`, `circle`, `square`, `triangle`, `ltrigger`, `rtrigger`, `select`, `start`, or `shot` |
-| `PSPDX.INSTALL` | a manifest URL here installs that app unattended, for testing |
+| `PSPDX.INSTALL` | an `app.pspdx` URL here installs that app unattended, for testing |
+| `PSP/PSPDX/sources.txt` | the lists, one URL a line, the built-in one first |
 | `PSP/PSPDX/cache/<served name>` | a picture once fetched, so it costs one handshake per stick, not per run. The catalog serves every asset under `<id>-<sha8>.<ext>`, a name that carries the bytes, so a changed picture arrives under a new name and the old file is simply never asked for again. An entry that links nothing is looked up as `<id>.<ext>`, which is where the rig plants a clip |
 | `PSP/PSPDX/font/ltn8.pgf` | never written by the client: where it looks for the system font when `flash0:` has none |
 | `PSP/PSPDX/db/<id>.json` | what was installed: rev, directory, manifest URL |

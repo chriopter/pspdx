@@ -81,6 +81,14 @@ static int hexval(char c) {
     return -1;
 }
 
+/* A string field of the file into a fixed buffer, empty when the field is
+   missing or not a string: every text field is optional. */
+static void text_field(char *dst, size_t size, cJSON *obj, const char *key) {
+    cJSON *v = cJSON_GetObjectItemCaseSensitive(obj, key);
+    if (cJSON_IsString(v)) snprintf(dst, size, "%s", v->valuestring);
+    else dst[0] = '\0';
+}
+
 int manifest_fetch(const char *url, const char *expect_id, struct manifest *m) {
     struct https_result r;
     g_manifest_len = 0;
@@ -128,20 +136,35 @@ int manifest_fetch(const char *url, const char *expect_id, struct manifest *m) {
         goto out;
     }
     if (!manifest_id_is_safe(id->valuestring)) { logline("manifest: unusable id"); goto out; }
-    if (expect_id && strcmp(expect_id, id->valuestring) != 0) {
-        /* The catalog said which package this is. A manifest that renames
-           itself would otherwise overwrite another package's record. */
-        logline("manifest: id is not %s", expect_id);
-        goto out;
+    if (expect_id) {
+        /* The catalog said which package this is, or the list said whose:
+           a manifest that renames itself would otherwise overwrite another
+           package's record, and one that names another owner's app would
+           overwrite that account's. */
+        size_t n = strlen(expect_id);
+        int prefix = n && expect_id[n - 1] == '.';
+        int ok = prefix ? strncmp(expect_id, id->valuestring, n) == 0
+                        : strcmp(expect_id, id->valuestring) == 0;
+        if (!ok) {
+            logline("manifest: id %s is not %s%s", id->valuestring, expect_id,
+                    prefix ? "*" : "");
+            goto out;
+        }
     }
     m->rev = (unsigned)rev->valuedouble;
     m->size = (size_t)size->valuedouble;
     strncpy(m->id, id->valuestring, sizeof(m->id) - 1);
     strncpy(m->url, u->valuestring, sizeof(m->url) - 1);
-    if (cJSON_IsObject(disp)) {
-        cJSON *v = cJSON_GetObjectItemCaseSensitive(disp, "version");
-        if (cJSON_IsString(v)) strncpy(m->version, v->valuestring, sizeof(m->version) - 1);
-    }
+    /* The version stands at the top of the file; a file written before the
+       author's half existed kept it under "display", and is still read. */
+    text_field(m->version, sizeof(m->version), root, "version");
+    if (!m->version[0] && cJSON_IsObject(disp))
+        text_field(m->version, sizeof(m->version), disp, "version");
+    text_field(m->name, sizeof(m->name), root, "name");
+    text_field(m->author, sizeof(m->author), root, "author");
+    text_field(m->summary, sizeof(m->summary), root, "summary");
+    text_field(m->category, sizeof(m->category), root, "category");
+    text_field(m->license, sizeof(m->license), root, "license");
     logline("manifest: %s rev %u, %lu bytes", m->id, m->rev, (unsigned long)m->size);
     rc = 0;
 out:

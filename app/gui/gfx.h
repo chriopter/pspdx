@@ -23,6 +23,11 @@ void gfx_frame_begin(unsigned clear);
 void gfx_frame_end(void);
 unsigned gfx_frames(void);
 
+/* Something the firmware draws over every frame -- its on-screen keyboard
+   -- called from end() once the list is finished and before the swap, which
+   is where the utility dialogs want to be. NULL takes it off again. */
+void gfx_frame_overlay(void (*overlay)(void));
+
 /* The worst wait for the GE to finish and the worst wait for vblank since
    last asked, in microseconds: how much of a frame the drawing itself takes
    and how much is slack. */

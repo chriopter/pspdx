@@ -70,10 +70,13 @@ int sync_done(void) { return g_state == SYNC_DONE || g_state == SYNC_FAILED; }
 
 const char *sync_message(void) {
     const char *phase = https_phase();
+    const char *progress = catalog_progress();
     switch (g_state) {
     case SYNC_IDLE:       return "connecting";
     case SYNC_CONNECTING: return phase[0] ? phase : "connecting";
-    case SYNC_FETCHING:   return phase[0] ? phase : "catalog";
+    /* A list being walked is one fetch per repository, and where it has
+       got to says more than which of them is mid-handshake. */
+    case SYNC_FETCHING:   return progress[0] ? progress : phase[0] ? phase : "catalog";
     case SYNC_CHECKING:   return "checking for updates";
     case SYNC_FAILED:     return g_message;
     default:              return "";

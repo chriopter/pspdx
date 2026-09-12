@@ -220,3 +220,79 @@ size_t psmf_build(const unsigned char *mp4, const struct mp4 *t,
     }
     return pk.w.pos;
 }
+
+/* ---------------------------------------------------------- reading one */
+
+static unsigned get16(const unsigned char *p) { return ((unsigned)p[0] << 8) | p[1]; }
+static unsigned get32(const unsigned char *p) { return (get16(p) << 16) | get16(p + 2); }
+
+/* The 48-bit timestamps at 0x54 and 0x5A: the low 32 bits are all a film of
+   a few seconds ever uses, and all the pacing arithmetic wants. */
+static unsigned get_ts48(const unsigned char *p) { return get32(p + 2); }
+
+int psmf_is(const unsigned char *data, size_t len) {
+    return len >= 4 && memcmp(data, "PSMF", 4) == 0;
+}
+
+/* Counts the video PES packets that carry a timestamp, one per access
+   unit: the muxers Sony shipped put one on the first PES of every picture,
+   and so does psmf_build. The packs are walked in place; a pack that does
+   not start with a pack header ends the count, which is where the stream
+   ends too. */
+static int count_frames(const unsigned char *s, size_t len) {
+    int frames = 0;
+    for (size_t at = 0; at + PSMF_PACK <= len; at += PSMF_PACK) {
+        const unsigned char *p = s + at, *end = p + PSMF_PACK;
+        if (p[0] != 0 || p[1] != 0 || p[2] != 1 || p[3] != 0xBA) break;
+        p += PACK_HEADER + (p[13] & 7);
+        /* PES packets, the system header and padding all share the shape
+           start code, id, 16-bit length; anything else is stuffing to the
+           end of the pack. */
+        while (p + 6 <= end && p[0] == 0 && p[1] == 0 && p[2] == 1) {
+            unsigned id = p[3], size = get16(p + 4);
+            const unsigned char *next = p + 6 + size;
+            if ((id & 0xF0) == 0xE0 && p + 8 <= end && (p[7] & 0x80)) frames++;
+            if (next > end) break;
+            p = next;
+        }
+    }
+    return frames;
+}
+
+int psmf_parse(const unsigned char *data, size_t len, struct psmf_info *out) {
+    if (!psmf_is(data, len) || len < 0x100) return -1;
+    memset(out, 0, sizeof(*out));
+    out->stream_offset = get32(data + 0x8);
+    out->stream_size = get32(data + 0xC);
+    if (out->stream_offset < 0x100 || out->stream_offset >= len) return -1;
+    /* A file cut short still plays as far as it goes. */
+    if (out->stream_size > len - out->stream_offset) out->stream_size = len - out->stream_offset;
+    out->start_pts = get_ts48(data + 0x54);
+    out->end_pts = get_ts48(data + 0x5A);
+
+    /* The stream table at 0x80: a count, then sixteen bytes an entry, the
+       video's carrying its size in macroblocks at the end. An ICON1.PMF
+       lists an audio stream too, in PES 0xBD, which the player leaves in
+       the ring unread. */
+    unsigned streams = get16(data + 0x80);
+    for (unsigned i = 0; i < streams && 0x82 + (i + 1) * 16 <= out->stream_offset; i++) {
+        const unsigned char *e = data + 0x82 + i * 16;
+        if ((e[0] & 0xF0) != 0xE0) continue;
+        out->width = e[0xC] * 16;
+        out->height = e[0xD] * 16;
+        break;
+    }
+    if (!out->width || !out->height) return -1;
+    out->frames = count_frames(data + out->stream_offset, out->stream_size);
+    return 0;
+}
+
+unsigned psmf_frame_ticks(const struct psmf_info *info) {
+    unsigned ticks = 3000;
+    if (info->frames > 0 && info->end_pts > info->start_pts)
+        ticks = (info->end_pts - info->start_pts) / (unsigned)info->frames;
+    /* Between ten and sixty a second: outside that the header is lying,
+       and thirty is what every film so far has been. */
+    if (ticks < 1500 || ticks > 9000) ticks = 3000;
+    return ticks;
+}

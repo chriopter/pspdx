@@ -23,4 +23,28 @@ size_t psmf_capacity(size_t mp4_len);
 size_t psmf_build(const unsigned char *mp4, const struct mp4 *track,
                   unsigned char *out, size_t cap);
 
+/* What a PSMF says about itself, whether psmf_build wrote it or it came out
+   of an EBOOT as ICON1.PMF: where the packs start and how many there are,
+   the picture's size, the presentation's first and last timestamps at
+   90 kHz, and how many pictures are in it, which the header does not say
+   and is counted by walking the packs for the PES packets that carry a
+   timestamp. */
+struct psmf_info {
+    size_t stream_offset, stream_size;
+    int width, height;
+    unsigned start_pts, end_pts;
+    int frames;
+};
+
+/* True when data starts with the PSMF magic, whatever follows it. */
+int psmf_is(const unsigned char *data, size_t len);
+
+/* 0 on success; -1 when it is not a PSMF, has no video stream, or the
+   stream does not fit in len. */
+int psmf_parse(const unsigned char *data, size_t len, struct psmf_info *out);
+
+/* How long one picture stays, in 90 kHz ticks: the presentation's span
+   over its count, or thirty a second when the header cannot say. */
+unsigned psmf_frame_ticks(const struct psmf_info *info);
+
 #endif
