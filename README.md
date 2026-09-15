@@ -1,13 +1,36 @@
 # PSPDX standard
 
-PSP homebrew is scattered over GitHub, forums and old archives. Installing is manual, and so is updating.
+PSP homebrew is scattered over GitHub, forums and old archives. Installing is
+manual, and so is updating.
 
-The PSPDX standard solves this with two small JSON files, so [PSPDX](https://github.com/chriopter/pspdx-app) on the PSP itself can find, install and update apps:
+The PSPDX standard is two small JSON files. They let [PSPDX](https://github.com/chriopter/pspdx-app)
+on the PSP itself find, install and update apps.
 
-- **`.pspdx`** → describes one app, in its own repository · [schema](https://chriopter.github.io/pspdx/schema/pspdx-v1.json)
-- **`catalog.json`** → lists many apps, like an app store anyone can run · [schema](https://chriopter.github.io/pspdx/schema/catalog-v1.json)
+- **`.pspdx`** describes one app. It lives in the app's own repository, written by the author.
+- **`catalog.json`** lists many apps. Anyone can publish one, like an app store.
 
-**[Fields and rules →](https://chriopter.github.io/pspdx/)**
+## How it works
+
+- **Direct:** The author puts a `.pspdx` in the repository. You add the repository
+  on the PSP, and PSPDX installs and updates the app from its releases.
+- **Catalog:** Someone creates a `catalog.json` that links to many repositories. You
+  add the catalog on the PSP, and each app installs and updates from its own repository.
+- **Old apps:** The repository has no `.pspdx`, often because the author is gone. The
+  `catalog.json` carries the details instead, and updates come through the catalog.
+
+A repository's own `.pspdx` always wins.
+
+## Get started
+
+**Your app.** Put a `.pspdx` in the root of your repository and publish a GitHub
+release with one ZIP that holds the app. Only `schema`, `source` and `name` are
+required; version, date and size come from the release, icon and pictures from
+the EBOOT. Then add the repository on the PSP, or ask a catalog to list it.
+
+**Your catalog.** A `catalog.json` carries every app with its releases: tag, date,
+ZIP URL, size and SHA-256. For a repository without a `.pspdx` it supplies the
+fields itself. [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) builds
+one for you: fork it and list your repositories.
 
 <details markdown="1">
 <summary><b>Example</b> · a minimal <code>.pspdx</code></summary>
@@ -24,17 +47,15 @@ The PSPDX standard solves this with two small JSON files, so [PSPDX](https://git
 
 </details>
 
-## How apps get onto the PSP and stay updated
+**[Fields and rules →](https://chriopter.github.io/pspdx/)**
 
-- **Direct:** The author puts a `.pspdx` in the homebrew's repository. You add the repository on the PSP, and PSPDX installs and updates the app from its releases.
-- **Catalog:** Someone creates a `catalog.json` that links to many repositories. You add the catalog on the PSP, and each app installs and updates from its own repository.
-- **Old apps:** The repository has no `.pspdx`, often because the author is gone. The `catalog.json` carries the details instead, and updates come through the catalog.
-
-A repository's own `.pspdx` always wins.
+Each file names its JSON Schema in the `schema` field, so it can be checked:
+[`pspdx-v1.json`](https://chriopter.github.io/pspdx/schema/pspdx-v1.json) and
+[`catalog-v1.json`](https://chriopter.github.io/pspdx/schema/catalog-v1.json).
 
 ## Links
 
-- [pspdx-app](https://github.com/chriopter/pspdx-app) — the PSP app that reads it
+- [pspdx-app](https://github.com/chriopter/pspdx-app) — the PSP app that reads these files
 - [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) — the main catalog and its builder
-- [pspdx-demo](https://github.com/chriopter/pspdx-demo) — Direct and Catalog: a homebrew with its own `.pspdx`
-- [pspdx-demo-abandoned](https://github.com/chriopter/pspdx-demo-abandoned) — Old apps: listed without a `.pspdx`
+- [pspdx-demo](https://github.com/chriopter/pspdx-demo) — a homebrew with its own `.pspdx`
+- [pspdx-demo-abandoned](https://github.com/chriopter/pspdx-demo-abandoned) — a homebrew listed without one
