@@ -4,8 +4,8 @@
 
 PSP homebrew is scattered over GitHub, forums and old archives. With this standard, [PSPDX](https://github.com/chriopter/pspdx-app) on the PSP finds, installs and updates it by itself.
 
-- **`.pspdx`** — one app, in its own repository · [schema](https://chriopter.github.io/pspdx/schema/pspdx-v1.json)
-- **`catalog.json`** — many apps in one list, anyone can publish one · [schema](https://chriopter.github.io/pspdx/schema/catalog-v1.json)
+- **`.pspdx`** — a breadcrumb in an app's repo that leads the PSP back to it for updates · [schema](https://chriopter.github.io/pspdx/schema/pspdx-v1.json)
+- **`catalog.json`** — a list of many homebrews, anyone can publish one · [schema](https://chriopter.github.io/pspdx/schema/catalog-v1.json)
 
 **[Fields and rules →](https://chriopter.github.io/pspdx/)**
 
@@ -32,9 +32,11 @@ PSP homebrew is scattered over GitHub, forums and old archives. With this standa
 
 A repo's own `.pspdx` always wins.
 
+**No central server.** The files live with the apps, and anyone can run a catalog. If a catalog disappears, apps with a `.pspdx` keep updating from their repos.
+
 ## Get started
 
-- **Your app:** a `.pspdx` in the repo root and a GitHub release with one ZIP. Only `schema`, `source` and `name` are required.
+- **Your app:** a `.pspdx` in the repo root and a GitHub release with one ZIP. Only `schema`, `source` and `name` are required. See [pspdx-demo](https://github.com/chriopter/pspdx-demo).
 - **Your catalog:** fork [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) and list your repos.
 
 ## Links

@@ -20,7 +20,10 @@ const SAID = {
   "^[0-9a-f]{64}(?![\\s\\S])": "64 lowercase hex digits",
   "^[0-9a-f]{32}(?![\\s\\S])": "32 lowercase hex digits",
 };
-const said = pattern => SAID[pattern] || `matches ${code(pattern)}`;
+// A long pattern would stretch its column; it is folded under a short label.
+const pat = pattern => pattern.length <= 32 ? code(pattern)
+  : `<details class="pattern"><summary>a pattern</summary>${code(pattern)}</details>`;
+const said = pattern => SAID[pattern] || `matches ${pat(pattern)}`;
 const strip = desc => (desc || "").replace(/^(required|optional);\s*/i, "");
 
 function typeOf(p, pre) {
@@ -48,7 +51,7 @@ function facts(p) {
   if (p.minimum !== undefined) f.push(`at least ${p.minimum}`);
   if (p.format) f.push(`format ${code(p.format)}`);
   if (p.pattern) f.push(said(p.pattern));
-  if (p.anyOf) f.push("either " + p.anyOf.map(a => [a.format && `format ${code(a.format)}`, a.pattern && `matching ${code(a.pattern)}`].filter(Boolean).join(" ")).join("<br>or "));
+  if (p.anyOf) f.push("either " + p.anyOf.map(a => [a.format && `format ${code(a.format)}`, a.pattern && `matching ${pat(a.pattern)}`].filter(Boolean).join(" ")).join("<br>or "));
   if (p.if && p.then) f.push(`if it ${cond(p.if)}, then it also ${cond(p.then)}`);
   if (p.items && p.items.type !== "object" && !p.items.$ref) {
     const inner = facts(p.items); if (inner.length) f.push("each: " + inner.join("; "));
@@ -60,16 +63,16 @@ function facts(p) {
 // else is shown as JSON rather than guessed at.
 function cond(c) {
   const parts = [];
-  if (c.pattern) parts.push(`matches ${code(c.pattern)}`);
-  if (c.not && c.not.pattern) parts.push(`does not match ${code(c.not.pattern)}`);
+  if (c.pattern) parts.push(`matches ${pat(c.pattern)}`);
+  if (c.not && c.not.pattern) parts.push(`does not match ${pat(c.not.pattern)}`);
   if (c.required) parts.push(`has ${list(c.required)}`);
   if (c.not && c.not.required) parts.push(`has no ${list(c.not.required)}`);
   if (c.anyOf) parts.push(c.anyOf.map(cond).join(" or "));
   if (c.properties) for (const [k, v] of Object.entries(c.properties)) {
     if (v.enum) parts.push(`${code(k)} is one of ${list(v.enum)}`);
     else if (v.const !== undefined) parts.push(`${code(k)} is ${code(v.const)}`);
-    else if (v.not && v.not.pattern) parts.push(`${code(k)} does not match ${code(v.not.pattern)}`);
-    else if (v.pattern) parts.push(`${code(k)} matches ${code(v.pattern)}`);
+    else if (v.not && v.not.pattern) parts.push(`${code(k)} does not match ${pat(v.not.pattern)}`);
+    else if (v.pattern) parts.push(`${code(k)} matches ${pat(v.pattern)}`);
     else if (v.required) parts.push(`${code(k)} has ${list(v.required)}`);
   }
   return parts.length ? parts.join(" and ") : code(c);
