@@ -32,7 +32,7 @@ PSP homebrew is scattered over GitHub, forums and old archives. With this standa
 
 A repo's own `.pspdx` always wins.
 
-**No central server.** The files live with the apps, and anyone can run a catalog. If a catalog disappears, apps with a `.pspdx` keep updating from their repos.
+**No central server.** The files live with the apps, and anyone can run a catalog. If a catalog disappears, apps with a `.pspdx` keep updating from their author's repo, because PSPDX keeps a copy of each app's `.pspdx` on the Memory Stick.
 
 ## Get started
 
