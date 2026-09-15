@@ -26,11 +26,11 @@ The PSPDX standard solves this with two small JSON files, so [PSPDX](https://git
 
 ## How apps get onto the PSP and stay updated
 
-- **Direct** → a homebrew's repo has a `.pspdx` → add the repo on the PSP → updates from its releases
-- **Catalog** → a `catalog.json` links to the repo → add the catalog → updates from the repo's releases
-- **Old apps** → the repo has no `.pspdx` → the `catalog.json` carries the details → updates from the catalog
+- **Direct:** The author puts a `.pspdx` in the homebrew's repository. You add the repository on the PSP, and PSPDX installs and updates the app from its releases.
+- **Catalog:** Someone creates a `catalog.json` that links to many repositories. You add the catalog on the PSP, and each app installs and updates from its own repository.
+- **Old apps:** The repository has no `.pspdx`, often because the author is gone. The `catalog.json` carries the details instead, and updates come through the catalog.
 
-A repo's own `.pspdx` always wins.
+A repository's own `.pspdx` always wins.
 
 ## Links
 
