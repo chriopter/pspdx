@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://chriopter.github.io/pspdx/schema/pspdx-v1.json",
   "title": ".pspdx",
-  "description": "What a PSP homebrew project says about itself to PSPDX. The id comes from the source: io.github.<owner>.<repository> on GitHub, the host of listed_by and the name elsewhere. Version, date, package and size come from the project's releases, the icon, picture, film and sound out of the EBOOT. Without release the app follows its newest release; with it, exactly that release and never a newer one until the file changes. A catalog may list a project that has no .pspdx; it sets listed_by on its entry. No string holds a control character, except a newline in description. All text is UTF-8. A console shows the characters its font has and skips the rest. Readers ignore fields they don't know, so a newer optional field never breaks an older reader; this schema lists only the known ones, so a typo shows up when a file is checked against it.",
+  "description": "What a PSP homebrew project says about itself to PSPDX. The id comes from the source: io.github.<owner>.<repository> on GitHub, the host of the source and the name elsewhere. Version, date, package and size come from the project's releases, the icon, picture, film and sound out of the EBOOT. Without release the app follows its newest release; with it, exactly that release and never a newer one until the file changes. A catalog may list a project that has no .pspdx from a file of its own; the project's own file wins once it has one. No string holds a control character, except a newline in description. All text is UTF-8. A console shows the characters its font has and skips the rest. Readers ignore fields they don't know, so a newer optional field never breaks an older reader; this schema lists only the known ones, so a typo shows up when a file is checked against it.",
   "type": "object",
   "required": [
     "schema",
@@ -48,14 +48,12 @@
         }
       },
       "then": {
-        "required": [
-          "listed_by"
-        ],
         "properties": {
           "name": {
             "pattern": "[A-Za-z0-9]"
           },
-          "listed_by": {
+          "source": {
+            "pattern": "^https://(?:[^/?#\\\\\\u0000-\\u001f]*@)?(?![Ww][Ww][Ww]\\.(?:[:/?#]|(?![\\s\\S])))(?:-*[A-Za-z0-9][A-Za-z0-9-]*\\.)*-*[A-Za-z0-9][A-Za-z0-9-]*\\.?(?::[0-9]*)?(?:[/?#][^\\\\\\u0000-\\u001f]*)?(?![\\s\\S])",
             "not": {
               "pattern": "^https://(?:[^/?#\\\\]*@)?(?![^/?#\\\\]*@)(?:[A-Za-z0-9-]*\\.)*-*[Gg]-*[Ii]-*[Tt]-*[Hh]-*[Uu]-*[Bb]-*\\.-*[Ii]-*[Oo]-*\\.?(?:[:/?#]|(?![\\s\\S]))"
             }
@@ -105,7 +103,7 @@
       "then": {
         "pattern": "^https://github\\.com/(?=[._-]*[A-Za-z0-9])[A-Za-z0-9_.-]{1,39}/(?=[._-]*[A-Za-z0-9])(?![._-]+\\.git/?(?![\\s\\S]))(?![A-Za-z0-9_.-]+\\.git\\.git/?(?![\\s\\S]))[A-Za-z0-9_.-]{1,100}/?(?![\\s\\S])"
       },
-      "description": "required; where the project lives: an https:// URL, and on github.com a repository URL, https://github.com/<owner>/<repository>, a .git or a slash after it allowed. The owner is 1 to 39 and the repository 1 to 100 of [A-Za-z0-9_.-], each with a letter or digit besides a .git it ends in, so neither is . or ..; and a repository does not end in .git.git. Only a GitHub repository has releases the console can ask for in version 1; any other source needs listed_by, whose host and the name make its id."
+      "description": "required; where the project lives: an https:// URL, and on github.com a repository URL, https://github.com/<owner>/<repository>, a .git or a slash after it allowed. The owner is 1 to 39 and the repository 1 to 100 of [A-Za-z0-9_.-], each with a letter or digit besides a .git it ends in, so neither is . or ..; and a repository does not end in .git.git. Only a GitHub repository has releases the console can ask for in version 1. Any other source's host and the name make its id: the host without www., backwards, and the name, each part reduced to its ASCII letters and digits in lower case. So there the host is ASCII letters, digits and hyphens, with a letter or digit in every label, any other name written in punycode (xn--), the URL holds no backslash, and a host under github.io, whose ids would start io.github., is refused."
     },
     "name": {
       "type": "string",
@@ -171,12 +169,6 @@
       "pattern": "^[^\\u0000-\\u0009\\u000b-\\u001f]*(?![\\s\\S])",
       "description": "optional; plain text, newlines allowed"
     },
-    "listed_by": {
-      "type": "string",
-      "maxLength": 255,
-      "pattern": "^https://(?:[^/?#\\\\\\u0000-\\u001f]*@)?(?![Ww][Ww][Ww]\\.(?:[:/?#]|(?![\\s\\S])))(?:-*[A-Za-z0-9][A-Za-z0-9-]*\\.)*-*[A-Za-z0-9][A-Za-z0-9-]*\\.?(?::[0-9]*)?(?:[/?#][^\\\\\\u0000-\\u001f]*)?(?![\\s\\S])",
-      "description": "optional; the https:// home page of a list that vouches for the app. A catalog sets it on the entry of an app whose repository has no .pspdx of its own; an author does not set it in their own .pspdx, and the repository's own file wins once it has one. Its host is ASCII letters, digits and hyphens, with a letter or digit in every label, any other name written in punycode (xn--), and the URL holds no backslash. For a source outside GitHub the host without www., backwards, and the name make the id, so there a list under github.io, whose ids would start io.github., is refused."
-    },
     "release": {
       "type": "object",
       "required": [
@@ -203,14 +195,14 @@
           "anyOf": [
             {
               "format": "date-time",
-              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z(?![\\s\\S])"
+              "pattern": "^(?!1970-01-01T00:00:00Z)(?:19[7-9][0-9]|[2-9][0-9]{3})-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z(?![\\s\\S])"
             },
             {
               "format": "date",
-              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(?![\\s\\S])"
+              "pattern": "^(?!1970-01-01(?![\\s\\S]))(?:19[7-9][0-9]|[2-9][0-9]{3})-[0-9]{2}-[0-9]{2}(?![\\s\\S])"
             }
           ],
-          "description": "optional; when the release was published, UTC, as a catalog writes it. On GitHub the date comes from GitHub and this value is ignored. Required outside GitHub."
+          "description": "optional; when the release was published, UTC, as a catalog writes it, after the start of 1970: 1970-01-01T00:00:01Z at the earliest, 1970-01-02 as a date. On GitHub the date comes from GitHub and this value is ignored. Required outside GitHub."
         }
       },
       "description": "optional; pins one release: PSPDX installs exactly this one and never looks for a newer one until the file changes. Without it, the newest release, with updates. A release is usable with one zip, or of several exactly one with psp in its name, in any case. Size and hashes are never written here; a catalog computes them."

@@ -72,14 +72,12 @@
             }
           },
           "then": {
-            "required": [
-              "listed_by"
-            ],
             "properties": {
               "name": {
                 "pattern": "[A-Za-z0-9]"
               },
-              "listed_by": {
+              "source": {
+                "pattern": "^https://(?:[^/?#\\\\\\u0000-\\u001f]*@)?(?![Ww][Ww][Ww]\\.(?:[:/?#]|(?![\\s\\S])))(?:-*[A-Za-z0-9][A-Za-z0-9-]*\\.)*-*[A-Za-z0-9][A-Za-z0-9-]*\\.?(?::[0-9]*)?(?:[/?#][^\\\\\\u0000-\\u001f]*)?(?![\\s\\S])",
                 "not": {
                   "pattern": "^https://(?:[^/?#\\\\]*@)?(?![^/?#\\\\]*@)(?:[A-Za-z0-9-]*\\.)*-*[Gg]-*[Ii]-*[Tt]-*[Hh]-*[Uu]-*[Bb]-*\\.-*[Ii]-*[Oo]-*\\.?(?:[:/?#]|(?![\\s\\S]))"
                 }
@@ -94,7 +92,7 @@
           "minLength": 1,
           "maxLength": 159,
           "pattern": "^[^\\u0000-\\u001f]*(?![\\s\\S])",
-          "description": "optional; whatever name the catalog gives the entry. PSPDX does not rely on it: it makes its own id from the source, io.github.<owner>.<repo> on GitHub, or from the host of listed_by and the name elsewhere."
+          "description": "optional; whatever name the catalog gives the entry. PSPDX does not rely on it: it makes its own id from the source, io.github.<owner>.<repo> on GitHub, or from the host of the source and the name elsewhere."
         },
         "source": {
           "type": "string",
@@ -106,7 +104,7 @@
           "then": {
             "pattern": "^https://github\\.com/(?=[._-]*[A-Za-z0-9])[A-Za-z0-9_.-]{1,39}/(?=[._-]*[A-Za-z0-9])(?![._-]+\\.git/?(?![\\s\\S]))(?![A-Za-z0-9_.-]+\\.git\\.git/?(?![\\s\\S]))[A-Za-z0-9_.-]{1,100}/?(?![\\s\\S])"
           },
-          "description": "required; where the project lives: an https:// URL, and on github.com a repository URL, https://github.com/<owner>/<repository>, a .git or a slash after it allowed. The owner is 1 to 39 and the repository 1 to 100 of [A-Za-z0-9_.-], each with a letter or digit besides a .git it ends in, so neither is . or ..; and a repository does not end in .git.git. Only a GitHub repository has releases the console can ask for in version 1; any other source needs listed_by, whose host and the name make its id."
+          "description": "required; where the project lives: an https:// URL, and on github.com a repository URL, https://github.com/<owner>/<repository>, a .git or a slash after it allowed. The owner is 1 to 39 and the repository 1 to 100 of [A-Za-z0-9_.-], each with a letter or digit besides a .git it ends in, so neither is . or ..; and a repository does not end in .git.git. Only a GitHub repository has releases the console can ask for in version 1. Any other source's host and the name make its id: the host without www., backwards, and the name, each part reduced to its ASCII letters and digits in lower case. So there the host is ASCII letters, digits and hyphens, with a letter or digit in every label, any other name written in punycode (xn--), the URL holds no backslash, and a host under github.io, whose ids would start io.github., is refused."
         },
         "name": {
           "type": "string",
@@ -171,12 +169,6 @@
           "maxLength": 2500,
           "pattern": "^[^\\u0000-\\u0009\\u000b-\\u001f]*(?![\\s\\S])",
           "description": "optional; plain text, newlines allowed"
-        },
-        "listed_by": {
-          "type": "string",
-          "maxLength": 255,
-          "pattern": "^https://(?:[^/?#\\\\\\u0000-\\u001f]*@)?(?![Ww][Ww][Ww]\\.(?:[:/?#]|(?![\\s\\S])))(?:-*[A-Za-z0-9][A-Za-z0-9-]*\\.)*-*[A-Za-z0-9][A-Za-z0-9-]*\\.?(?::[0-9]*)?(?:[/?#][^\\\\\\u0000-\\u001f]*)?(?![\\s\\S])",
-          "description": "optional; the https:// home page of a list that vouches for the app. A catalog sets it on the entry of an app whose repository has no .pspdx of its own; an author does not set it in their own .pspdx, and the repository's own file wins once it has one. Its host is ASCII letters, digits and hyphens, with a letter or digit in every label, any other name written in punycode (xn--), and the URL holds no backslash. For a source outside GitHub the host without www., backwards, and the name make the id, so there a list under github.io, whose ids would start io.github., is refused."
         },
         "website": {
           "type": "string",
@@ -251,14 +243,14 @@
           "anyOf": [
             {
               "format": "date-time",
-              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z(?![\\s\\S])"
+              "pattern": "^(?!1970-01-01T00:00:00Z)(?:19[7-9][0-9]|[2-9][0-9]{3})-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z(?![\\s\\S])"
             },
             {
               "format": "date",
-              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}(?![\\s\\S])"
+              "pattern": "^(?!1970-01-01(?![\\s\\S]))(?:19[7-9][0-9]|[2-9][0-9]{3})-[0-9]{2}-[0-9]{2}(?![\\s\\S])"
             }
           ],
-          "description": "required; when the release was published, UTC: 2024-12-20T14:03:00Z, or only the date 2024-12-20 where no time is known. It orders and dates releases; the console finds an update by releases[0] having another sha256 than the installed one, not by this time."
+          "description": "required; when the release was published, UTC: 2024-12-20T14:03:00Z, or only the date 2024-12-20 where no time is known; after the start of 1970, so 1970-01-01T00:00:01Z at the earliest and 1970-01-02 as a date, since a console counts seconds from then. It orders and dates releases; the console finds an update by releases[0] having another sha256 than the installed one, not by this time."
         },
         "url": {
           "type": "string",
