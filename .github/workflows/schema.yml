@@ -9,7 +9,7 @@ name: Schemas
 on:
   push:
     branches: [master]
-    paths: ["schema/**", "README.md", ".github/workflows/schema.yml"]
+    paths: ["schema/**", "page/**", "README.md", ".github/workflows/schema.yml"]
   workflow_dispatch:
   schedule:
     - cron: "17 6 * * *"
@@ -36,12 +36,12 @@ jobs:
       - name: Build the site
         run: |
           pip install --quiet jsonschema markdown
-          python3 schema/build.py site
+          python3 page/build.py _site
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: _site
       - uses: actions/deploy-pages@v4
         id: deployment
 

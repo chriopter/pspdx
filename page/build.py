@@ -10,7 +10,7 @@ this checks that both schemas are valid, name their own URL as $id, are
 linked from the README, and that every example validates. The workflow
 checks the live URLs again after the deploy.
 
-    python3 schema/build.py [site-dir]     (needs jsonschema and markdown)
+    python3 page/build.py [site-dir]     (needs jsonschema and markdown)
 """
 import json
 import pathlib
@@ -55,12 +55,12 @@ def check_examples(readme, loaded):
         fail("README.md has no json example")
     for block in blocks:
         valid("pspdx-v1.json", block.split("```", 1)[0], "the README's example")
-    valid("catalog-v1.json", (ROOT / "schema/catalog-example.json").read_text(encoding="utf-8"),
-          "schema/catalog-example.json")
+    valid("catalog-v1.json", (ROOT / "page/catalog-example.json").read_text(encoding="utf-8"),
+          "page/catalog-example.json")
 
 
 def fields():
-    example = (ROOT / "schema/catalog-example.json").read_text(encoding="utf-8")
+    example = (ROOT / "page/catalog-example.json").read_text(encoding="utf-8")
     out = []
     for name, file in SCHEMAS.items():
         box = name.removesuffix(".json")
@@ -73,7 +73,7 @@ def fields():
 
 
 def main():
-    site = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "site")
+    site = pathlib.Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "_site")
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     loaded = schemas()
     for name in SCHEMAS:
@@ -86,14 +86,15 @@ def main():
     if link not in body:
         fail("README.md no longer has the **[Fields and rules →](" + BASE + ")** line the fields go in")
     body = body.replace(link, fields()).replace(f'href="{BASE}', 'href="')
-    page = (ROOT / "schema/page.html").read_text(encoding="utf-8").replace("<!-- README -->", body)
+    page = (ROOT / "page/template.html").read_text(encoding="utf-8").replace("<!-- README -->", body)
 
     if site.exists():
         shutil.rmtree(site)
     (site / "schema").mkdir(parents=True)
     (site / "index.html").write_text(page, encoding="utf-8")
-    for name in [*SCHEMAS, "render.js", "view.html"]:
+    for name in SCHEMAS:
         shutil.copy(ROOT / "schema" / name, site / "schema" / name)
+    shutil.copy(ROOT / "page/render.js", site / "render.js")
     for name in SCHEMAS:
         if f'href="schema/{name}"' not in page:
             fail(f"the page lost its link to schema/{name}")
