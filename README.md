@@ -9,6 +9,21 @@ The PSPDX standard solves this with two small JSON files, so [PSPDX](https://git
 
 **[Fields and rules →](https://chriopter.github.io/pspdx/)**
 
+<details markdown="1">
+<summary><b>Example</b> · a minimal <code>.pspdx</code></summary>
+
+```json
+{
+  "schema": "https://chriopter.github.io/pspdx/schema/pspdx-v1.json",
+  "source": "https://github.com/chriopter/pspdx-demo",
+  "name": "PSPDX Demo",
+  "category": "demo",
+  "summary": "Hello, PSP. A demo listing for PSPDX."
+}
+```
+
+</details>
+
 ## How apps get onto the PSP and stay updated
 
 - **Direct** → repo has a `.pspdx` → add the repo on the PSP → updates from its releases

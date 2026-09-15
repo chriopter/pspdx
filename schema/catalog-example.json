@@ -1,0 +1,36 @@
+{
+  "schema": "https://chriopter.github.io/pspdx/schema/catalog-v1.json",
+  "generated_at": "2026-09-14T22:25:44Z",
+  "apps": [
+    {
+      "id": "io.github.chriopter.pspdxdemo",
+      "source": "https://github.com/chriopter/pspdx-demo",
+      "name": "PSPDX Demo",
+      "category": "demo",
+      "installdir": "PSP/GAME/PSPDXDemo",
+      "summary": "Hello, PSP. A demo listing for PSPDX.",
+      "author": "chriopter",
+      "license": "MIT",
+      "description": "A hello world for the PSP, published the way a listed app is: a .pspdx in the repository, a release with the EBOOT.\nX says hello again, HOME leaves.",
+      "releases": [
+        {
+          "tag": "v0.1.2",
+          "published_at": "2026-09-12T23:20:26Z",
+          "url": "https://github.com/chriopter/pspdx-demo/releases/download/v0.1.2/pspdx-demo.zip",
+          "size": 123707,
+          "sha256": "cb5737fbf5aae1fcbcfcdbc7dcc85d761559d4c21a83b8366d39c227598273e4",
+          "eboot_md5": "5d7f8a921fb99b5df2560ffade01d4b4",
+          "changelog": "**Full Changelog**: https://github.com/chriopter/pspdx-demo/compare/v0.1.1...v0.1.2"
+        }
+      ],
+      "media": {
+        "icon": "apps/io.github.chriopter.pspdxdemo/icon-f39ad127.png",
+        "screenshots": [
+          "apps/io.github.chriopter.pspdxdemo/picture-3d60f75d.png"
+        ],
+        "video": "apps/io.github.chriopter.pspdxdemo/film-a4eb3006.pmf",
+        "sound": "apps/io.github.chriopter.pspdxdemo/sound-90636786.at3"
+      }
+    }
+  ]
+}

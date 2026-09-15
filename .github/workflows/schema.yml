@@ -1,14 +1,18 @@
-# The two schemas, served as files: GitHub's page for a file in the
-# repository is HTML, and an editor or a validator asked to fetch a schema
-# from there gets a web page instead of JSON. Pages serves .json as
-# application/json. Only schema/ is published, whenever it changes.
+# The standard's site: README.md as the page, the two schemas as files beside
+# it. GitHub's page for a file in the repository is HTML, and a validator
+# asked to fetch a schema from there gets a web page instead of JSON; Pages
+# serves .json as application/json. The schema URLs must never go away, so
+# the build refuses to publish without them and the live URLs are checked
+# after every deploy.
 name: Schemas
 
 on:
   push:
     branches: [master]
-    paths: ["schema/**", ".github/workflows/schema.yml"]
+    paths: ["schema/**", "README.md", ".github/workflows/schema.yml"]
   workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * *"
 
 permissions:
   contents: read
@@ -21,6 +25,7 @@ concurrency:
 
 jobs:
   deploy:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
@@ -28,25 +33,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # A schema that is not valid JSON Schema is not published.
-      - name: Check the schemas
+      - name: Build the site
         run: |
-          pip install --quiet jsonschema
-          python3 - <<'PY'
-          import json, pathlib, jsonschema
-          for path in sorted(pathlib.Path("schema").glob("*.json")):
-              jsonschema.Draft202012Validator.check_schema(json.loads(path.read_text()))
-              print("ok", path)
-          PY
-
-      # The page explains what the files are for and links back to the repo;
-      # it lives beside them in schema/ so a change to either publishes both.
-      - name: Assemble the site
-        run: |
-          mkdir -p site/schema
-          cp schema/*.json site/schema/
-          cp schema/index.html site/index.html
-          cp schema/view.html schema/render.js site/schema/
+          pip install --quiet jsonschema markdown
+          python3 schema/build.py site
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
@@ -54,3 +44,26 @@ jobs:
           path: site
       - uses: actions/deploy-pages@v4
         id: deployment
+
+  # Once a day and after every deploy: both schema URLs answer with the
+  # schema that names that URL, and the page still links them.
+  live:
+    needs: deploy
+    if: always() && (needs.deploy.result == 'success' || needs.deploy.result == 'skipped')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check the live URLs
+        run: |
+          base=https://chriopter.github.io/pspdx
+          for try in 1 2 3 4 5 6; do
+            ok=1
+            for name in pspdx-v1.json catalog-v1.json; do
+              url=$base/schema/$name
+              id=$(curl -fsSL "$url" | python3 -c 'import json,sys; print(json.load(sys.stdin)["$id"])') || id=
+              if [ "$id" = "$url" ]; then echo "ok $url"; else echo "not yet: $url"; ok=0; fi
+              curl -fsSL "$base/" | grep -q "href=\"schema/$name\"" || { echo "page lacks schema/$name"; ok=0; }
+            done
+            [ $ok = 1 ] && exit 0
+            sleep 30
+          done
+          echo "::error::a schema URL is down or wrong"; exit 1
