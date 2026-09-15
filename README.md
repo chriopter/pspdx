@@ -26,9 +26,9 @@ PSP homebrew is scattered over GitHub, forums and old archives. With this standa
 
 ## How it works
 
-- **Direct:** the repo has a `.pspdx`. Add the repo on the PSP, updates come from its releases.
-- **Catalog:** a `catalog.json` links many repos. Add the catalog, each app updates from its repo.
-- **Old apps:** the repo has no `.pspdx`. The catalog carries the details and the updates.
+- **Direct:** Extreme Tux Racer has a `.pspdx` in its repo. You add the repo on the PSP, PSPDX installs the latest release, and every new release shows up as an update.
+- **Catalog:** someone publishes a `catalog.json` with Tux Racer and dozens of other repos. You add that one catalog and browse them all.
+- **Old apps:** a homebrew from 2008 has no `.pspdx` and no author left. The catalog writes its name and download itself, and PSPDX installs it from there.
 
 A repo's own `.pspdx` always wins.
 
