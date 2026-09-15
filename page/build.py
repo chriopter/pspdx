@@ -2,9 +2,9 @@
 """Builds the Pages site out of README.md and refuses to build a broken one.
 
 The page is the README, written once, laid out as a specification: a header
-with the version and the schema URLs, a numbered table of contents, and one
-section per file with its fields drawn from the schema by render.js. The
-README's "Fields and rules" line and its example move into those sections.
+with the version and the schema URLs and a numbered table of contents.
+Each README "Fields and rules" line becomes that file's fields, folded and
+drawn from the schema by render.js.
 
 Validators read the schemas from their URLs, so before anything is built
 this checks that both schemas are valid, name their own URL as $id, are
@@ -68,15 +68,6 @@ def slug(text):
     return re.sub(r"[^a-z0-9]+", "-", re.sub(r"<[^>]+>", "", text).lower()).strip("-")
 
 
-def section(name, file, example):
-    url = f"{BASE}schema/{name}"
-    box = name.removesuffix(".json")
-    return (f'<h2 id="{slug(file)}">The <code>{file}</code> file</h2>\n'
-            f'<p class="schema-url">Schema <a href="schema/{name}"><code>{url}</code></a></p>\n'
-            f'<div class="fields" id="{box}" data-schema="schema/{name}"><p class="dim">Loading the fields…</p></div>\n'
-            f'{example}\n')
-
-
 def updated():
     try:
         out = subprocess.run(["git", "log", "-1", "--format=%cs", "--", "schema"], cwd=ROOT,
@@ -105,21 +96,19 @@ def main():
     body = body.lstrip()[lede.end():] if lede else body
     lede = f'<p class="lede">{lede.group(1)}</p>\n' if lede else ""
 
-    # The "Fields and rules" line and the example after it become the sections.
-    rules = re.search(r'<p><strong><a href="' + re.escape(BASE) + r'">Fields and rules →</a></strong></p>\s*'
-                      r'(<details>.*?</details>)?\s*', body, re.S)
-    if not rules:
-        fail(f"README.md no longer has the **[Fields and rules →]({BASE})** line the fields go in")
-    body = body.replace(rules.group(0), "", 1)
-    pspdx_example = rules.group(1) or ""
+    # Each "Fields and rules" line opens that file's fields, folded, in place.
     catalog = html.escape((ROOT / "page/catalog-example.json").read_text(encoding="utf-8"), quote=False)
-    catalog_example = ('<details><summary><b>Example</b> · a <code>catalog.json</code> with one app</summary>'
-                       f'<pre><code>{catalog}</code></pre></details>')
-    spec = (section("pspdx-v1.json", ".pspdx", pspdx_example) +
-            section("catalog-v1.json", "catalog.json", catalog_example))
-    if "<h2>Links</h2>" not in body:
-        fail("README.md has no ## Links section to put the file sections before")
-    body = body.replace("<h2>Links</h2>", spec + "<h2>Links</h2>", 1)
+    for name, file in SCHEMAS.items():
+        box = name.removesuffix(".json")
+        line = f'<p><strong><a href="{BASE}#{box}">Fields and rules →</a></strong></p>'
+        if line not in body:
+            fail(f"README.md no longer has the **[Fields and rules →]({BASE}#{box})** line for {file}")
+        fold = (f'<details><summary><b>Fields and rules</b> · <code>{file}</code></summary>'
+                f'<div class="fields" id="{box}" data-schema="schema/{name}"><p class="dim">Loading the fields…</p></div></details>')
+        if name == "catalog-v1.json":
+            fold += ('\n<details><summary><b>Example</b> · a <code>catalog.json</code> with one app</summary>'
+                     f'<pre><code>{catalog}</code></pre></details>')
+        body = body.replace(line, fold, 1)
 
     body = re.sub(r"<h2>(.*?)</h2>", lambda m: f'<h2 id="{slug(m.group(1))}">{m.group(1)}</h2>', body)
     body = re.sub(r'<(h[23]) id="([^"]+)">(.*?)</\1>',

@@ -4,10 +4,13 @@
 
 PSP homebrew is scattered over GitHub, forums and old archives. With this standard, [PSPDX](https://github.com/chriopter/pspdx-app) on the PSP finds, installs and updates it by itself.
 
-- **`.pspdx`** — a breadcrumb in an app's repo that leads the PSP back to it for updates · [schema](https://chriopter.github.io/pspdx/schema/pspdx-v1.json)
-- **`catalog.json`** — a list of many homebrews, anyone can publish one · [schema](https://chriopter.github.io/pspdx/schema/catalog-v1.json)
+## The `.pspdx` file
 
-**[Fields and rules →](https://chriopter.github.io/pspdx/)**
+A breadcrumb in an app's repo that leads the PSP back to it for updates.
+
+Schema: [https://chriopter.github.io/pspdx/schema/pspdx-v1.json](https://chriopter.github.io/pspdx/schema/pspdx-v1.json)
+
+**[Fields and rules →](https://chriopter.github.io/pspdx/#pspdx-v1)**
 
 <details markdown="1">
 <summary><b>Example</b> · a minimal <code>.pspdx</code></summary>
@@ -23,6 +26,14 @@ PSP homebrew is scattered over GitHub, forums and old archives. With this standa
 ```
 
 </details>
+
+## The `catalog.json` file
+
+A list of many homebrews, with their releases and pictures. Anyone can publish one.
+
+Schema: [https://chriopter.github.io/pspdx/schema/catalog-v1.json](https://chriopter.github.io/pspdx/schema/catalog-v1.json)
+
+**[Fields and rules →](https://chriopter.github.io/pspdx/#catalog-v1)**
 
 ## How it works
 
