@@ -92,6 +92,8 @@ def main():
     if not title:
         fail("README.md has no # title")
     body = body.replace(title.group(0), "", 1)
+    # The README's link to this page is the page itself here.
+    body = re.sub(r'<p><strong><a href="' + re.escape(BASE) + r'">[^<]*</a></strong></p>\s*', "", body, count=1)
     lede = re.match(r"<p><strong>(.*?)</strong></p>\s*", body.lstrip())
     body = body.lstrip()[lede.end():] if lede else body
     lede = f'<p class="lede">{lede.group(1)}</p>\n' if lede else ""

@@ -2,6 +2,8 @@
 
 **Two small JSON files that let a PSP install and update homebrew by itself**
 
+**[→ Read the specification](https://chriopter.github.io/pspdx/)**
+
 PSP homebrew is scattered over GitHub, forums and old archives, and installing or updating it takes a PC. With PSPDX, apps describe themselves in their repositories and catalogs fill in for the rest, so the PSP can find, install and update them directly.
 
 ## Overview
