@@ -1,16 +1,36 @@
 # PSPDX standard
 
-**Two small JSON files for PSP homebrew**
+**Two small JSON files that let a PSP install and update homebrew by itself**
 
-PSP homebrew is scattered over GitHub, forums and old archives. With this standard, [PSPDX](https://github.com/chriopter/pspdx-app) on the PSP finds, installs and updates it by itself.
+PSP homebrew is scattered over GitHub, forums and old archives, and installing or updating it takes a PC. With PSPDX, apps describe themselves in their repositories and catalogs fill in for the rest, so the PSP can find, install and update them directly.
 
-## The `.pspdx` file
+## Overview
 
-A breadcrumb in an app's repo that leads the PSP back to it for updates.
+Three parts: an **app** is a homebrew, ideally with a `.pspdx` in its repository; a **catalog** is a `catalog.json` that lists many apps; and a **client** such as PSPDX on the PSP reads both.
 
-Schema: [https://chriopter.github.io/pspdx/schema/pspdx-v1.json](https://chriopter.github.io/pspdx/schema/pspdx-v1.json)
+```mermaid
+flowchart RL
+  P["PSPDX app<br/>on the PSP"]
+  C["catalog.json<br/>apps and their releases"]
+  R["App location<br/>with optional .pspdx"]
+  P -- browses --> C
+  C -- points to --> R
+  R -- install and update --> P
+```
 
-**[Fields and rules →](https://chriopter.github.io/pspdx/#pspdx-v1)**
+### How it works
+
+- **`.pspdx`:** the app author puts it next to the app to describe it.
+- **Catalog:** provides cached metadata and release info from all listed `.pspdx` files, so update checks on the PSP take one request. If an app has no `.pspdx`, e.g. because it is abandoned or its author doesn't use the standard, the catalog provides the metadata itself.
+- **Client:** keeps a copy of each installed app's `.pspdx`, so it can check for and download updates even without a catalog.
+
+## Specification
+
+### `.pspdx`
+
+One app, in the root of its repository.
+
+[Schema](https://chriopter.github.io/pspdx/schema/pspdx-v1.json) · [Fields and rules →](https://chriopter.github.io/pspdx/#pspdx-v1)
 
 <details markdown="1">
 <summary><b>Example</b> · a minimal <code>.pspdx</code></summary>
@@ -27,32 +47,15 @@ Schema: [https://chriopter.github.io/pspdx/schema/pspdx-v1.json](https://chriopt
 
 </details>
 
-## The `catalog.json` file
+### `catalog.json`
 
-A list of many homebrews, with their releases and pictures. Anyone can publish one.
+A list of many apps with their releases and pictures. For an abandoned app, the entry holds the fields its `.pspdx` would have.
 
-Schema: [https://chriopter.github.io/pspdx/schema/catalog-v1.json](https://chriopter.github.io/pspdx/schema/catalog-v1.json)
+[Schema](https://chriopter.github.io/pspdx/schema/catalog-v1.json) · [Fields and rules →](https://chriopter.github.io/pspdx/#catalog-v1)
 
-**[Fields and rules →](https://chriopter.github.io/pspdx/#catalog-v1)**
+## Implementations
 
-## How it works
-
-- **Direct:** Extreme Tux Racer has a `.pspdx` in its repo. You add the repo on the PSP, PSPDX installs the latest release, and every new release shows up as an update.
-- **Catalog:** someone publishes a `catalog.json` with Tux Racer and dozens of other repos. You add that one catalog and browse them all.
-- **Old apps:** a homebrew from 2008 has no `.pspdx` and no author left. The catalog writes its name and download itself, and PSPDX installs it from there.
-
-A repo's own `.pspdx` always wins.
-
-**No central server.** The files live with the apps, and anyone can run a catalog. If a catalog disappears, apps with a `.pspdx` keep updating from their author's repo, because PSPDX keeps a copy of each app's `.pspdx` on the Memory Stick.
-
-## Get started
-
-- **Your app:** a `.pspdx` in the repo root and a GitHub release with one ZIP. Only `schema`, `source` and `name` are required. See [pspdx-demo](https://github.com/chriopter/pspdx-demo).
-- **Your catalog:** fork [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) and list your repos.
-
-## Links
-
-- [pspdx-app](https://github.com/chriopter/pspdx-app) — the PSP app
-- [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) — the main catalog and its builder
-- [pspdx-demo](https://github.com/chriopter/pspdx-demo) — a homebrew with its own `.pspdx`
-- [pspdx-demo-abandoned](https://github.com/chriopter/pspdx-demo-abandoned) — a homebrew listed without one
+- [pspdx-app](https://github.com/chriopter/pspdx-app) — the client for the PSP: browses catalogs, installs release ZIPs, checks for updates at start
+- [pspdx-catalog](https://github.com/chriopter/pspdx-catalog) — the main catalog: rebuilds itself every hour, reads each listed repo's `.pspdx` and fetches its latest releases
+- [pspdx-demo](https://github.com/chriopter/pspdx-demo) — a minimal homebrew with its own `.pspdx` and a release
+- [pspdx-demo-abandoned](https://github.com/chriopter/pspdx-demo-abandoned) — a homebrew without a `.pspdx`, listed by the catalog

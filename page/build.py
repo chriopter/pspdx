@@ -100,15 +100,16 @@ def main():
     catalog = html.escape((ROOT / "page/catalog-example.json").read_text(encoding="utf-8"), quote=False)
     for name, file in SCHEMAS.items():
         box = name.removesuffix(".json")
-        line = f'<p><strong><a href="{BASE}#{box}">Fields and rules →</a></strong></p>'
-        if line not in body:
-            fail(f"README.md no longer has the **[Fields and rules →]({BASE}#{box})** line for {file}")
+        link = f' · <a href="{BASE}#{box}">Fields and rules →</a>'
+        para = re.search(r"<p>[^\n]*?" + re.escape(link) + r"</p>", body)
+        if not para:
+            fail(f"README.md no longer has a line ending in · [Fields and rules →]({BASE}#{box}) for {file}")
         fold = (f'<details><summary><b>Fields and rules</b> · <code>{file}</code></summary>'
                 f'<div class="fields" id="{box}" data-schema="schema/{name}"><p class="dim">Loading the fields…</p></div></details>')
         if name == "catalog-v1.json":
             fold += ('\n<details><summary><b>Example</b> · a <code>catalog.json</code> with one app</summary>'
                      f'<pre><code>{catalog}</code></pre></details>')
-        body = body.replace(line, fold, 1)
+        body = body.replace(para.group(0), para.group(0).replace(link, "") + "\n" + fold, 1)
 
     body = re.sub(r"<h2>(.*?)</h2>", lambda m: f'<h2 id="{slug(m.group(1))}">{m.group(1)}</h2>', body)
     body = re.sub(r'<(h[23]) id="([^"]+)">(.*?)</\1>',
@@ -128,7 +129,8 @@ def main():
     footer = f'PSPDX standard, version 1 · <a href="{REPO}">source and history</a>'
 
     page = (ROOT / "page/template.html").read_text(encoding="utf-8")
-    page = page.replace("<!-- PAGE -->", header + nav + body).replace("<!-- FOOTER -->", footer)
+    first = body.find("<h2")
+    page = page.replace("<!-- PAGE -->", header + body[:first] + nav + body[first:]).replace("<!-- FOOTER -->", footer)
 
     if site.exists():
         shutil.rmtree(site)
