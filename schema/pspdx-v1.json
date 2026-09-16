@@ -140,6 +140,16 @@
       },
       "description": "optional; up to 8 different words for what the app is, each 1 to 24 characters. game, emulator, app and demo are the ones the console has a tab for."
     },
+    "languages": {
+      "type": "array",
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z]{2,3}(?:-[a-z0-9]{2,8})?(?![\\s\\S])"
+      },
+      "description": "optional; the languages the app speaks, as lowercase ISO 639-1 codes, or 639-2 where a language has no two-letter code, a region after a hyphen where it matters: en, de, ja, pt-br. Up to 16, none twice. A console may show its user's language first."
+    },
     "installdir": {
       "type": "string",
       "pattern": "^PSP/GAME/(?![.][Pp][Ss][Pp][Dd][Xx]-[Ss][Tt][Aa][Gg][Ee](?![\\s\\S]))[A-Za-z0-9_.-]{0,31}[A-Za-z0-9_-](?![\\s\\S])",

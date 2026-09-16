@@ -72,6 +72,7 @@ A list of many apps with their releases and pictures. For an abandoned app, the 
       "summary": "Hello, PSP. A demo listing for PSPDX.",
       "author": "chriopter",
       "license": "MIT",
+      "languages": ["en"],
       "description": "A hello world for the PSP, published the way a listed app is: a .pspdx in the repository, a release with the EBOOT.\nX says hello again, HOME leaves.",
       "releases": [
         {
