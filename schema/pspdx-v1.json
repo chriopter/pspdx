@@ -35,6 +35,27 @@
     },
     {
       "if": {
+        "not": {
+          "required": [
+            "type"
+          ],
+          "properties": {
+            "type": {
+              "const": "plugin"
+            }
+          }
+        }
+      },
+      "then": {
+        "not": {
+          "required": [
+            "plugin"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
         "required": [
           "source"
         ],
@@ -119,7 +140,7 @@
         "iso"
       ],
       "default": "homebrew",
-      "description": "optional; homebrew when missing. homebrew is an EBOOT installed under PSP/GAME, plugin a .prx installed to seplugins/ (its category is plugin), iso a disc image."
+      "description": "optional; homebrew when missing. homebrew is an EBOOT installed under PSP/GAME, plugin the folder of the zip's shallowest .prx, installed to seplugins/<its name without .prx>/ (its category is plugin), iso a disc image."
     },
     "category": {
       "type": "string",
@@ -154,6 +175,11 @@
       "type": "string",
       "pattern": "^PSP/GAME/(?![.][Pp][Ss][Pp][Dd][Xx]-[Ss][Tt][Aa][Gg][Ee](?![\\s\\S]))[A-Za-z0-9_.-]{0,31}[A-Za-z0-9_-](?![\\s\\S])",
       "description": "optional; only for type homebrew. When missing: PSP/GAME/<repository name> for a GitHub source, PSP/GAME/<name> otherwise, the name reduced to [A-Za-z0-9_.-], cut at 32 and without the dots it then ends in. Where the package goes on the Memory Stick: the directory in the zip that holds the EBOOT.PBP, with everything beside and below it, is copied here. The folder is 1 to 32 of [A-Za-z0-9_.-], the name the XMB shows; it does not end in a dot, which FAT drops, so it is never . or .., and it is not .pspdx-stage in any case, where the client stages an install."
+    },
+    "plugin": {
+      "type": "string",
+      "pattern": "^(?![.])[A-Za-z0-9_.-]{1,28}[.][Pp][Rr][Xx](?![\\s\\S])",
+      "description": "optional; only for type plugin. The .prx to load, needed where several lie in the package's folder: a file name there of up to 32 of [A-Za-z0-9_.-], not starting with a dot."
     },
     "summary": {
       "type": "string",
