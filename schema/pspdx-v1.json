@@ -119,7 +119,7 @@
         "iso"
       ],
       "default": "homebrew",
-      "description": "optional; homebrew when missing. homebrew is an EBOOT installed under PSP/GAME, plugin a .prx for custom firmware, iso a disc image."
+      "description": "optional; homebrew when missing. homebrew is an EBOOT installed under PSP/GAME, plugin a .prx installed to seplugins/ (its category is plugin), iso a disc image."
     },
     "category": {
       "type": "string",

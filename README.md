@@ -25,6 +25,7 @@ flowchart RL
 - **`.pspdx`:** the app author puts it next to the app to describe it.
 - **Catalog:** provides cached metadata and release info from all listed `.pspdx` files, so update checks on the PSP take one request. If an app has no `.pspdx`, e.g. because it is abandoned or its author doesn't use the standard, the catalog provides the metadata itself.
 - **Client:** keeps a copy of each installed app's `.pspdx`, so it can check for and download updates even without a catalog.
+- **Plugins:** an app of `type` `plugin` releases a ZIP with one `.prx` and, if it likes, an `ICON0.PNG` at its top. The client copies the `.prx` to `seplugins/` and, when the user turns it on, adds its line to `PLUGINS.TXT` ([ARK-4](https://github.com/PSP-Archive/ARK-4)); it changes nothing else there.
 
 ## Specification
 
