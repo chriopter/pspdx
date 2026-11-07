@@ -74,9 +74,9 @@
             "pattern": "[A-Za-z0-9]"
           },
           "source": {
-            "pattern": "^https://(?:[^/?#\\\\\\u0000-\\u001f]*@)?(?![Ww][Ww][Ww]\\.(?:[:/?#]|(?![\\s\\S])))(?:-*[A-Za-z0-9][A-Za-z0-9-]*\\.)*-*[A-Za-z0-9][A-Za-z0-9-]*\\.?(?::[0-9]*)?(?:[/?#][^\\\\\\u0000-\\u001f]*)?(?![\\s\\S])",
+            "pattern": "^https?://(?:[^/?#\\\\\\u0000-\\u001f]*@)?(?![Ww][Ww][Ww]\\.(?:[:/?#]|(?![\\s\\S])))(?:-*[A-Za-z0-9][A-Za-z0-9-]*\\.)*-*[A-Za-z0-9][A-Za-z0-9-]*\\.?(?::[0-9]*)?(?:[/?#][^\\\\\\u0000-\\u001f]*)?(?![\\s\\S])",
             "not": {
-              "pattern": "^https://(?:[^/?#\\\\]*@)?(?![^/?#\\\\]*@)(?:[A-Za-z0-9-]*\\.)*-*[Gg]-*[Ii]-*[Tt]-*[Hh]-*[Uu]-*[Bb]-*\\.-*[Ii]-*[Oo]-*\\.?(?:[:/?#]|(?![\\s\\S]))"
+              "pattern": "^https?://(?:[^/?#\\\\]*@)?(?![^/?#\\\\]*@)(?:[A-Za-z0-9-]*\\.)*-*[Gg]-*[Ii]-*[Tt]-*[Hh]-*[Uu]-*[Bb]-*\\.-*[Ii]-*[Oo]-*\\.?(?:[:/?#]|(?![\\s\\S]))"
             }
           }
         }
@@ -117,14 +117,14 @@
     "source": {
       "type": "string",
       "maxLength": 255,
-      "pattern": "^https://[^\\u0000-\\u001f]+(?![\\s\\S])",
+      "pattern": "^https?://[^\\u0000-\\u001f]+(?![\\s\\S])",
       "if": {
         "pattern": "^https://github\\.com/"
       },
       "then": {
         "pattern": "^https://github\\.com/(?=[._-]*[A-Za-z0-9])[A-Za-z0-9_.-]{1,39}/(?=[._-]*[A-Za-z0-9])(?![._-]+\\.git/?(?![\\s\\S]))(?![A-Za-z0-9_.-]+\\.git\\.git/?(?![\\s\\S]))[A-Za-z0-9_.-]{1,100}/?(?![\\s\\S])"
       },
-      "description": "required; where the project lives: an https:// URL, and on github.com a repository URL, https://github.com/<owner>/<repository>, a .git or a slash after it allowed. The owner is 1 to 39 and the repository 1 to 100 of [A-Za-z0-9_.-], each with a letter or digit besides a .git it ends in, so neither is . or ..; and a repository does not end in .git.git. Only a GitHub repository has releases the console can ask for in version 1. Any other source's host and the name make its id: the host without www., backwards, and the name, each part reduced to its ASCII letters and digits in lower case. So there the host is ASCII letters, digits and hyphens, with a letter or digit in every label, any other name written in punycode (xn--), the URL holds no backslash, and a host under github.io, whose ids would start io.github., is refused."
+      "description": "required; where the project lives: an https:// URL, or http:// for a server its owner hosts, which has no TLS and so holds every download to its sha256, and on github.com a repository URL, https://github.com/<owner>/<repository>, a .git or a slash after it allowed. The owner is 1 to 39 and the repository 1 to 100 of [A-Za-z0-9_.-], each with a letter or digit besides a .git it ends in, so neither is . or ..; and a repository does not end in .git.git. Only a GitHub repository has releases the console can ask for in version 1. Any other source's host and the name make its id: the host without www., backwards, and the name, each part reduced to its ASCII letters and digits in lower case. So there the host is ASCII letters, digits and hyphens, with a letter or digit in every label, any other name written in punycode (xn--), the URL holds no backslash, and a host under github.io, whose ids would start io.github., is refused."
     },
     "name": {
       "type": "string",
@@ -223,7 +223,7 @@
           "type": "string",
           "maxLength": 512,
           "format": "uri",
-          "pattern": "^https://[\\u0021-\\u007e]+(?![\\s\\S])",
+          "pattern": "^https?://[\\u0021-\\u007e]+(?![\\s\\S])",
           "description": "optional; the release ZIP. On GitHub one of that release's assets, chosen by the ZIP rule when missing. Required outside GitHub."
         },
         "published_at": {
